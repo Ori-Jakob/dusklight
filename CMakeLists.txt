@@ -11,6 +11,7 @@ if (DUSK_VERSION_OVERRIDE)
     set(DUSK_WC_DESCRIBE "${DUSK_VERSION_OVERRIDE}")
     set(DUSK_VERSION_STRING "0.0.0.0")
     set(DUSK_SHORT_VERSION_STRING "0.0.0")
+    set(DUSK_VERSION_CODE "1")
     set(DUSK_WC_REVISION "")
     set(DUSK_WC_BRANCH "")
     set(DUSK_WC_DATE "")
@@ -61,6 +62,9 @@ endif ()
 
 if (DUSK_WC_DESCRIBE MATCHES "^v([0-9]+)\\.([0-9]+)\\.([0-9]+)([-+].*)?$")
     set(DUSK_SHORT_VERSION_STRING "${CMAKE_MATCH_1}.${CMAKE_MATCH_2}.${CMAKE_MATCH_3}")
+    set(_ver_major ${CMAKE_MATCH_1})
+    set(_ver_minor ${CMAKE_MATCH_2})
+    set(_ver_patch ${CMAKE_MATCH_3})
     set(DUSK_VERSION_TWEAK "0")
     if (DUSK_WC_DESCRIBE MATCHES "^v[0-9]+\\.[0-9]+\\.[0-9]+-([0-9]+)(-dirty)?$")
         set(DUSK_VERSION_TWEAK "${CMAKE_MATCH_1}")
@@ -68,10 +72,19 @@ if (DUSK_WC_DESCRIBE MATCHES "^v([0-9]+)\\.([0-9]+)\\.([0-9]+)([-+].*)?$")
         set(DUSK_VERSION_TWEAK "${CMAKE_MATCH_1}")
     endif ()
     set(DUSK_VERSION_STRING "${DUSK_SHORT_VERSION_STRING}.${DUSK_VERSION_TWEAK}")
+    if(DUSK_VERSION_TWEAK GREATER 999)
+        set(_tweak 999)
+    else()
+        set(_tweak ${DUSK_VERSION_TWEAK})
+    endif()
+    # encoding: major*1e7 + minor*1e5 + patch*1e3 + tweak; collision-free for major<210, minor<100, patch<100, tweak<=999
+    math(EXPR DUSK_VERSION_CODE
+        "${_ver_major} * 10000000 + ${_ver_minor} * 100000 + ${_ver_patch} * 1000 + ${_tweak}")
 else ()
     set(DUSK_WC_DESCRIBE "UNKNOWN-VERSION")
     set(DUSK_VERSION_STRING "0.0.0.0")
     set(DUSK_SHORT_VERSION_STRING "0.0.0")
+    set(DUSK_VERSION_CODE "1")
 endif ()
 
 endif ()
@@ -79,6 +92,7 @@ endif ()
 # Add version information to CI environment variables
 if(DEFINED ENV{GITHUB_ENV})
     file(APPEND "$ENV{GITHUB_ENV}" "DUSK_VERSION=${DUSK_WC_DESCRIBE}\n")
+    file(APPEND "$ENV{GITHUB_ENV}" "DUSK_VERSION_CODE=${DUSK_VERSION_CODE}\n")
 endif()
 message(STATUS "Dusklight version set to ${DUSK_WC_DESCRIBE}")
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
@@ -86,6 +100,8 @@ project(dusklight LANGUAGES C CXX VERSION ${DUSK_VERSION_STRING})
 if (APPLE)
     enable_language(OBJC OBJCXX)
 endif ()
+# Adjust CMAKE_SYSTEM_PROCESSOR on Windows to match compiler target
+include(cmake/WindowsTargetProcessor.cmake)
 if (APPLE AND NOT TVOS AND CMAKE_SYSTEM_NAME STREQUAL tvOS)
     # ios.toolchain.cmake hack for SDL
     set(TVOS ON)
@@ -121,11 +137,18 @@ target_compile_definitions(aurora_mtx PRIVATE MTX_USE_PS=1)
 
 add_subdirectory(libs/freeverb)
 
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+    set(DUSK_GFX_DEBUG_GROUPS_DEFAULT ON)
+else ()
+    set(DUSK_GFX_DEBUG_GROUPS_DEFAULT OFF)
+endif ()
+
 option(DUSK_BUILD_WARNINGS "Enable compiler warnings (off by default)")
 option(DUSK_SELECTED_OPT "If on, selected parts of the project will be compiled with optimizations on Debug, intending to make the game run at 30 FPS. Note for MSVC: you will need to remove '/RTC1' from your debug flags in CMake.")
 option(DUSK_MOVIE_SUPPORT "If on, compile against libjpeg-turbo to enable THP file decoding" ON)
 option(DUSK_ENABLE_UPDATE_CHECKER "Enable update checking support" ON)
 option(DUSK_ENABLE_SENTRY_NATIVE "Enable sentry-native crash reporting support" OFF)
+option(DUSK_GFX_DEBUG_GROUPS "Report debug groups to the native graphics API" ${DUSK_GFX_DEBUG_GROUPS_DEFAULT})
 set(DUSK_SENTRY_DSN "" CACHE STRING "Sentry DSN")
 set(DUSK_SENTRY_ENVIRONMENT "development" CACHE STRING "Sentry environment")
 
@@ -154,6 +177,7 @@ if (DUSK_MOVIE_SUPPORT)
         endif ()
         set(_jpeg_cmake_args
             -DCMAKE_INSTALL_PREFIX=${_jpeg_install_dir}
+            -DCMAKE_PROJECT_INCLUDE=${CMAKE_CURRENT_SOURCE_DIR}/cmake/WindowsTargetProcessor.cmake
             -DENABLE_SHARED=OFF
             -DWITH_TURBOJPEG=ON
             -DWITH_JAVA=OFF
@@ -172,6 +196,8 @@ if (DUSK_MOVIE_SUPPORT)
             CMAKE_MSVC_RUNTIME_LIBRARY
             CMAKE_MSVC_DEBUG_INFORMATION_FORMAT
             CMAKE_OSX_ARCHITECTURES
+            CMAKE_OSX_DEPLOYMENT_TARGET
+            CMAKE_OSX_SYSROOT
             DEPLOYMENT_TARGET
             ENABLE_ARC
             ENABLE_BITCODE
@@ -202,10 +228,9 @@ if (CMAKE_SYSTEM_NAME STREQUAL Linux)
     # -Wno-multichar: Multi-character constants ('ABCD') are implementation-defined but all compilers
     #   (CW, GCC, Clang, MSVC) encode them identically in big-endian order.
     #   For >4-char literals (which GCC/Clang truncate to int), use the MULTI_CHAR() macro.
-    # -Wwrite-strings: Game code relies on implicit const char* -> char* conversions
     # -Wdeprecated-declarations: JSystem uses std::iterator, deprecated in C++17
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-multichar -Wno-write-strings")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-multichar -Wno-write-strings -Wno-trigraphs -Wno-deprecated-declarations")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-multichar")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-multichar -Wno-trigraphs -Wno-deprecated-declarations")
     set(CMAKE_INSTALL_RPATH "$ORIGIN")
     set(CMAKE_BUILD_RPATH "$ORIGIN")
 elseif (APPLE)
@@ -215,7 +240,6 @@ elseif (APPLE)
 elseif (MSVC)
     add_compile_options(
         $<$<COMPILE_LANGUAGE:C,CXX>:/bigobj>
-        $<$<COMPILE_LANGUAGE:C,CXX>:/Zc:strictStrings->
         $<$<COMPILE_LANGUAGE:C,CXX>:/MP>
         $<$<COMPILE_LANGUAGE:C,CXX>:/FS>
     )
@@ -329,7 +353,7 @@ set(GAME_LIBS aurora::core aurora::gx aurora::gd aurora::si aurora::vi aurora::p
     aurora::card freeverb cxxopts::cxxopts absl::flat_hash_map nlohmann_json::nlohmann_json TracyClient fmt::fmt
     Threads::Threads)
 
-list(APPEND GAME_LIBS libzstd_static)
+list(APPEND GAME_LIBS zstd::libzstd)
 
 if (DUSK_ENABLE_SENTRY_NATIVE)
     list(APPEND GAME_LIBS sentry)
@@ -338,6 +362,10 @@ endif ()
 
 if (WIN32)
     list(APPEND GAME_LIBS Ws2_32)
+    if (CMAKE_BUILD_TYPE STREQUAL Debug)
+        list(APPEND GAME_LIBS dbghelp)
+        list(APPEND GAME_COMPILE_DEFS DUSK_CRASH_DBGHELP=1)
+    endif ()
 endif ()
 
 set(DUSK_HTTP_BACKEND_SOURCE src/dusk/http/no_backend.cpp)
@@ -395,6 +423,11 @@ endif ()
 
 if(ANDROID)
     list(APPEND GAME_COMPILE_DEFS TARGET_ANDROID=1)
+endif ()
+
+if (DUSK_GFX_DEBUG_GROUPS)
+    list(APPEND GAME_COMPILE_DEFS DUSK_GFX_DEBUG_GROUPS=1)
+    target_compile_definitions(aurora_gx PRIVATE AURORA_GFX_DEBUG_GROUPS)
 endif ()
 
 # game_debug is for game code files that we know work when compiled with DEBUG=1
@@ -472,6 +505,10 @@ if (ANDROID)
     # SDLActivity loads SDL_main via dlsym on Android. Since aurora::main is a static
     # archive, force an undefined reference so the linker keeps the SDL_main object.
     target_link_options(dusklight PRIVATE "-Wl,-u,SDL_main")
+endif ()
+
+if (CMAKE_SYSTEM_NAME STREQUAL Linux)
+    target_link_options(dusklight PRIVATE "-Wl,--build-id=sha1")
 endif ()
 
 if (NOT APPLE)
