@@ -1,0 +1,8 @@
+{
+  "id": "dev.twilitrealm.lantern.core",
+  "name": "Lantern Core",
+  "version": "0.1.0",
+  "author": "Twilit Realm",
+  "description": "Modular encrypted multiplayer rooms, compatibility negotiation, and peer messaging for Dusklight."
+}
+

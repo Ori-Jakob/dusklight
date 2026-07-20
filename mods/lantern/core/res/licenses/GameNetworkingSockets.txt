@@ -1,0 +1,5 @@
+GameNetworkingSockets is licensed under the BSD 3-Clause License.
+
+Source and complete license text:
+https://github.com/ValveSoftware/GameNetworkingSockets/tree/v1.5.1
+

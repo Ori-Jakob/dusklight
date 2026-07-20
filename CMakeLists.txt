@@ -610,6 +610,9 @@ if (DUSK_ENABLE_CODE_MODS AND CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR
     add_subdirectory(mods/template_mod)
     add_subdirectory(mods/ao_mod)
     add_subdirectory(mods/shadow_mod)
+    if (WIN32)
+        add_subdirectory(mods/lantern)
+    endif ()
 endif ()
 
 if (APPLE)
