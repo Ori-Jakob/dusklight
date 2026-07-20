@@ -1,0 +1,7 @@
+{
+  "id": "dev.twilitrealm.lighting_mod",
+  "name": "Clustered Lighting + GI",
+  "version": "1.0.0",
+  "author": "Twilit Realm",
+  "description": "Gathers every light in the scene (torches, lanterns, spotlights, effect lights) and shades them with clustered deferred lighting on the GPU, with optional global illumination: screen-space GI or voxel cone tracing. Can suppress the game's native 8-light dynamic lighting so the deferred pass owns all dynamic lights."
+}
