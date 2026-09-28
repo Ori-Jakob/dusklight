@@ -20,6 +20,7 @@
 #include "enemy/EnemyScaling.hpp"
 #include "enemy/EnemySync.hpp"
 #include "hooks/Hooks.hpp"
+#include "story/Story.hpp"
 #include "sync/WorldSync.hpp"
 #include "ui/Ui.hpp"
 
@@ -87,9 +88,11 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     // Optional: without it peers' item impacts are not shown.
     std::string fxError;
     hooks::install(hooks::Group::Fx, fxError);
-    // Optional: without it enemy sync and scaling stay off.
+    // Optional: without them enemy sync and scaling, or story sync, stay off.
     std::string enemyError;
     hooks::install(hooks::Group::Enemy, enemyError);
+    std::string storyError;
+    hooks::install(hooks::Group::Story, storyError);
 
     ui::init();
 
@@ -125,6 +128,7 @@ MOD_EXPORT ModResult mod_shutdown(ModError*) {
 #endif
     ui::shutdown();
     sync::shutdown();
+    story::shutdown();
     enemy_sync::shutdown();
     enemy_scaling::shutdown();
     Session::shutdown();

@@ -2,6 +2,7 @@
 #include "core/Log.hpp"
 #include "core/SaveGate.hpp"
 #include "core/Session.hpp"
+#include "story/Story.hpp"
 #include "sync/WorldSync.hpp"
 
 #include "d/d_com_inf_game.h"
@@ -112,6 +113,7 @@ void Session::onStageSaveTableLoaded(int saveTblNo) {
     mCurrentSaveTblNo =
         (saveTblNo >= 0 && saveTblNo < dSv_save_c::STAGE_MAX) ? saveTblNo : -1;
     sync::onStageSaveTableLoaded();
+    story::onStageSaveTableLoaded();
 }
 
 // A reload of the same stage and layer (a void-out) drops the old positions here.

@@ -3,6 +3,7 @@
 #include "sync/WorldSyncState.hpp"
 
 #include "core/SaveGate.hpp"
+#include "story/Story.hpp"
 #include "sync/LocalOnlyEventBits.hpp"
 #include "sync/RemoteApplyGuard.hpp"
 
@@ -299,6 +300,10 @@ void onEventBit(uint16_t no, bool set) {
         return;
     }
     noteEventBit(no, set);
+    if (set) {
+        // Story qualification: we wrote a synced story bit.
+        story::noteLocalEventBit();
+    }
     if (!enabled()) {
         return;
     }

@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <string>
 
-// What the Players tab shows about story sync; P5 replaces the stub.
+// What the Players tab shows about story sync.
 namespace twili::story {
 
 // Status lines for the Story section, RML.

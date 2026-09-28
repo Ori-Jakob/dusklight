@@ -39,6 +39,7 @@ set(TWILI_SOURCES
     src/core/GameAccess.cpp
     src/core/Host.cpp
     src/core/LocalPlayer.cpp
+    src/core/Maps.cpp
     src/core/RoomStateSync.cpp
     src/core/SaveGate.cpp
     src/core/Session.cpp
@@ -58,6 +59,7 @@ set(TWILI_SOURCES
     src/hooks/hooks_map.cpp
     src/hooks/hooks_player.cpp
     src/hooks/hooks_save.cpp
+    src/hooks/hooks_story.cpp
     src/hooks/hooks_sync.cpp
     src/horse/HorsePuppetStub.cpp
     src/horse/HorseSync.cpp
@@ -69,13 +71,18 @@ set(TWILI_SOURCES
     src/presence/PlayerUpdate.cpp
     src/presence/RemotePose.cpp
     src/pvp/PvpStub.cpp
-    src/story/StoryUiStub.cpp
+    src/story/StoryEvent.cpp
+    src/story/StoryMove.cpp
+    src/story/StoryMoves.cpp
+    src/story/StorySegments.cpp
+    src/story/StoryTracker.cpp
+    src/story/StoryUi.cpp
     src/sync/DungeonItems.cpp
     src/sync/Flags.cpp
     src/sync/GiveItem.cpp
     src/sync/WorldState.cpp
     src/sync/WorldSync.cpp
-    src/teleport/TeleportStub.cpp
+    src/teleport/Teleport.cpp
     src/ui/ColorMath.cpp
     src/ui/ItemNames.cpp
     src/ui/ItemToasts.cpp

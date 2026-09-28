@@ -5,7 +5,9 @@
 #include "core/SaveGate.hpp"
 #include "enemy/EnemyScaling.hpp"
 #include "enemy/EnemySync.hpp"
+#include "story/Story.hpp"
 #include "sync/WorldSync.hpp"
+#include "teleport/Teleport.hpp"
 
 #if TWILI_ENABLE_AUTOTEST
 #include "autotest/AutoTest.hpp"
@@ -82,6 +84,7 @@ void Session::resetSessionState() {
     mVersionMismatchLogged.clear();
     sync::resetSession();
     enemy_sync::resetSession();
+    story::resetSession();
 }
 
 void Session::connect() {
@@ -213,7 +216,10 @@ void Session::update() {
         tickRoomOwnerSettings();
         manageDummyActors();
     }
+    // Connected or not: a stage change already under way is seen through.
     enemy_sync::tick();
+    teleport::tick();
+    story::tick();
     enemy_scaling::tick();
 }
 
@@ -273,7 +279,9 @@ void Session::onMessage(const nlohmann::json& packet) {
     } else if (type == "UPDATE_ROOM_STATE") {
         handleUpdateRoomState(packet);
     } else if (sync::handlePacket(type, packet)) {
+    } else if (teleport::handlePacket(type, packet)) {
     } else if (enemy_sync::handlePacket(type, packet)) {
+    } else if (story::handlePacket(type, packet)) {
     } else if (type == "AUTOTEST_SIGNAL") {
 #if TWILI_ENABLE_AUTOTEST
         autotest::onSignal(packet.value("instance", std::string{}),
@@ -321,8 +329,8 @@ void Session::onSelfStateKnown() {
 
 void Session::queuePvpHit(uint32_t, const pvp::HitReport&) {}
 
-bool Session::storySharedEventWith(uint32_t) const {
-    return false;
+bool Session::storySharedEventWith(uint32_t clientId) const {
+    return story::sharedEventWith(clientId);
 }
 
 }  // namespace twili

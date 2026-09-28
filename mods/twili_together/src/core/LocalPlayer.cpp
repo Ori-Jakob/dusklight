@@ -1,11 +1,14 @@
 #include "core/LocalPlayer.hpp"
 
+#include "core/Maps.hpp"
 #include "core/SaveGate.hpp"
 
 #include "d/actor/d_a_alink.h"
 #include "d/d_com_inf_game.h"
 #include "d/d_meter2_info.h"
 #include "f_op/f_op_overlap_mng.h"
+
+#include <cstring>
 
 namespace twili::local {
 
@@ -55,6 +58,56 @@ const char* localTeleportBlocker() {
         return "carrying";
     }
     return nullptr;
+}
+
+bool isTeleportableRoom(const char* stage, int roomNo) {
+    // The safe-spot capture asks about the same room every tick.
+    static char s_stage[8] = {};
+    static int s_room = -1;
+    static bool s_result = false;
+    if (s_room == roomNo && std::strncmp(s_stage, stage, sizeof(s_stage)) == 0) {
+        return s_result;
+    }
+    std::strncpy(s_stage, stage, sizeof(s_stage) - 1);
+    s_room = roomNo;
+    s_result = false;
+    for (size_t i = 0; i < maps::kRoomCount && !s_result; i++) {
+        const maps::Room& r = maps::kRooms[i];
+        s_result = r.room >= 0 && r.room == roomNo && std::strcmp(r.stage, stage) == 0;
+    }
+    return s_result;
+}
+
+bool isKnownEntrance(const char* stage, int roomNo, int point) {
+    for (size_t i = 0; i < maps::kRoomCount; i++) {
+        const maps::Room& r = maps::kRooms[i];
+        if (r.room < 0 || r.room != roomNo || std::strcmp(r.stage, stage) != 0) {
+            continue;
+        }
+        for (uint8_t p = 0; p < r.pointCount; p++) {
+            if (r.points[p] == point) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+std::string mapName(const char* stage, int roomNo) {
+    const char* anyRoom = nullptr;
+    for (size_t i = 0; i < maps::kRoomCount; i++) {
+        const maps::Room& r = maps::kRooms[i];
+        if (std::strcmp(r.stage, stage) != 0) {
+            continue;
+        }
+        if (anyRoom == nullptr) {
+            anyRoom = r.name;
+        }
+        if (r.room >= 0 && r.room == roomNo) {
+            return r.name;
+        }
+    }
+    return anyRoom != nullptr ? anyRoom : stage;
 }
 
 }  // namespace twili::local
