@@ -544,10 +544,11 @@ test("queued team packets are replayed to a teammate who joins later", () => wit
 }));
 
 test("team packets carry the sender's name and colour, also when replayed after it left", () => withServer(async (mk) => {
+    // Players without a team show in their own colour.
     const a = mk();
     const b = mk();
-    await a.join({ teamId: "t", name: "Dad", color: { r: 30, g: 60, b: 200 } });
-    await b.join({ teamId: "t", name: "Mom" });
+    await a.join({ name: "Dad", color: { r: 30, g: 60, b: 200 } });
+    await b.join({ name: "Mom" });
     a.send({ type: "UPDATE_WORLD_STATE", save: "S", senderName: "Forged" });
     a.send({ type: "GIVE_ITEM", itemNo: 0x44, addToQueue: true, senderName: "Forged", senderColor: { r: 1, g: 2, b: 3 } });
     const live = await b.waitType("GIVE_ITEM");
@@ -557,7 +558,7 @@ test("team packets carry the sender's name and colour, also when replayed after 
     await a.close();
 
     const c = mk();
-    await c.join({ teamId: "t" });
+    await c.join();
     c.send({ type: "REQUEST_WORLD_STATE", catchUp: true });
     // Mom has not caught up (no request of her own), so the cache stands in for the team.
     const ws = await c.waitType("UPDATE_WORLD_STATE");
@@ -2268,4 +2269,89 @@ test("room state carries teleportAcrossTeams, off by default and owner-only", ()
     a.send({ type: "UPDATE_ROOM_STATE", state: { teleportAcrossTeams: "yes" } });
     const s = await b.waitType("UPDATE_ROOM_STATE");
     assert.equal(s.state.teleportAcrossTeams, false);
+}));
+
+// --- Team colours
+
+const RED_DEFAULT = { r: 0x1e, g: 0x88, b: 0xe5 };
+
+test("team members show in their team's colour, players without a team in their own", () => withServer(async (mk) => {
+    const a = mk();
+    const b = mk();
+    const c = mk();
+    await a.join({ name: "A", color: { r: 10, g: 20, b: 30 } });
+    await b.join({ name: "B", teamId: "red", color: { r: 40, g: 50, b: 60 } });
+    await c.join({ name: "C", teamId: "red", color: { r: 70, g: 80, b: 90 } });
+    const d = mk();
+    const all = await d.join({ name: "D" });
+    const row = (id) => all.clients.find((x) => x.clientId === id);
+    assert.deepEqual(row(a.id).displayColor, { r: 10, g: 20, b: 30 });
+    const teamDefault = row(b.id).displayColor;
+    assert.deepEqual(row(c.id).displayColor, teamDefault, "one colour for the whole team");
+    assert.deepEqual(row(b.id).color, { r: 40, g: 50, b: 60 }, "the player's own colour is kept");
+    assert.deepEqual(teamDefault, RED_DEFAULT, "a stable default from the team id");
+    assert.deepEqual((await teamState(d, "red")).color, teamDefault);
+    assert.equal((await teamState(d, "")).color, null, "players without a team have no team colour");
+    // A member's own colour change does not change how the team shows.
+    b.send({ type: "UPDATE_CLIENT_STATE", color: { r: 1, g: 2, b: 3 } });
+    const upd = await d.waitType("UPDATE_CLIENT_STATE", (p) => p.clientId === b.id);
+    assert.deepEqual(upd.color, { r: 1, g: 2, b: 3 });
+    assert.deepEqual(upd.displayColor, teamDefault);
+    // World packets carry the display colour.
+    b.send({ type: "SET_FLAG", flagNo: 1 });
+    assert.deepEqual((await c.waitType("SET_FLAG")).senderColor, teamDefault);
+}));
+
+test("only the team leader sets the team colour, and everyone sees it at once", () => withServer(async (mk, server) => {
+    const a = mk();
+    const b = mk();
+    const c = mk();
+    await a.join({ name: "A" });
+    await b.join({ name: "B", teamId: "red" });
+    await c.join({ name: "C", teamId: "red" });
+    c.send({ type: "SET_TEAM_COLOR", color: { r: 1, g: 1, b: 1 } });
+    await waitForLog(server, /\[C\] rejected SET_TEAM_COLOR \(not the team leader\)/);
+    a.send({ type: "SET_TEAM_COLOR", color: { r: 1, g: 1, b: 1 } });
+    await waitForLog(server, /\[A\] rejected SET_TEAM_COLOR \(no team\)/);
+    await a.expectNone((p) => p.type === "UPDATE_CLIENT_STATE" && p.displayColor?.r === 1, "a refused team colour");
+    b.send({ type: "SET_TEAM_COLOR", color: { r: 250, g: 5, b: 155 } });
+    const want = { r: 250, g: 5, b: 155 };
+    for (const viewer of [a, b, c]) {
+        for (const member of [b, c]) {
+            const p = await viewer.waitType("UPDATE_CLIENT_STATE", (x) => x.clientId === member.id && x.displayColor?.r === 250);
+            assert.deepEqual(p.displayColor, want);
+            assert.equal("self" in p, false, "a colour-only update keeps the receiver's own row");
+        }
+    }
+    assert.deepEqual((await teamState(a, "red", (p) => p.color.r === 250)).color, want);
+    const late = mk();
+    const all = await late.join({ name: "L", teamId: "red" });
+    for (const row of all.clients.filter((x) => x.teamId === "red")) assert.deepEqual(row.displayColor, want);
+    // Junk keeps the current colour.
+    b.send({ type: "SET_TEAM_COLOR", color: { r: "x", g: -5, b: 999 } });
+    assert.deepEqual((await teamState(a, "red", (p) => p.members.length === 3)).color, want);
+}));
+
+test("the team colour survives promotion and succession", () => withServer(async (mk) => {
+    const want = { r: 12, g: 34, b: 56 };
+    const a = mk();
+    const b = mk();
+    const c = mk();
+    const watcher = mk();
+    await a.join({ name: "A", teamId: "red" });
+    await b.join({ name: "B", teamId: "red" });
+    await c.join({ name: "C", teamId: "red" });
+    await watcher.join({ name: "W" });
+    a.send({ type: "SET_TEAM_COLOR", color: want });
+    await teamState(watcher, "red", (p) => p.color.r === 12);
+    a.send({ type: "SET_TEAM_OWNER", targetClientId: b.id });
+    assert.deepEqual((await teamState(watcher, "red", (p) => p.ownerClientId === b.id)).color, want);
+    await b.close();
+    const s = await teamState(watcher, "red", (p) => !p.members.some((m) => m.clientId === b.id));
+    assert.equal(s.ownerClientId, a.id);
+    assert.deepEqual(s.color, want);
+    await a.close();
+    assert.deepEqual((await teamState(watcher, "red", (p) => p.members.length === 1)).color, want);
+    c.send({ type: "SET_TEAM_COLOR", color: { r: 99, g: 99, b: 99 } });
+    assert.equal((await teamState(watcher, "red", (p) => p.color.r === 99)).ownerClientId, c.id);
 }));

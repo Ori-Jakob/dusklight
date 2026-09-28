@@ -21,7 +21,8 @@
  *              only by the leader (after CLAIM_TEAM_GAME while teammates still play the old one). Team
  *              packets flow only between members whose state is "ok" (in game on the team game).
  *              TEAM_STATE tells the room each team's owner, game and member states; the seed's
- *              permalink ("share") reaches that team only.
+ *              permalink ("share") reaches that team only. A named team has a colour (a default
+ *              from its id, or its leader's SET_TEAM_COLOR) that its members show in.
  *   Catch-up   The last untargeted UPDATE_WORLD_STATE and the addToQueue packets since are kept
  *              per team, team game and layout. REQUEST_WORLD_STATE goes to caught-up teammates on the same
  *              protocol and layout; the cache answers only when none can, and catchUp:true also
@@ -149,6 +150,8 @@ function packetSummary(packet) {
             return `${packet.type} saveTbl=${text(packet.saveTblNo)} target=${packet.targetClientId ? text(packet.targetClientId) : "team"}`;
         case "REQUEST_WORLD_STATE":
             return `${packet.type}${packet.catchUp === true ? " catchUp" : ""}`;
+        case "SET_TEAM_COLOR":
+            return `${packet.type} color=${packet.color && typeof packet.color === "object" ? `${text(packet.color.r)},${text(packet.color.g)},${text(packet.color.b)}` : "?"}`;
         case "GAME_IDENTITY":
             return `${packet.type} inGame=${text(packet.inGame)} kind=${text(packet.kind)} key=${text(packet.key)}` +
                 (packet.allowUnverified === true ? " allowUnverified" : "");
@@ -199,8 +202,8 @@ let nextClientId = 1;
  *             gateLogged: Set<string> }} Client
  * @typedef {{ inGame: boolean, kind: string, key: string, display: { name: string, mode: string },
  *             share: object|null, allowUnverified: boolean }} GameIdentity
- * @typedef {{ id: string, ownerClientId: number|null, game: object|null, conflictKey: string,
- *             sig: string }} Team
+ * @typedef {{ id: string, ownerClientId: number|null, game: object|null, color: object|null,
+ *             conflictKey: string, sig: string }} Team
  * @typedef {{ id: string, clients: Map<number, Client>, ownerClientId: number|null,
  *             state: object, teams: Map<string, Team>, teamStates: Map<string, object>,
  *             teamQueues: Map<string, object[]>, teamStoryMoves: Map<string, object>,
@@ -273,12 +276,14 @@ function roomStatePacket(room) {
     };
 }
 
-function clientStateOf(client, forClientId) {
+// A player on a team shows in the team colour; `color` stays the player's own.
+function clientStateOf(room, client, forClientId) {
     return {
         clientId: client.clientId,
         name: client.name,
         teamId: client.teamId,
         color: client.color,
+        displayColor: displayColorOf(room, client),
         modVersion: client.modVersion,
         layout: client.layout,
         protocolVersion: client.protocolVersion,
@@ -533,10 +538,33 @@ function assignOwnerIfNeeded(room) {
 function teamOf(room, teamId) {
     let team = room.teams.get(teamId);
     if (!team) {
-        team = { id: teamId, ownerClientId: null, game: null, conflictKey: "", sig: "" };
+        team = { id: teamId, ownerClientId: null, game: null, color: null, conflictKey: "", sig: "" };
         room.teams.set(teamId, team);
     }
     return team;
+}
+
+// The window's colour presets without white: a team's colour until its leader picks one.
+const TEAM_COLOR_DEFAULTS = ["e53935", "fb8c00", "fdd835", "7cb342", "2e9d4a", "00897b", "00acc1",
+    "1e88e5", "5e35b1", "8e24aa", "d81b60"].map((h) => ({
+    r: parseInt(h.slice(0, 2), 16), g: parseInt(h.slice(2, 4), 16), b: parseInt(h.slice(4, 6), 16),
+}));
+
+// Stable per team id, so a team keeps its default in every room and after the room expired.
+function defaultTeamColor(teamId) {
+    let h = 0x811c9dc5;
+    for (const ch of Buffer.from(teamId, "utf8")) h = Math.imul(h ^ ch, 0x01000193) >>> 0;
+    return TEAM_COLOR_DEFAULTS[h % TEAM_COLOR_DEFAULTS.length];
+}
+
+// Players without a team have no team colour.
+function teamColor(room, teamId) {
+    if (teamId === "") return null;
+    return room.teams.get(teamId)?.color ?? defaultTeamColor(teamId);
+}
+
+function displayColorOf(room, client) {
+    return teamColor(room, client.teamId) ?? client.color;
 }
 
 function teamMembers(room, team) {
@@ -660,6 +688,7 @@ function teamStatePacket(room, team, recipient) {
         type: "TEAM_STATE",
         teamId: team.id,
         ownerClientId: team.ownerClientId ?? 0,
+        color: teamColor(room, team.id),
         game: publicGame(team.game, own),
         members: teamMembers(room, team).map((c) => {
             const m = { clientId: c.clientId, sync: memberSync(team, c), inGame: c.game.inGame, kind: c.game.kind,
@@ -747,6 +776,20 @@ function handleSetRoomOwner(room, client, packet) {
     broadcastRoom(room, -1, roomStatePacket(room));
 }
 
+// The leader of a named team picks its colour; it stays with the team through leader changes.
+function handleSetTeamColor(room, client, packet) {
+    const team = teamOf(room, client.teamId);
+    if (team.id === "" || team.ownerClientId !== client.clientId) {
+        log(`[${client.name}] rejected SET_TEAM_COLOR (${team.id === "" ? "no team" : "not the team leader"})`);
+        return;
+    }
+    team.color = asColor(packet.color, teamColor(room, team.id));
+    for (const c of teamMembers(room, team)) {
+        broadcastRoom(room, -1, { type: "UPDATE_CLIENT_STATE", clientId: c.clientId, displayColor: team.color });
+    }
+    broadcastTeams(room);
+}
+
 // A team leader hands the team to any connected teammate.
 function handleSetTeamOwner(room, client, packet) {
     const team = teamOf(room, client.teamId);
@@ -830,12 +873,12 @@ function handleHandshake(conn, packet) {
 
     send(client, {
         type: "ALL_CLIENT_STATE",
-        clients: [...room.clients.values()].map((c) => clientStateOf(c, clientId)),
+        clients: [...room.clients.values()].map((c) => clientStateOf(room, c, clientId)),
         roomState: roomStatePacket(room).state,
     });
     sendAllTeams(room, client);
 
-    broadcastRoom(room, clientId, { type: "UPDATE_CLIENT_STATE", ...clientStateOf(client, -1) });
+    broadcastRoom(room, clientId, { type: "UPDATE_CLIENT_STATE", ...clientStateOf(room, client, -1) });
     if (ownerChanged) {
         // The joiner already has the room state from ALL_CLIENT_STATE.
         broadcastRoom(room, clientId, roomStatePacket(room));
@@ -1013,7 +1056,7 @@ function handlePacket(client, packet) {
     if (packet.type === "UPDATE_CLIENT_STATE") {
         updateCachedClientState(client, packet);
         // Relay the sanitized server-side view, never the raw packet.
-        broadcastRoom(room, client.clientId, { type: "UPDATE_CLIENT_STATE", ...clientStateOf(client, -1) });
+        broadcastRoom(room, client.clientId, { type: "UPDATE_CLIENT_STATE", ...clientStateOf(room, client, -1) });
         return;
     }
 
@@ -1032,6 +1075,10 @@ function handlePacket(client, packet) {
     }
     if (packet.type === "SET_TEAM_OWNER") {
         handleSetTeamOwner(room, client, packet);
+        return;
+    }
+    if (packet.type === "SET_TEAM_COLOR") {
+        handleSetTeamColor(room, client, packet);
         return;
     }
 
@@ -1107,7 +1154,7 @@ function handlePacket(client, packet) {
         relayed.senderSessionKey = client.sessionKey;
         // The server's view of the sender, so queued and cached packets still name them.
         relayed.senderName = client.name;
-        relayed.senderColor = client.color;
+        relayed.senderColor = displayColorOf(room, client);
 
         // Stored packets are relayed first, so an unserializable one throws before it is stored.
         if (packet.type === "UPDATE_WORLD_STATE") {

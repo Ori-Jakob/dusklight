@@ -87,7 +87,11 @@ still play the team's; `CLAIM_TEAM_GAME` switches the team to the leader's game 
 The room owner and each team leader are the longest-connected member of the room or team; when
 one leaves, the next by connection order takes over (the team keeps its game). The owner may hand
 the room to any member with `SET_ROOM_OWNER {targetClientId}`, a leader the team to a teammate
-with `SET_TEAM_OWNER {targetClientId}`. Teleport requests across teams are refused (`other-team`)
+with `SET_TEAM_OWNER {targetClientId}`. A named team has a colour: a default picked from its id, until
+its leader sets one with `SET_TEAM_COLOR {color}` (kept through leader changes). Client state
+carries each player's own `color` and the `displayColor` everyone shows them in: the team colour
+for team members, their own otherwise; world packets are stamped with it (`senderColor`).
+Teleport requests across teams are refused (`other-team`)
 unless the room's `teleportAcrossTeams` is on, and always between different team games
 (`other-game`).
 
