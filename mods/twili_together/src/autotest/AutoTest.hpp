@@ -50,6 +50,9 @@ public:
 };
 
 void setNetDriver(NetDriver* driver);
+// The session's driver (NetDriver.cpp).
+void installNetDriver();
+void removeNetDriver();
 
 // An AUTOTEST_SIGNAL relayed by the server.
 void onSignal(const std::string& instance, const std::string& name);

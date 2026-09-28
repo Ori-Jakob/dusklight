@@ -7,6 +7,9 @@
 namespace twili::hooks {
 
 // Defined in the hooks_*.cpp files.
+ModResult installSave(std::string& error);
+ModResult installPlayer(std::string& error);
+ModResult installActor(std::string& error);
 #if TWILI_ENABLE_AUTOTEST
 ModResult installAutotest(std::string& error);
 #endif
@@ -15,13 +18,24 @@ namespace {
 
 using Installer = ModResult (*)(std::string& error);
 
+ModResult installCore(std::string& error) {
+    ModResult result = installSave(error);
+    if (result == MOD_OK) {
+        result = installPlayer(error);
+    }
+    if (result == MOD_OK) {
+        result = installActor(error);
+    }
+    return result;
+}
+
 struct GroupInfo {
     const char* name;
     Installer installer;
 };
 
 constexpr std::array<GroupInfo, static_cast<size_t>(Group::Count)> kGroups{{
-    {"core", nullptr},
+    {"core", installCore},
     {"fx", nullptr},
     {"pvp", nullptr},
     {"enemy", nullptr},

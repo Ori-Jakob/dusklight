@@ -2,6 +2,7 @@
 #include "autotest/State.hpp"
 
 #include "core/Log.hpp"
+#include "core/SaveGate.hpp"
 
 #include "d/d_com_inf_game.h"
 #include "d/d_item_data.h"
@@ -178,6 +179,9 @@ bool takeOverBoot(scene_class* logoScene) {
     dKy_clear_game_init();
     dComIfGs_resetDan();
     dComIfGs_setRestartRoomParam(0);
+
+    // A fresh save that never went through card_to_memory.
+    markSaveLoaded();
 
     TwiliLog.info("[autotest] boot -> {} point {} room {} layer {} (status {})", stage, point, room,
         layer, status);

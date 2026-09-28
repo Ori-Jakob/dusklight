@@ -27,18 +27,51 @@ endif ()
 
 set(TWILI_SOURCES
     src/mod.cpp
+    src/actors/DummyActors.cpp
+    src/actors/DummyItemFx.cpp
+    src/actors/DummyMidna.cpp
+    src/actors/DummyPlayer.cpp
+    src/actors/DummyWolfFx.cpp
+    src/actors/Profiles.cpp
     src/core/Base64.cpp
+    src/core/ClientState.cpp
     src/core/Config.cpp
+    src/core/GameAccess.cpp
     src/core/Host.cpp
+    src/core/RoomStateSync.cpp
+    src/core/SaveGate.cpp
+    src/core/Session.cpp
+    src/core/Visibility.cpp
+    src/fx/ItemFx.cpp
+    src/fx/PlayerRecolor.cpp
+    src/fx/RemoteTransformFx.cpp
+    src/fx/StatusFx.cpp
+    src/fx/WolfFx.cpp
     src/hooks/Hooks.cpp
+    src/hooks/hooks_actor.cpp
+    src/hooks/hooks_player.cpp
+    src/hooks/hooks_save.cpp
+    src/horse/HorsePuppetStub.cpp
+    src/horse/HorseSync.cpp
+    src/net/Link.cpp
+    src/net/TcpTransport.cpp
+    src/net/WsTransport.cpp
+    src/presence/LinkPuppetState.cpp
+    src/presence/PlayerSfx.cpp
+    src/presence/PlayerUpdate.cpp
+    src/presence/RemotePose.cpp
+    src/pvp/PvpStub.cpp
+    src/ui/TwiliWindow.cpp
 )
 
 if (TWILI_ENABLE_AUTOTEST)
     list(APPEND TWILI_SOURCES
         src/autotest/AutoTest.cpp
         src/autotest/BootTakeover.cpp
+        src/autotest/NetDriver.cpp
         src/autotest/PadOverride.cpp
         src/autotest/Platform.cpp
+        src/autotest/StepsMotion.cpp
         src/hooks/hooks_autotest.cpp
     )
 endif ()
