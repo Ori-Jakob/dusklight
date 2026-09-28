@@ -145,6 +145,56 @@ World sync (`StepsWorld.cpp`):
 | `expectNoItem` | `item`, `forSec` (5) | fails if the item's first-get bit gets set within `forSec` |
 | `expectMerges` | `min`, `max`, `timeoutSec` | world-state merges applied so far: waits for `min`, fails above `max` |
 
+UI: colour and window (`StepsColor.cpp`). The picker is the host's colour control, driven by key
+presses posted to the game's own window (so it needs no focus) and checked through the setting:
+
+| op | fields | does |
+| --- | --- | --- |
+| `colorMathSelfTest` | `chunk` | the colour maths over all 2^24 colours |
+| `setColor` / `expectColor` | `rgb` (`"#RRGGBB"`) or `r`, `g`, `b`; `timeoutSec` | writes / waits for the colour setting |
+| `expectColorHsv` | `h`, `hTol`, `hMin`, `hMax`, `s`, `v`, `tol`, `timeoutSec` | the setting's colour as HSV |
+| `expectPeerColor` / `expectSelfRow` | `name`, `rgb`; `saveLoaded`, `stage` | a peer's / our own client entry |
+| `expectDummyColor` | `name`, `rgb`, `timeoutSec` | the peer's dummy tints (and, with recolouring, its textures) in that colour |
+| `resetColorPushes` / `expectColorPushes` | `min`, `max` | colour updates we sent since the reset |
+| `showWindow` / `hideWindow` | `tab` (0 Connection, 1 Room, 2 Players) | the Twili-Together window |
+| `openColorPicker` / `closeColorPicker` | | the window's colour control pressed (the square has focus) / a cancel |
+| `pickerKey` | `key` (`left`, `right`, `up`, `down`, `confirm`, `cancel`, `next`, `prev`), `count`, `holdMs` | taps, one per tick; `holdMs` holds one, repeating every tick after 0.32 s |
+| `resizeWindow` | `width`, `height` | the game window's client size |
+| `mark` | `msg` | logged as a warning, which flushes the log: a trigger for window captures |
+
+Map cursors (`StepsMapCursor.cpp`). Targets are peer names or `#<client id>`:
+
+| op | fields | does |
+| --- | --- | --- |
+| `mapCursorSelfTest` | | projection, facing, outline, pins, colours |
+| `showMinimap` | `minAlpha`, `timeoutSec` | until the minimap draws on screen |
+| `injectMapCursorClients` / `clearMapCursorClients` | `clients` (`id`, `color`, `dx`, `dz`, `dy`, `angle`), `unit` (`cm`, `texel`) | extra markers around our map position |
+| `expectMapCursor` | `surface` (`minimap`, `dmap`), `target(s)`, `color(s)`, `pinned`, `floorDelta`, `facing`, `count`, `holdTicks`, `maxAgeTicks`, `timeoutSec` | a fresh frame with those markers in exactly those colours |
+| `expectNoMapCursor` | `surface`, `target`, `reason`, `holdTicks`, `timeoutSec` | no marker, for that frame or client reason (or `absent`) |
+| `checkMapCursorTransform` | `target`, `tolPx` | anchors and facings against the offscreen pass's matrices |
+| `expectMapPaletteClean` | `groups`, `holdTicks` | the dungeon map palette is untouched |
+| `dumpMapCursors` | `surface` | logs the frame and `MAPCURSOR_PROBE` screen fractions |
+| `openPauseMap` | `timeoutSec` | the dungeon map, as the map button opens it (a B press closes it) |
+
+Item toasts (`StepsItemToast.cpp`), checked through the toast history:
+
+| op | fields | does |
+| --- | --- | --- |
+| `itemToastSelfTest` | `items` | icons and names from the game files |
+| `itemToastOption` | `name` (`item_toasts`, `item_toasts_own`), `value` | |
+| `clearItemToasts` | | forgets the history and what waits |
+| `testItemToast` | `item`, `name`, `r`, `g`, `b`, `count`, `saveTbl` | a live toast as if a teammate picked the item up |
+| `expectItemToast` / `expectNoItemToast` | `kind` (`item`, `own`, `summary`, `merged`), `from`, `item`, `textContains`, `minCount`, `fromPacket`, `hold`, `pushed`, `rendered`, `timeoutSec` / `forSec` | a matching toast (`rendered`: pushed with that item's `item://` icon) |
+| `expectItemToastCount` / `expectItemToastItems` | the same fields and `count` or `min`/`max`; `from`, `count` | how many toasts / items counted |
+| `dumpItemToasts` | | logs the history |
+
+Name tags (`StepsNameTags.cpp`):
+
+| op | fields | does |
+| --- | --- | --- |
+| `expectNameTag` | `name`, `shown`, `gate`, `line2`, `holdTicks`, `timeoutSec` | the peer's tag in the last presented frame (or none, for `gate`) |
+| `viewPeer` | `name`, `yaw`, `beyond` | moves our player past the peer's dummy, seen from our camera, so the peer shows `yaw` degrees off centre |
+
 ## Adding a scenario
 
 Core scenarios are in `scenarios.js`; feature scenarios in `scenarios/<feature>.js`, each

@@ -87,10 +87,16 @@ if (TWILI_ENABLE_AUTOTEST)
     list(APPEND TWILI_SOURCES
         src/autotest/AutoTest.cpp
         src/autotest/BootTakeover.cpp
+        src/autotest/Input.cpp
         src/autotest/NetDriver.cpp
         src/autotest/PadOverride.cpp
         src/autotest/Platform.cpp
+        src/autotest/StepsColor.cpp
+        src/autotest/StepsItemToast.cpp
+        src/autotest/StepsMapCursor.cpp
         src/autotest/StepsMotion.cpp
+        src/autotest/StepsNameTags.cpp
+        src/autotest/StepsWolf.cpp
         src/autotest/StepsWorld.cpp
         src/hooks/hooks_autotest.cpp
     )
