@@ -29,7 +29,28 @@ muted. Don't minimize them: a minimized window skips frames.
 
 Exit code is 0 when every scenario passed. Output goes to `out/<timestamp>/<scenario>/`:
 `report.json`, `<instance>.log`, `<instance>.stderr.log`, `<instance>.result.json`,
-`<instance>.script.json` and, for network scenarios, `server.log`.
+`<instance>.script.json` and, for network scenarios, `server.log`. `out/<timestamp>/summary.json`
+has every report of the run; with `--repeat` each round goes to `out/<timestamp>/run<N>/`.
+
+## Running the whole suite
+
+Without scenario names the runner runs everything except the manual scenarios (`manualOnly`:
+window tours and showcases that only exist for screen captures; run them by name). That is about
+130 scenarios and takes around two hours on one runner. To go faster, split the list over two
+runners, each with its own `--work` and `--out`:
+
+```
+node run.js <first half of the names>  --exe <copy>/dusklight.exe --work w1 --out out1 --repeat 3
+node run.js <second half of the names> --exe <copy>/dusklight.exe --work w2 --out out2 --repeat 3
+```
+
+More than two runners (or other heavy work on the machine) makes the timing-sensitive scenarios
+flaky: they count game ticks, and a starved instance falls behind its peer.
+
+The relay has its own tests, no game needed: `npm test` in `../server`.
+
+Not covered: reloading or disabling the mod from the Mods window while two instances are
+connected. Check that by hand after changes to startup, shutdown or the actors.
 
 ## Isolation
 
@@ -40,7 +61,7 @@ the runner also points `USERPROFILE`, `APPDATA` and `LOCALAPPDATA` at `work/slot
 therefore never writes the player's real game data.
 
 Before each scenario the runner rebuilds the slot's `config.json` from the user's, without
-`mod.*`, `beacon.*` and `actionBindings.*` keys, plus the test settings: autosave and pause on
+`mod.*` and `actionBindings.*` keys, plus the test settings: autosave and pause on
 focus loss off, background controller input off, audio muted, windowed 800x450. It deletes the
 slot's saves, achievements, logs and mod data. The first run seeds each slot's shader caches from
 the user's data folder; later runs reuse them.
@@ -95,7 +116,7 @@ Timings in `frames` are simulation ticks (30 per second), independent of the fra
 | `warp` | `stage`, `room`, `point`, `layer` | requests a stage change |
 | `walk` | `frames`, `stickX`, `stickY`, `circle`, `buttons`, `async` | synthetic port-0 input; `circle` walks in a slow loop; `async` lets the next steps run meanwhile |
 | `wait` | `frames` or `sec` | |
-| `markPos` / `expectPos` | —; `minMoved`, `near` (`[x, y, z]`), `maxDist` | remember Link's position / fail unless he moved at least `minMoved` since, or is within `maxDist` of `near` |
+| `markPos` / `expectPos` | none; `minMoved`, `near` (`[x, y, z]`), `maxDist` | remember Link's position / fail unless he moved at least `minMoved` since, or is within `maxDist` of `near` |
 | `connect` | `name`, `room`, `team` (default: instance name, run room, no team) | connects to the run's server |
 | `disconnect` | | |
 | `waitConnected` | `timeoutSec` | until the server assigned us a client id |
@@ -105,7 +126,7 @@ Timings in `frames` are simulation ticks (30 per second), independent of the fra
 | `checkDummies` | `maxDist` | fails if a peer in our layer has no dummy, or its dummy is further than `maxDist` from the peer's reported position |
 | `signal` / `waitSignal` | `name`, `from`, `timeoutSec` | barrier between instances, relayed by the server |
 | `giveItem` / `expectItem` | `item`, `timeoutSec` | `execItemGet` (a gameplay give, so it is shared) / wait for the item bit |
-| `burnShield` / `expectShield` | —; `item` (255 = none), `owned`, `forSec`, `timeoutSec` | what a wooden shield burning up does (unequipped, first-get bit cleared) / wait for the equipped shield (and its first-get bit) |
+| `burnShield` / `expectShield` | none; `item` (255 = none), `owned`, `forSec`, `timeoutSec` | what a wooden shield burning up does (unequipped, first-get bit cleared) / wait for the equipped shield (and its first-get bit) |
 | `addKeys` / `expectKeys` | `count`; `forSec`, `timeoutSec` | add to the current stage's small-key count / wait until it equals `count` (and, with `forSec`, stays so that long) |
 | `setSwitch` / `unsetSwitch` / `expectSwitch` | `no`, `room` (default: current), `set` | save switch through `dComIfGs_onSwitch` etc. |
 | `setEventBit` / `expectEventBit` | `no`, `set` | permanent event bit |
@@ -192,7 +213,9 @@ Status effects (`StepsStatusFx.cpp`):
 | `expectDummyStatus` | `frozen`, `iceBlock`, `thaws`, `fireMin`/`Max`, `fireEmittersMin`/`Max`, `fireReceived`, `shieldBurnMin`/`Max`, `shieldBurnFx`, `shieldBurnOuts`, `shieldItem`, `elec`, `elecFx`, `damageTimerMin`/`Max`, `flashesMin`, `iceWait`, `sinkMin`/`Max`, `statusFlags`, `frames`, `timeoutSec` | the first peer's dummy |
 | `statusFxPack` | `iceBlock`, `elec` | logs whether this stage's particle pack has these effects |
 
-Items and projectiles (`StepsItemFx.cpp`):
+Items and projectiles (`StepsItemFx.cpp`). Kinds in `{kind: n}` fields are `arrow`, `boomerang`,
+`bomb`, `spinner` and `crodBall`; event types `explode`, `hitMark`, `sound`, `water` and
+`particle`:
 
 | op | fields | does |
 | --- | --- | --- |
@@ -201,7 +224,8 @@ Items and projectiles (`StepsItemFx.cpp`):
 | `injectItemFx` | `slots`, `events`, `hook`, `ball`, `packets` | our next updates show these |
 | `setOil` | `value` (21600) | lantern oil |
 | `expectLocalItemFx` | `objects`, `events`, `hookOutTicks`, `ironBallTicks`, `levelSfxTicks`, `minHookDist`, `timeoutSec` | our capture's totals |
-| `markRemoteItemFx` / `expectRemoteItemFx` | many (see the file) | the first peer's dummy's item copies and events since the mark |
+| `markRemoteItemFx` | | remembers the first peer dummy's counters |
+| `expectRemoteItemFx` | `minDrawn` / `maxDrawn` (`{kind: n}` drawn now), `minSeen` (`{kind: n}` since the mark), `explosions`, `hitMarks`, `sounds`, `splashes`, `particles`, `maxExplosions` (since the mark), `tornado`, `boomCharge`, `minLights`, `maxLights`, `minEmitters`, `maxHeapUsed`, `hookChain`, `minTipDist`, `minHookShots` (chains since the mark), `minHookPeak` (the latest chain's longest tip distance), `minIronBallMode`, `maxIronBallMode`, `minIronBallDist`, `lanternFlame`, `minLanternGlow`, `maxLanternGlow`, `levelSfx` (level sounds started since the mark); `frames` (0), `timeoutSec` (20) | until the first peer's dummy shows every field given, then for `frames` more ticks |
 
 Life, PvP and enemies (`StepsPvp.cpp`, `StepsEnemy.cpp`):
 
@@ -331,7 +355,7 @@ Map cursors (`StepsMapCursor.cpp`). Targets are peer names or `#<client id>`:
 | `showMinimap` | `minAlpha`, `timeoutSec` | until the minimap draws on screen |
 | `injectMapCursorClients` / `clearMapCursorClients` | `clients` (`id`, `color`, `dx`, `dz`, `dy`, `angle`), `unit` (`cm`, `texel`) | extra markers around our map position |
 | `expectMapCursor` | `surface` (`minimap`, `dmap`), `target(s)`, `color(s)`, `pinned`, `floorDelta`, `facing`, `count`, `holdTicks`, `maxAgeTicks`, `timeoutSec` | a fresh frame with those markers in exactly those colours |
-| `expectNoMapCursor` | `surface`, `target`, `reason`, `holdTicks`, `timeoutSec` | no marker, for that frame or client reason (or `absent`) |
+| `expectNoMapCursor` | `surface`, `target`, `reason`, `holdTicks` (30), `timeoutSec` | no marker, for that reason: a frame reason (`locationsOff`, `cutscene`, `notConnected`, `alphaZero`), a client reason (`noSave`, `noUpdate`, `otherStage`, `otherLayer`, `otherFloor`, `badPose`) or `absent` |
 | `checkMapCursorTransform` | `target`, `tolPx` | anchors and facings against the offscreen pass's matrices |
 | `expectMapPaletteClean` | `groups`, `holdTicks` | the dungeon map palette is untouched |
 | `dumpMapCursors` | `surface` | logs the frame and `MAPCURSOR_PROBE` screen fractions |
