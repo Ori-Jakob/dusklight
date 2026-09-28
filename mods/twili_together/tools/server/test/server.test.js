@@ -803,6 +803,63 @@ test("a teammate on another protocol version is not asked for world state", () =
     await a.expectNone((p) => p.type === "REQUEST_WORLD_STATE", "request forwarded across protocol versions");
 }));
 
+test("world packets, the world cache and the queue are kept per save layout", () => withServer(async (mk) => {
+    const L1 = "1111111111111111";
+    const L2 = "2222222222222222";
+    const a = mk();
+    const b = mk();
+    const c = mk();
+    await a.join({ teamId: "t", layout: L1 });
+    await b.join({ teamId: "t", layout: L2 });
+    await c.join({ teamId: "t", layout: L1 });
+    a.enterStage("F_SP103");
+    b.enterStage("F_SP103");
+    a.send({ type: "REQUEST_WORLD_STATE", catchUp: true });
+    b.send({ type: "REQUEST_WORLD_STATE", catchUp: true });
+    await settle();
+
+    a.send({ type: "SET_FLAG", flagNo: 1, addToQueue: true });
+    a.send({ type: "UPDATE_WORLD_STATE", save: "SA" });
+    a.send({ type: "GIVE_ITEM", itemNo: 0x40, addToQueue: true });
+    const give = await c.waitType("GIVE_ITEM");
+    await c.waitType("UPDATE_WORLD_STATE", (p) => p.save === "SA");
+    await b.expectNone((p) => ["SET_FLAG", "GIVE_ITEM", "UPDATE_WORLD_STATE"].includes(p.type),
+        "world packet across save layouts");
+
+    // B's state is cached for its own layout and does not replace A's.
+    b.send({ type: "UPDATE_WORLD_STATE", save: "SB" });
+    b.send({ type: "GIVE_ITEM", itemNo: 0x41, addToQueue: true });
+    await a.expectNone((p) => p.type === "UPDATE_WORLD_STATE" || p.type === "GIVE_ITEM", "state from another layout");
+    await settle();
+
+    const d = mk();
+    await d.join({ teamId: "t", layout: L1 });
+    d.send({ type: "REQUEST_WORLD_STATE", catchUp: true });
+    await a.waitType("REQUEST_WORLD_STATE", (p) => p.clientId === d.id);
+    await b.expectNone((p) => p.type === "REQUEST_WORLD_STATE", "request forwarded across save layouts");
+    const replayed = await d.waitType("GIVE_ITEM", (p) => p.fromQueue === true);
+    assert.equal(replayed.itemNo, 0x40);
+    assert.equal(replayed.queueEpoch, give.queueEpoch);
+    await d.expectNone((p) => p.type === "GIVE_ITEM" && p.itemNo === 0x41, "queued packet from another layout");
+
+    // A joiner on B's layout with nobody to answer gets B's cache, never A's.
+    await b.close();
+    const e = mk();
+    await e.join({ teamId: "t", layout: L2 });
+    e.send({ type: "REQUEST_WORLD_STATE", catchUp: true });
+    const cached = await e.waitType("UPDATE_WORLD_STATE");
+    assert.equal(cached.save, "SB");
+    assert.equal(cached.fromCache, true);
+    const own = await e.waitType("GIVE_ITEM", (p) => p.fromQueue === true);
+    assert.equal(own.itemNo, 0x41);
+    assert.notEqual(own.queueEpoch, give.queueEpoch);
+    await e.expectNone((p) => p.type === "UPDATE_WORLD_STATE" && p.save === "SA", "cache of another layout");
+
+    // A targeted answer never crosses layouts either.
+    a.send({ type: "UPDATE_WORLD_STATE", save: "ST", targetClientId: e.id });
+    await e.expectNone((p) => p.type === "UPDATE_WORLD_STATE" && p.save === "ST", "targeted state across layouts");
+}));
+
 test("UNSET_EVENT_BIT is team-scoped and queued", () => withServer(async (mk, server) => {
     const a = mk();
     const b = mk();

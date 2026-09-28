@@ -12,12 +12,13 @@
  *              owner leaves, the longest-connected client takes over. A room left empty for
  *              TT_ROOM_TTL_SEC (default 6 h) is deleted with its caches.
  *   Room state UPDATE_ROOM_STATE is accepted from the owner only and echoed to the room.
- *   Teams      Flag, event, item, dungeon and world-state packets go to the same room and teamId,
- *              stamped with the sender's clientId, teamId, session key, name and colour.
+ *   Teams      Flag, event, item, dungeon and world-state packets go to the same room, teamId and
+ *              save layout, stamped with the sender's clientId, teamId, session key, name and colour.
  *   Catch-up   The last untargeted UPDATE_WORLD_STATE and the addToQueue packets since are kept
- *              per team. REQUEST_WORLD_STATE goes to caught-up teammates on the same protocol; the
- *              cache answers only when none can, and catchUp:true also replays the queue and the
- *              latest STORY_MOVE arrive. Replays skip the requester's own session.
+ *              per team and layout. REQUEST_WORLD_STATE goes to caught-up teammates on the same
+ *              protocol and layout; the cache answers only when none can, and catchUp:true also
+ *              replays the queue and the latest STORY_MOVE arrive. Replays skip the requester's
+ *              own session.
  *   Presence   PLAYER_UPDATE / PLAYER_SFX go to room members in the same stage, layer and protocol.
  *   Kills      ENEMY_DEFEATED / STORY_EVENT go to teammates in the same stage and layer, uncached.
  *   Story      STORY_MOVE goes to the whole team and is never queued.
@@ -290,6 +291,22 @@ function broadcastTeam(room, sender, packet) {
     }
 }
 
+// World packets are raw save data: only teammates on the same save layout get them.
+function broadcastWorld(room, sender, packet) {
+    const msg = JSON.stringify(packet);
+    for (const [id, c] of room.clients) {
+        if (id !== sender.clientId && c.teamId === sender.teamId && c.layout === sender.layout &&
+            c.conn.readyState === 1) {
+            c.conn.send(msg);
+        }
+    }
+}
+
+// Cache, queue and queue numbers are kept per team and save layout.
+function worldKey(client) {
+    return JSON.stringify([client.teamId, client.layout]);
+}
+
 function broadcastPresence(room, sender, packet) {
     if (!sender.online || !sender.isSaveLoaded) return;
     const msg = JSON.stringify(packet);
@@ -396,11 +413,11 @@ function applyRoomState(state, incoming) {
     }
 }
 
-function queueTeamPacket(room, teamId, packet) {
-    let queue = room.teamQueues.get(teamId);
+function queueTeamPacket(room, key, packet) {
+    let queue = room.teamQueues.get(key);
     if (!queue) {
         queue = [];
-        room.teamQueues.set(teamId, queue);
+        room.teamQueues.set(key, queue);
     }
     queue.push(packet);
     if (queue.length > MAX_TEAM_QUEUE) {
@@ -416,14 +433,14 @@ function sameSession(client, sessionKey) {
 // Cached world state and/or queued packets, skipping the client's own session.
 function sendTeamCatchUp(room, client, withState, withQueue) {
     const ownSession = (p) => p.clientId === client.clientId || sameSession(client, p.senderSessionKey);
-    const cached = withState ? room.teamStates.get(client.teamId) : undefined;
+    const cached = withState ? room.teamStates.get(worldKey(client)) : undefined;
     const sendState = cached !== undefined && !ownSession(cached);
     if (sendState) {
         send(client, { ...cached, fromCache: true });
     }
     let replayed = 0;
     if (withQueue) {
-        for (const packet of room.teamQueues.get(client.teamId) ?? []) {
+        for (const packet of room.teamQueues.get(worldKey(client)) ?? []) {
             if (ownSession(packet)) continue;
             send(client, { ...packet, fromQueue: true });
             replayed++;
@@ -766,25 +783,25 @@ function handlePacket(client, packet) {
             if (packet.targetClientId) {
                 // An answer to one REQUEST_WORLD_STATE; never cached, as cache and queue change together.
                 const target = room.clients.get(packet.targetClientId);
-                if (target && target.teamId === client.teamId) {
+                if (target && target.teamId === client.teamId && target.layout === client.layout) {
                     send(target, relayed);
                     target.caughtUp = true;
                 }
                 return;
             }
-            broadcastTeam(room, client, relayed);
-            // Fresh full state supersedes everything queued for this team.
-            room.teamStates.set(client.teamId, relayed);
-            room.teamQueues.set(client.teamId, []);
+            broadcastWorld(room, client, relayed);
+            // Fresh full state supersedes everything queued for this team and layout.
+            room.teamStates.set(worldKey(client), relayed);
+            room.teamQueues.set(worldKey(client), []);
             return;
         }
 
         if (packet.type === "REQUEST_WORLD_STATE") {
-            // Caught-up teammates on the same protocol answer, but not the requester's old connection.
+            // Caught-up teammates (same protocol and layout) answer, not the requester's old connection.
             const live = [...room.clients.values()].filter((c) =>
                 c.clientId !== client.clientId && c.teamId === client.teamId && c.isSaveLoaded &&
                 c.caughtUp && c.protocolVersion === client.protocolVersion &&
-                !sameSession(client, c.sessionKey));
+                c.layout === client.layout && !sameSession(client, c.sessionKey));
             // The cache stands in only for absent teammates: it may predate flags cleared since.
             sendTeamCatchUp(room, client, live.length === 0, packet.catchUp === true);
             if (packet.catchUp === true) {
@@ -802,14 +819,14 @@ function handlePacket(client, packet) {
 
         if (packet.addToQueue) {
             // Numbered so a reconnecting client can skip replayed packets it already applied.
-            const seq = (room.teamQueueSeqs.get(client.teamId) ?? 0) + 1;
-            room.teamQueueSeqs.set(client.teamId, seq);
-            relayed.queueEpoch = `${room.queueEpoch}:${client.teamId}`;
+            const seq = (room.teamQueueSeqs.get(worldKey(client)) ?? 0) + 1;
+            room.teamQueueSeqs.set(worldKey(client), seq);
+            relayed.queueEpoch = `${room.queueEpoch}:${client.layout}:${client.teamId}`;
             relayed.queueSeq = seq;
         }
-        broadcastTeam(room, client, relayed);
+        broadcastWorld(room, client, relayed);
         if (packet.addToQueue) {
-            queueTeamPacket(room, client.teamId, relayed);
+            queueTeamPacket(room, worldKey(client), relayed);
         }
         return;
     }
