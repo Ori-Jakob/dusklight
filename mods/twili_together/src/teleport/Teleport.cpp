@@ -4,6 +4,7 @@
 
 #include "teleport/Teleport.hpp"
 
+#include "core/Host.hpp"
 #include "core/LocalPlayer.hpp"
 #include "core/Log.hpp"
 #include "core/SaveGate.hpp"
@@ -143,6 +144,7 @@ bool tryLocalTeleport(const Destination& d) {
     if (camera_process_class* camera = dComIfGp_getCamera(dComIfGp_getPlayerCameraID(0))) {
         camera->mCamera.Reset(camera->mCamera.mCenter + delta, camera->mCamera.mEye + delta);
     }
+    interp::requestPresentationSync();
     return true;
 }
 
