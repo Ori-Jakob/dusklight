@@ -1,9 +1,6 @@
 #pragma once
 
-// "Dad got Clawshot" with the item's icon when a teammate picks up a progression item, a dungeon
-// item or a heart piece. What the server replays on join and what a catch-up merge brings in ends
-// as one summary per catch-up window ("Synced 12 items from Dad"). One item toast at a time, held
-// while no save is loaded, a stage loads or a cutscene runs; a backlog from one sender merges.
+// Toasts for teammates' pickups; replays and catch-ups merge into one summary per window.
 
 #include <nlohmann/json_fwd.hpp>
 
@@ -40,15 +37,13 @@ struct ItemCount {
     int saveTbl = -1;  // the stage table of a dungeon item, -1 otherwise
 };
 
-// The sender of a team packet: its roster row, else the server's senderName/senderColor stamp,
-// else unknown.
+// A team packet's sender: its roster row, else the server's senderName/senderColor stamp.
 Sender senderOf(const Session& session, const nlohmann::json& packet);
 
 // Progression items plus the small key, map, compass and boss keys.
 bool isToastableItem(uint8_t itemNo);
 
-// A live one toasts even when we already had it; a replayed one only counts into the catch-up
-// summary if it changed our save (`applied`).
+// A live one always toasts; a replayed one counts into the summary only if `applied`.
 void noteItem(const Sender& who, uint8_t itemNo, int count, int saveTbl, Source src, bool applied);
 // Items a world-state merge made new to us (CatchUpMerge or LiveMerge).
 void noteMerge(const Sender& who, Source src, const std::vector<ItemCount>& items);

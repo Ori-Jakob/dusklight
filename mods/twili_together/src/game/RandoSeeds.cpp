@@ -41,8 +41,7 @@ constexpr std::string_view kDigestSections[] = {
     "mReturnToPlaceOverrides",
 };
 
-// verifyProgressiveItem's cases in the randomizer (swords, bows, wallets, skills, clawshots,
-// sky book, key shards, rods, mirror and shadow pieces, ammo).
+// The randomizer's verifyProgressiveItem cases (swords, bows, wallets, skills, ...).
 constexpr uint8_t kInventoryDependent[] = {
     0x0A,
     0x0B,

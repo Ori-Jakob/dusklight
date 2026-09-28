@@ -20,8 +20,7 @@
 namespace twili {
 namespace {
 
-// Hue bands (degrees; saturation 0..1) of the clothes whose tunic colour is one hue, measured on
-// the disc's textures; the per-set whitelist keeps pants, hair and belts out.
+// Tunic hue bands measured on the disc's textures; the per-set whitelist keeps pants out.
 constexpr HueBand kGreen{100, 45, 15, 0.10f, 0.04f};  // Kokiri tunic and hat
 constexpr HueBand kBlue{205, 45, 15, 0.10f, 0.04f};   // Zora mask
 constexpr HueBand kRed{350, 25, 10, 0.22f, 0.06f};    // Magic Armor cloth

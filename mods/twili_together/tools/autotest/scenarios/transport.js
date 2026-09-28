@@ -2,8 +2,7 @@
 
 const { STAGES, COMMON_CVARS, meetIn, connect } = require("../lib");
 
-// Both meet, the relay dies (the runner kills it on A's signal) and comes back on the same
-// ports: the dummies go and come back without a connect step.
+// The relay dies on A's signal and comes back: dummies return without a connect step.
 const afterRestart = (other) => [
     { op: "waitNoDummies", timeoutSec: 60 },
     { op: "waitConnected", timeoutSec: 90 },

@@ -1,9 +1,4 @@
-// Step for the cost of our hooks.
-//
-// measureHookCost  frames (300), maxMs (0.1)
-//     Counts the calls of every hooked target that runs each tick or more over `frames` ticks,
-//     times one host dispatch on a probe hook, and fails if calls x dispatch per tick is over
-//     maxMs. Logs "[autotest] hook cost ...".
+// Step for the cost of our hooks; reference in the runner README.
 
 #include "autotest/AutoTestSteps.hpp"
 

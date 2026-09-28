@@ -1,26 +1,4 @@
-// Steps for the player colour, its live sync and the Twili-Together window. The picker is the
-// host's colour control: it is driven with key presses posted to the game window and checked
-// through the colour setting. Colours are "#RRGGBB" strings or r, g, b fields.
-//
-// colorMathSelfTest  chunk (1 << 20)
-// setColor / expectColor  rgb | r, g, b, timeoutSec (5)
-// expectColorHsv  h, hTol (0.6), hMin, hMax, s, v, tol (0.011), timeoutSec (5)
-//     The setting's colour as HSV (a grey or black keeps no hue: give s and v only).
-// expectPeerColor  name, rgb, timeoutSec (10)
-// expectSelfRow  rgb, saveLoaded, stage, timeoutSec (5)
-// expectDummyColor  name, rgb, timeoutSec (10)
-// resetColorPushes / expectColorPushes  min (0), max
-// showWindow  tab (0: Connection, 1: Room, 2: Players)  /  hideWindow
-// openColorPicker
-//     The window on its Connection tab, the colour control focused and pressed; the picker
-//     opens with its square focused.
-// pickerKey  key (left, right, up, down, confirm, cancel, next, prev), count (1), holdMs (0)
-//     count taps, one per tick; with holdMs one press held that long, repeating every tick
-//     after 0.32 s.
-// closeColorPicker  (a cancel tap)
-// resizeWindow  width (800), height (450)
-// mark  msg
-//     Logged as a warning, which flushes the log: a trigger for window captures.
+// Steps for the player colour, its live sync and the window; reference in the runner README.
 
 #include "autotest/AutoTestSteps.hpp"
 

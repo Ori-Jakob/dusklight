@@ -24,8 +24,7 @@ namespace twili {
 
 // At most 4 colour updates a second while the picker is dragged.
 static constexpr auto kColorPushInterval = std::chrono::milliseconds(250);
-// Our horse's parking spot is read once a horse that came along has saved her new position,
-// and pushed at most this often.
+// Our horse's parking spot, pushed at most this often once she saved her new position.
 static constexpr auto kHorsePlaceSettle = std::chrono::seconds(2);
 static constexpr auto kHorseStatePushInterval = std::chrono::seconds(1);
 // The server keeps at most 32 code points of a horse name.
@@ -275,8 +274,7 @@ void Session::syncSelfRow() {
     }
 }
 
-// Our horse's name and, while we are in another stage than hers, where she waits: peers there
-// show her parked. The server caches both for late joiners.
+// Our horse's name and, while we are elsewhere, where she waits (cached for late joiners).
 void Session::tickHorseState() {
     if (mSelfClientId == 0 || mLastLayerNo == -127) {
         return;

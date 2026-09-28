@@ -1,5 +1,4 @@
-// Victim side: a received hit planted into our Link's mTgCyls[0] for one checkDamageAction, so
-// the vanilla TG branch plays its reactions (stagger, knockdown, guard, swimming, horse, wolf).
+// Victim side: a received hit planted in mTgCyls[0] for one checkDamageAction.
 
 #include "pvp/Pvp.hpp"
 

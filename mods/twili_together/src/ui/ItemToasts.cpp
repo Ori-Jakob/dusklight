@@ -35,8 +35,7 @@ constexpr auto kBusyItemDuration = std::chrono::milliseconds(2500);
 constexpr auto kSummaryDuration = std::chrono::milliseconds(5000);
 // The overlay shows one toast at a time: ours is gone after its duration plus the fade.
 constexpr auto kToastFade = std::chrono::milliseconds(400);
-// The catch-up window closes after this long without a replayed packet, no earlier than
-// kWindowMin after it opened, and at kWindowMax whatever still trickles in.
+// The catch-up window closes this long after the last replay, within kWindowMin..kWindowMax.
 constexpr auto kWindowQuiet = std::chrono::milliseconds(2500);
 constexpr auto kWindowMin = std::chrono::milliseconds(2000);
 constexpr auto kWindowMax = std::chrono::seconds(15);
@@ -146,8 +145,7 @@ bool isProgressionItem(uint8_t itemNo) {
     }
 }
 
-// The icon the item-get window shows, read from the game's icon archive like the host's
-// item:// provider does; the checksum covers every layer's texels.
+// The item-get window's icon, read like the host's item:// provider; checksum of all layers.
 const IconProbe& iconInfo(uint8_t itemNo) {
     IconInfo& info = sIcons[itemNo];
     if (info.known || dComIfGp_getItemIconArchive() == nullptr) {
@@ -339,8 +337,7 @@ void addRecord(const Entry& e) {
     TwiliLog.info("[toast] queued {} #{} \"{}\"", kindName(e.kind), e.seq, entryText(e, false));
 }
 
-// Folds every pending item toast of `who` into one "merged" toast at the first one's place,
-// plus `extra` if given. A toast is never dropped, only merged.
+// Merges `who`'s pending item toasts (plus `extra`) into one at the first one's place.
 void mergeSender(const Sender& who, const Entry* extra) {
     Entry merged;
     merged.kind = Kind::Merged;
@@ -592,8 +589,7 @@ void noteMerge(const Sender& who, Source src, const std::vector<ItemCount>& item
         }
         return;
     }
-    // A teammate's broadcast merges to nothing once its GIVE_ITEMs landed; not for items gained
-    // outside a give or while we were apart.
+    // Nothing to summarize once its GIVE_ITEMs landed, unless gained outside a give or apart.
     Tally t{who};
     for (const ItemCount& ic : counted) {
         t.total += ic.count;
@@ -642,8 +638,7 @@ void tick() {
         return;
     }
 
-    // Over a pause screen is fine; over a loading screen or a cutscene (our own item-get window
-    // included) it is not.
+    // Fine over a pause screen, not over a loading screen or a cutscene (item-get included).
     const char* block = local::localTeleportBlocker();
     const bool hold = block != nullptr &&
                       (std::strcmp(block, "not-in-game") == 0 ||

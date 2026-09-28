@@ -7,8 +7,7 @@
 
 class dEvt_order_c;
 
-// Story sync: STORY_MOVE follow prompts, catch-up and repair, and the same-room pull-in
-// (STORY_EVENT). The tracker runs whether or not we are connected.
+// Story sync: follow prompts, catch-up and repair (STORY_MOVE), same-room pull-in (STORY_EVENT).
 namespace twili::story {
 
 // dEvt_control_c::setParam: an event order was accepted.

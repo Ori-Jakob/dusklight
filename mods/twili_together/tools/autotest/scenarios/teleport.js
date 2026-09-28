@@ -111,8 +111,7 @@ module.exports = [
                     ...meetIn(STAGES.linksHouse, "B"),
                     ...enableTeleport,
                     { op: "waitSignal", name: "leaving", from: "B", timeoutSec: 120 },
-                    // Sent at once, while B is still online: B refuses it as loading, or the
-                    // server (offline), our roster (offline) or our timeout ends it once B is gone.
+                    // Sent while B is still online: refused as loading, or ended once B is gone.
                     { op: "teleportTo", target: "B", expect: ["refused", "timeout"], timeoutSec: 30 },
                     { op: "waitNoDummies", timeoutSec: 60 },
                     { op: "walk", frames: 120, circle: true },

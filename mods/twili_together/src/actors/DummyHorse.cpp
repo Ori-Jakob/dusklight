@@ -59,8 +59,7 @@ u32 archiveNodeType(JKRArchive* archive, u16 fileIndex) {
     return 'BMDR';
 }
 
-// dRes_info_c's BCK path on a private file: the clip with its BAS. Each index is loaded once
-// (J3DAnmLoader swaps the key data in place).
+// dRes_info_c's BCK path on a private file; each index loads once (the loader swaps in place).
 mDoExt_transAnmBas* loadBckWithBas(JKRArchive* archive, u16 index) {
     if (!archive->isFileEntry(index)) {
         return nullptr;
@@ -245,8 +244,7 @@ cPhs_Step daDummyHorse_c::create() {
         TwiliLog.warn("[horse {}] create: entrySolidHeap failed", mClientId);
         return cPhs_ERROR_e;
     }
-    // daHorse_c::create's static set-up minus everything that talks to the game: no
-    // dComIfGp_setHorseActor, no paths, no collision, no acch.
+    // daHorse_c::create's set-up without setHorseActor, paths, collision or acch.
     m_modelData->getJointNodePointer(0)->setMtxCalc(m_mtxcalc);
     m_model->setUserArea(reinterpret_cast<uintptr_t>(this));
     for (u16 i = 0; i < kJointNum; i++) {
@@ -764,8 +762,7 @@ int daDummyHorse_draw(void* i_this) {
 
 }  // namespace
 
-// Group 5 as daHorse_c: suspend regions never freeze it and nothing searches it to talk or fight.
-// Drawn before the dummies: a rider adds itself to its horse's shadow.
+// Group 5 like daHorse_c (never suspended); drawn before the dummies for the rider's shadow.
 const ActorProfileDesc g_dummyHorseProfile = {
     .name = "TThorse",
     .priority_group = 9,

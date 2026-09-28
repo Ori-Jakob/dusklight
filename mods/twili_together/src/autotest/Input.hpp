@@ -1,7 +1,6 @@
 #pragma once
 
-// Keyboard input and window size for the game's own window, posted as window messages so the
-// host UI sees ordinary key presses. Windows only; the others report false.
+// Key presses and window size posted to the game's own window (Windows only).
 namespace twili::autotest::input {
 
 enum class Key { Left, Right, Up, Down, Confirm, Cancel, Next, Prev };

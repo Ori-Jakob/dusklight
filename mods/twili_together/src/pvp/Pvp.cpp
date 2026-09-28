@@ -19,8 +19,7 @@
 namespace twili::pvp {
 namespace {
 
-// Vanilla attack powers are tuned for enemies; PvP has its own table, never above kMaxHitDamage.
-// The Master Sword adds kMasterSwordBonus to a sword row, the wooden sword takes one off.
+// PvP damage per attack, at most kMaxHitDamage; the Master Sword adds kMasterSwordBonus.
 enum class Attack : uint8_t {
     Slash,       // normal, dash, stab and horseback cuts
     Finisher,    // combo finishers, back slice, mortal draw

@@ -9,9 +9,7 @@
 class dMap_c;
 class dMenuMapCommon_c;
 
-// Remote players on the maps. The minimap texture holds palette indices, so remote markers are
-// not drawn into it: they are direct-colour 2D triangles over the finished picture, in each
-// player's exact colour, projected with the transform the offscreen pass uses.
+// Remote players on the maps, as direct-colour triangles over the finished picture.
 namespace twili::ui::map_cursor {
 
 enum class Surface : uint8_t { Minimap = 0, PauseDmap = 1, Count };
@@ -93,8 +91,7 @@ struct Frame {
 // After the minimap picture, with its rect and alpha.
 void drawMinimap(dMap_c& map, f32 x, f32 y, f32 w, f32 h, u8 alpha);
 
-// Pause dungeon map: `cnv` maps a map position onto the map pane, mirror mode included. Called
-// for each floor the menu blends this tick with that floor's blend weight.
+// Pause dungeon map: `cnv` maps onto the pane; called per blended floor with its weight.
 using PauseCnvFn = void (*)(const void* ctx, f32 x, f32 z, f32* px, f32* py);
 void collectPauseDmap(s8 floorNo, f32 alphaRate, PauseCnvFn cnv, const void* ctx);
 // Just before the menu's own icons, with drawIcon's arguments.

@@ -1,22 +1,4 @@
-// Steps for item toasts (src/ui/ItemToasts.cpp), checked through its history: every toast it
-// decided on, whether it went to the overlay, and why it waits. Items are dItemNo_* numbers.
-//
-// itemToastSelfTest  items ([0x40, 0x41, 0x43, 0x44, 0x45, 0x46, 0x48, 0x4B, 0x20, 0x21, 0x26,
-//                    0x60, 0xF6, 0xFD])
-//     Per item: an icon of 16-64 px in the game files, the same checksum when read again, no two
-//     alike, the bottle with its glass layer, and a printable name from the game's text (the
-//     heart piece's is English).
-// itemToastOption  name (item_toasts | item_toasts_own), value (true)
-// clearItemToasts
-// testItemToast  item, name ("Tester"), r, g, b (255), count (1), saveTbl (-1)
-//     A live toast as if a teammate called `name` had picked the item up.
-// expectItemToast  kind, from (peer name or "self"), item, textContains, minCount, fromPacket,
-//                  hold, pushed (true), rendered (false), timeoutSec (30)
-//     rendered: pushed with an item:// icon of that item.
-// expectNoItemToast  the same fields, forSec (5)
-// expectItemToastCount  the same fields, count or min / max
-// expectItemToastItems  from, count
-// dumpItemToasts
+// Steps for item toasts, checked through their history; reference in the runner README.
 
 #include "autotest/AutoTestSteps.hpp"
 

@@ -90,8 +90,7 @@ bool remoteMapPose(const Client& c, MapPose& out) {
     return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
 }
 
-// The room-wide gates and per-client filters every surface shares. `gate` stays Drawn when the
-// filters ran.
+// Room-wide gates and per-client filters every surface shares; `gate` stays Drawn past them.
 void gatherSources(std::vector<Source>& out, std::vector<Skipped>& skipped, Gate& gate) {
     out.clear();
     skipped.clear();
@@ -143,8 +142,7 @@ void gatherSources(std::vector<Source>& out, std::vector<Skipped>& skipped, Gate
     }
 }
 
-// The exact colour; the outline is dark for light colours and light for dark ones. Dimming only
-// lowers alpha.
+// The exact colour with a contrasting outline; dimming only lowers alpha.
 void pickColours(const Source& s, u8 alpha, bool otherFloor, Drawn& d) {
     const f32 dim = otherFloor ? kOtherFloorAlpha : 1.0f;
     const u8 a = scaled(alpha, dim);
@@ -188,8 +186,7 @@ bool expandTri(const Vec2 v[3], f32 width, Vec2 out[3]) {
     return true;
 }
 
-// Moves an anchor outside the rect onto the rect inset by `margin`, along the ray from the rect
-// centre, pointing along that ray. False when inside.
+// Pins an anchor outside the rect onto its `margin` inset, along the ray from the centre.
 bool pinToRect(f32 x, f32 y, f32 w, f32 h, f32 margin, Vec2& anchor, Vec2& dir) {
     if (anchor.x >= x && anchor.x <= x + w && anchor.y >= y && anchor.y <= y + h) {
         return false;
@@ -211,8 +208,7 @@ void emit(Vec2 p, const u8 c[4]) {
     GXColor4u8(c[0], c[1], c[2], c[3]);
 }
 
-// A triangle in `fill` with a ring in `outline` around it; the fill never overlaps the ring, so
-// a translucent marker still shows its own colour.
+// A `fill` triangle in an `outline` ring it never overlaps, so translucent stays exact.
 void drawOutlinedTri(const Vec2 v[3], const u8 fill[4], const u8 outline[4]) {
     Vec2 o[3];
     if (!expandTri(v, kOutline, o)) {
@@ -356,8 +352,7 @@ const char* skipName(Skip s) {
     return "?";
 }
 
-// The offscreen pass: lookAt(eye=(cx, cz, -5000), at=(cx, cz, 5000), up=(0, -1, 0)) and an ortho
-// of +-worldW/2 (negated when mirrored) by +-worldH/2 over the whole texture.
+// As the offscreen pass: lookAt from z -5000 to 5000, up -y, ortho +-worldW/2 by +-worldH/2.
 Vec2 projectMinimap(const MinimapXform& t, f32 x, f32 z) {
     const f32 right = (t.mirror ? -0.5f : 0.5f) * t.worldW;
     const f32 top = 0.5f * t.worldH;
@@ -456,8 +451,7 @@ void drawMinimap(dMap_c& map, f32 x, f32 y, f32 w, f32 h, u8 alpha) {
 }
 
 void collectPauseDmap(s8 floorNo, f32 alphaRate, PauseCnvFn cnv, const void* ctx) {
-    // Both blended floors come in the same tick, and the create-time call before the menu's
-    // first _move, so a new tick starts a new list.
+    // Both blended floors arrive in one tick, so a new tick starts a new list.
     const uint32_t tick = nowTick();
     if (!sPause.valid || sPause.tick != tick) {
         sPause.valid = true;

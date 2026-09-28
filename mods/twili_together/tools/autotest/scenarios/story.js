@@ -1,8 +1,4 @@
-// Story sync; steps in StepsStory.cpp.
-//
-// The capture is a chain of arrival demos: South Faron point 20 on layer 8 starts 'demo04_01',
-// which exits to the cell (R_SP107 point 25, SAVEREQ), then point 24 (the wake-up), then point 0.
-// triggerStory "arrival" performs Ordon Spring's exit to point 20, as the game does.
+// Story sync. The capture: South Faron point 20 (layer 8) -> the cell -> point 24 -> point 0.
 
 const { STAGES, COMMON_CVARS, warp, waitStage, barrier, connect } = require("../lib");
 
@@ -163,8 +159,7 @@ module.exports = [
                 { op: "storyPrompts", value: false },
                 waitStage(southFaron),
                 { op: "expectLocalForm", form: "human" },
-                // The user's broken pair: the teammate's capture wrote these, this player never
-                // went through it.
+                // A broken save: the teammate's capture wrote these, this player never went through it.
                 { op: "setEventBit", no: F_0630 },
                 { op: "setTransformLevel", level: 0 },
                 { op: "expectConsistent", value: false, segment: "captured" },

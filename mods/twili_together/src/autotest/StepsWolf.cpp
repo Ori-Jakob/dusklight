@@ -1,28 +1,4 @@
-// Steps for the player's form, remote wolves, Midna on their back and remote transformations'
-// effects (actors/DummyPlayer.cpp, actors/DummyMidna.cpp, fx/RemoteTransformFx.cpp).
-//
-// setForm  form (wolf | human)
-//     The form daAlink_c::create spawns in on the next stage load: follow with a warp.
-// transform  form (wolf), trace (false), timeoutSec (30)
-//     Done once Link is in that form. With trace, every stage must show and every emitter the
-//     planner expects for what PLAYER_UPDATE sends must exist.
-// expectLocalForm  form (wolf)
-// expectRemoteForm  form (wolf), body (form | hidden), count (1), timeoutSec (30)
-// expectCleanAnims  frames (120), maxRefused (0)
-// setMidna  ride (true), visible (true), timeoutSec (20)
-//     visible:true in the light world sets transform level 3 (a tired Midna); visible:false
-//     needs a light-world stage.
-// expectRemoteMidna  mode (drawn | shadow | none), upper, hairHand, leftHand, rightHand, tired,
-//                    maxRefused (0), count (1), frames (0), timeoutSec (20)
-// transformFxSelfTest
-// expectRemoteTransformFx  form (wolf), maxLag (1), minSilhouette (1), fur (true),
-//                          maxAnchorErr (50), skip ([] of A | swap | C), hidden (false),
-//                          anchorSource (0), timeoutSec (60)
-//     The first peer's next whole transformation, as sent and as its dummy replayed it.
-// expectNoTransformFx  frames (120)
-// expectDummyTransformFx  emitters (mask of 1 << TfEmitter), tev, silhouette, anchorSource,
-//                         frames (0), timeoutSec (20)
-// waitRemoteTransformPhase  phase (A | swap | C), timeoutSec (60)
+// Steps for forms, remote wolves, Midna and transformation effects; reference in the runner README.
 
 #include "autotest/AutoTestSteps.hpp"
 
@@ -443,8 +419,7 @@ bool skipsStage(const nlohmann::json& step, const char* stage) {
     return std::find(it->begin(), it->end(), stage) != it->end();
 }
 
-// The peer, the transformations its stream and its dummy had shown when the step began, and the
-// tick both had shown the end of the next one.
+// The peer and its transformation counts when the step began; the tick both showed the end.
 struct RemoteTransformWatch {
     uint32_t clientId = 0;
     uint16_t wireBase = 0;

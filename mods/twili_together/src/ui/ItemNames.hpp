@@ -3,8 +3,7 @@
 #include <cstdint>
 #include <string>
 
-// Item names from the game's own message archive (so a PAL game shows its own names), English as
-// the fallback.
+// Item names from the game's own message archive, English as the fallback.
 namespace twili::ui {
 
 // UTF-8, never empty. `saveTbl` picks the stage-specific names (the Snowpeak Ruins map).

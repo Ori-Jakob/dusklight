@@ -4,8 +4,7 @@
 #include <string>
 #include <vector>
 
-// Name tags over remote players and cards over their unridden horses, drawn under the HUD from a
-// GfxService stage callback once per presented frame.
+// Name tags over remote players and cards over their horses, drawn under the HUD each frame.
 namespace twili::ui::name_tags {
 
 bool install();
@@ -27,8 +26,7 @@ const std::vector<Probe>& drawn();
 uint32_t frameCount();
 const char* lastGate();
 
-// The card over `clientId`'s horse, "<owner>'s <horse>", "" while none shows; the second line of
-// its tag, the horse's name while it rides her.
+// The card over `clientId`'s horse ("" when none) and its tag's second line (while riding).
 std::string horseCardText(uint32_t clientId);
 std::string riderTagLine2(uint32_t clientId);
 

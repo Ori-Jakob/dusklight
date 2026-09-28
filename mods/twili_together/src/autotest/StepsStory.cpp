@@ -301,8 +301,7 @@ std::optional<bool> catchUp(StepContext& ctx) {
     return true;
 }
 
-// The capture chain stops in the cell at SAVEREQ, d_GameOver's "Save?" menu: cancel it, or pick
-// "No" with stick down + A if cancelling is not offered.
+// The capture ends at d_GameOver's "Save?" menu: cancel it, or pick "No" (stick down + A).
 std::optional<bool> dismissSaveRequest(StepContext& ctx) {
     const story::Instance* in = story::tracker().lastInstance();
     const bool saveReq =

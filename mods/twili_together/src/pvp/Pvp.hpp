@@ -11,9 +11,7 @@ class daAlink_c;
 class dCcD_GObjInf;
 class fopAc_ac_c;
 
-// PvP (room setting pvpMode). The attacker's game decides a hit landed (our weapon touched a
-// dummy's TG-only hurtbox) and sends DAMAGE_PLAYER; the victim plants it as a TG hit on its own
-// Link (PlantedHit.cpp), so its damage code can only make it milder.
+// PvP: the attacker's game decides a hit, the victim plants it on its own Link (PlantedHit.cpp).
 namespace twili {
 
 struct Client;

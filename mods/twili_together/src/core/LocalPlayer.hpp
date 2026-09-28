@@ -16,8 +16,7 @@ bool isSettledOnGround(daAlink_c* link);
 // Settled on a floor that starts no restart (pit, fog, quicksand, lava).
 bool onSafeFloor(daAlink_c* link);
 
-// Why the local player cannot be moved now, or nullptr: "not-in-game", "loading", "menu",
-// "cutscene", "down", "riding", "busy", "carrying".
+// Why the local player cannot be moved now ("loading", "cutscene", "riding", ...), or nullptr.
 const char* localTeleportBlocker();
 
 // Rooms the warp tool can load; start point -1 needs the room's PLYR chunk.

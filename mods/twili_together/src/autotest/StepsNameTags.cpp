@@ -1,10 +1,4 @@
-// Steps for name tags (src/ui/NameTags.cpp), read from what the last presented frame drew.
-//
-// expectNameTag  name, shown (true), gate (the reason nothing is drawn, with shown false),
-//                line2, rgb (the frame's "#RRGGBB"), holdTicks (0), timeoutSec (10)
-// viewPeer  name, yaw (0), beyond (200)
-//     Moves the local player past the peer's dummy, seen from our camera, so the peer shows yaw
-//     degrees off the centre (for captures).
+// Steps for name tags; reference in the runner README.
 
 #include "autotest/AutoTestSteps.hpp"
 
@@ -100,8 +94,7 @@ std::optional<bool> viewPeer(StepContext& ctx) {
         ctx.fail("viewPeer: no peer dummy, player or view");
         return false;
     }
-    // The camera stays put for a moment and turns to us: standing `beyond` past the peer on a
-    // line turned `yaw` degrees from it, the peer shows that far off the centre.
+    // `beyond` past the peer on a line `yaw` degrees off: the peer shows that far off centre.
     const cXyz eye = view->lookat.eye;
     f32 dx = dummy->current.pos.x - eye.x;
     f32 dz = dummy->current.pos.z - eye.z;

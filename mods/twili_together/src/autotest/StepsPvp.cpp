@@ -1,26 +1,4 @@
-// Steps for PvP (pvp/, the dummy's hurtbox in actors/DummyPlayer.cpp). Life values are quarter
-// hearts: the saved life plus the change the meter has not applied yet.
-//
-// setLife  value (12)
-// markLife
-//     Remembers our life for expectLifeDelta.
-// expectLife  value | min | max, timeoutSec (10)
-// expectLifeDelta  delta, frames (60), timeoutSec (10)
-//     Until life - marked == delta; fails at once past it. delta 0 must hold for `frames` ticks.
-// approachDummy  dist (110)
-//     Our Link `dist` in front of the first peer's dummy, facing it, held there for 10 ticks.
-// sendPvpHit  target, kind ("sword"), damage (2), knockback ("light"), dirY, blocked (false)
-//     A real DAMAGE_PLAYER without our collision pass or cooldown; viewSeq from our dummy of it.
-// expectPvpResult  target, result (string or list), reason, damage, timeoutSec (10)
-//     The DAMAGE_RESULT of the last hit we sent to `target`.
-// expectPvpStats  target, sent, applied, blocked, dropped, refused, damage, timeoutSec (0)
-//     Our counters for hits on `target`; only the fields given are checked.
-// expectPvpTaken  count (applied + blocked), blocked, dropped, damage, reason, timeoutSec (0)
-// expectDummyHurtbox  registered (true), guard, timeoutSec (0)
-//     Whether the first peer's dummy registered its PvP hurtbox this tick (in shield mode).
-// expectReaction  knockback ("light", "knockdown" or "none"), timeoutSec (10)
-//     Until our Link plays that reaction (PROC_DAMAGE / PROC_WOLF_DAMAGE, or
-//     checkCameraLargeDamage); "none": neither, and the i-frames are over.
+// Steps for life and PvP; reference in the runner README.
 
 #include "autotest/AutoTestSteps.hpp"
 

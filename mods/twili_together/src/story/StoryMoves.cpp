@@ -11,8 +11,7 @@ namespace twili::story {
 
 // Labels and follower recipes, not gates: an unmatched move still qualifies on its effects.
 const StoryMoveDef kStoryMoves[] = {
-    // The capture: a chain of arrival demos ending in the cell. Followers load point 24 (the
-    // wake-up), where phase_1 sets transform level 0.
+    // The capture: arrival demos ending in the cell; followers load point 24, the wake-up.
     {"faron-capture", "{name} was captured", "the Hyrule Castle prison cell", "F_SP108", -1,
         "R_SP107", 0, nullptr, 24, Form::Wolf, false, true},
     // Midna warps Link from the castle to twilight Ordon (M_014).

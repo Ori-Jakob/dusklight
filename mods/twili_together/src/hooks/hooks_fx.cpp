@@ -122,7 +122,7 @@ void onSetHitMarkPost(ModContext*, void* args, void*, void*) {
     }
 }
 
-// The sound plays where Beacon noted it: the hit point, the clawshot tip or the ball.
+// The sound plays at the hit point, the clawshot tip or the ball.
 void onStartHitItemSEPost(ModContext*, void* args, void*, void*) {
     perf::count(Target::HitItemSe);
     const ScopeEntry scope = Scope::top();
@@ -200,8 +200,7 @@ void onFastCreatePost(ModContext*, void* args, void*, void*) {
 // The Link whose clothes archive this loadModelDVD call frees.
 daAlink_c* s_freeingLink = nullptr;
 
-// A change requested while the previous clothes archive still mounts would destroy the mount
-// command and free the heap the DVD thread decompresses into: wait for it (timer stays 3).
+// Wait while the previous clothes archive still mounts (its heap is in use); timer stays 3.
 HookAction onLoadModelDVDPre(ModContext*, void* args, void* retval, void*) {
     perf::count(Target::LoadModel);
     auto* link = mods::arg<daAlink_c*>(args, 0);
@@ -217,8 +216,7 @@ HookAction onLoadModelDVDPre(ModContext*, void* args, void* retval, void*) {
     return HOOK_CONTINUE;
 }
 
-// field_0x06ec is a shape of the body just freed; setSelectEquipItem would write into the next
-// archive loaded there (Ordon clothes -> Zora armor crash). It skips a null shape.
+// field_0x06ec points into the freed body; null it (Ordon clothes -> Zora armor crash).
 void onLoadModelDVDPost(ModContext*, void* args, void*, void*) {
     auto* link = mods::arg<daAlink_c*>(args, 0);
     if (s_freeingLink == link) {

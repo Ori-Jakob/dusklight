@@ -1,5 +1,4 @@
-// How remote players look (actors/DummyPlayer.cpp, presence/PlayerUpdate.cpp). Steps in
-// src/autotest/StepsFidelity.cpp.
+// How remote players look.
 
 const { STAGES, ITEMS, COMMON_CVARS, tt, waitStage, barrier, meetIn, connect } = require("../lib");
 
@@ -183,8 +182,7 @@ module.exports = [
         ],
     },
     {
-        // Regression: a clothes change used to corrupt the next archive loaded into the freed
-        // body's heap (Ordon clothes -> Zora armor crashed in initModel).
+        // Regression: Ordon clothes -> Zora armor crashed in initModel (freed archive heap).
         name: "clothes-solo",
         description: "the local player changes clothes repeatedly with no peer (port crash regression)",
         timeoutSec: 400,

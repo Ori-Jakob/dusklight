@@ -152,8 +152,7 @@ void Session::manageDummyActors() {
     }
 }
 
-// Deletes the puppet of `it`, or forgets it if it never executed (a create under way deletes
-// itself once its client is gone).
+// Deletes the puppet of `it`, or forgets one that never executed (it deletes itself).
 static std::map<uint32_t, fpc_ProcID>::iterator dropActor(std::map<uint32_t, fpc_ProcID>& actors,
     std::map<uint32_t, fpc_ProcID>::iterator it, std::set<uint32_t>& seen) {
     if (fopAcM_IsExecuting(it->second)) {
@@ -201,8 +200,7 @@ void Session::manageHorsePuppets(bool stageReady) {
         }
     }
 
-    // Live: its dummy is here and its horse was shown since. Parked: its owner is in another
-    // stage and left the horse in ours.
+    // Live: its dummy is here. Parked: its owner left the horse in our stage.
     auto wanted = [this](uint32_t id, const Client& c, bool& parked) {
         parked = false;
         if (clientHasPlayerInCurrentLayer(c)) {
@@ -226,8 +224,7 @@ void Session::manageHorsePuppets(bool stageReady) {
             ++it;
             continue;
         }
-        // Its owner just changed scene: the puppet waits hidden for the horse place or the next
-        // keyframe instead of loading Horse.arc again.
+        // Owner changed scene: wait hidden instead of loading Horse.arc again.
         if (clientIt != mClients.end() && now - mHorseWantedAt[it->first] < kHorseGrace) {
             ++it;
             continue;

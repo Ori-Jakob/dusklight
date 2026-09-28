@@ -1,13 +1,8 @@
-// PvP (pvp/, the dummy's hurtbox in actors/DummyPlayer.cpp). Steps in src/autotest/StepsPvp.cpp;
-// room options through setRoomOption / waitRoomOption.
-//
-// Damage values are the PvP table's (quarter hearts): a normal slash of the Ordon sword takes 2,
-// doubled for a wolf; a hit never takes more than 4.
+// PvP; damage in quarter hearts: an Ordon sword slash takes 2 (doubled on a wolf), at most 4.
 
 const { STAGES, COMMON_CVARS, barrier, meetIn, connect } = require("../lib");
 
-// Deterministic damage whatever the user's config says; pvp-rules turns the difficulty options up
-// on the victim to show PvP ignores them.
+// Fixed difficulty; pvp-rules turns it up on the victim to show PvP ignores it.
 const CVARS = [...COMMON_CVARS, "game.damageMultiplier=1", "game.instantDeath=false",
                "game.infiniteHearts=false"];
 // Every instance sets it: whichever one owns the room pushes it.
@@ -15,8 +10,7 @@ const room = (name, value) => [
     { op: "setRoomOption", name, value },
     { op: "waitRoomOption", name, value, timeoutSec: 20 },
 ];
-// One press of B (PAD_BUTTON_B), then time for the cut to finish. With the sword sheathed the
-// press only draws it, so every attacker presses once (drawSword) before its first real swing.
+// One B press and time for the cut; the first press only draws a sheathed sword.
 const swing = [{ op: "walk", frames: 1, stickX: 0, stickY: 0, buttons: 0x200 }, { op: "wait", frames: 45 }];
 const drawSword = swing;
 // More than the victim's 30 ticks of i-frames after a hit.
@@ -46,8 +40,7 @@ module.exports = [
                     ...room("pvpMode", true),
                     ...barrier("pvp-on", "B"),
                     ...barrier("b-life-12", "B"),
-                    // 12 -> 8 (a light hit) -> 4 (a knockdown), then the floor keeps B at one
-                    // heart.
+                    // 12 -> 8 (light) -> 4 (knockdown), then the floor keeps B at one heart.
                     { op: "sendPvpHit", target: "B", damage: 4, knockback: "light" },
                     { op: "expectPvpResult", target: "B", result: "applied", damage: 4 },
                     recover,

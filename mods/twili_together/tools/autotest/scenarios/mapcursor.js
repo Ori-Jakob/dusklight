@@ -1,8 +1,4 @@
-// Remote players on the maps (src/ui/MapCursors.cpp, steps in src/autotest/StepsMapCursor.cpp).
-//
-// Colours are checked against the literal colour each instance was configured with, so the
-// whole path counts: the sender's settings, HANDSHAKE, the server, client state, the draw.
-// Every channel has its low three bits set, so any RGB555 step on the way would show.
+// Map markers, checked against each instance's literal colour (low bits set to catch RGB555).
 
 const { STAGES, COMMON_CVARS, tt, barrier, meetIn, connect } = require("../lib");
 
@@ -23,8 +19,7 @@ const room = (name, value) => [
 const seesPeer = (name, extra = {}) =>
     ({ op: "expectMapCursor", target: other(name), color: COLORS[other(name)], ...extra });
 
-// Twelve injected players whose ids are all equal mod 6 (the old palette scheme gave them one
-// shared slot), in a ring around us, plus one far away that must be pinned to the map's edge.
+// Twelve injected players with ids equal mod 6 in a ring, plus a far one pinned to the edge.
 const RING = Array.from({ length: 12 }, (_, i) => ({
     id: 600 + 6 * i,
     color: "#" + [0x17 + 19 * i, 0xEF - 17 * i, 0x2B + 23 * i]

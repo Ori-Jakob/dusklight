@@ -1,17 +1,4 @@
-// Steps for how remote players look (actors/DummyPlayer.cpp, presence/PlayerUpdate.cpp).
-//
-// setClothes  item (0x2E Ordon; 0x2F Kokiri, 0x30 Magic Armor, 0x31 Zora), timeoutSec (20)
-//     As the collection screen does; done once the new body is bound.
-// setBoots  on (true)
-//     Iron boots on (assigned to X) or off; done once that has held for 10 ticks.
-// patchPlayerUpdate  patch ({}), packets (60)
-//     Merges `patch` into our next `packets` PLAYER_UPDATEs, each one a keyframe.
-// assignItemX  item
-//     An owned item (dItemNo_*) on the X button (a walk step's buttons: X = 0x400).
-// expectDummyLook  clothes, casualHead, heavyBoots, zoraMask, lantern, heldItem, basePack,
-//                  basePackAnm, standIn, ground, hidden, armorDrained, armorSettled, maxMissing;
-//                  frames (0), timeoutSec (20)
-//     The first peer dummy in our layer shows every field given, then for `frames` more ticks.
+// Steps for how remote players look; reference in the runner README.
 
 #include "autotest/AutoTestSteps.hpp"
 

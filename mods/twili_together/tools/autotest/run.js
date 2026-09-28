@@ -30,7 +30,7 @@ const TEST_CONFIG = {
     "backend.skipPreLaunchUI": false,
     "backend.wasPresetChosen": true,
 };
-const STRIPPED_KEY_PREFIXES = ["beacon.", "mod.", "actionBindings."];
+const STRIPPED_KEY_PREFIXES = ["mod.", "actionBindings."];
 const SEED_CACHES = ["pipeline_cache.db", "dawn_cache.db"];
 const NET_OPS = new Set(["connect", "disconnect", "waitConnected", "waitPeers", "waitDummies",
     "waitNoDummies", "checkDummies", "expectPeers", "signal", "waitSignal"]);
@@ -212,8 +212,7 @@ async function startServer(outDir, extraEnv = {}, ports = null) {
     return { proc, port, tcpPort, logPath, extraEnv, outDir };
 }
 
-// scenario.restartServer: once the relay logs AUTOTEST_SIGNAL `afterSignal`, it is killed and
-// started again on the same ports `downMs` later; the clients have to find it on their own.
+// scenario.restartServer: kill the relay on that AUTOTEST_SIGNAL, restart it `downMs` later.
 async function watchServerRestart(scenario, server) {
     const spec = scenario.restartServer;
     if (!spec || server.restarted || server.restarting) return;

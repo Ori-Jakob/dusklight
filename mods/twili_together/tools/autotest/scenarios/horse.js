@@ -1,11 +1,4 @@
-// Epona sync (horse/, actors/DummyHorse.cpp): each remote player's horse as a puppet posed from
-// its PLAYER_UPDATE "o*" groups, ridden by its dummy, parked where its owner left it, never
-// rideable here, with a card ("B's Lilly") or, while ridden, the horse's name under the rider's
-// name, and a slight tint of the owner's colour on the mane. Steps in src/autotest/StepsHorse.cpp.
-//
-// Faron Field (F_SP121) places a horse on a fresh save; spawnHorse moves it in front of Link.
-// Its Bokoblin would knock a rider off (clearEnemies deletes it first).
-// The scenarios mark HORSE_HOLD <what> (on A) and wait where a window capture is worth taking.
+// Epona sync; Faron Field has a horse on a fresh save; HORSE_HOLD <what> (on A) marks captures.
 
 const { STAGES, COMMON_CVARS, tt, barrier, meetIn, connect, warp, waitStage } = require("../lib");
 
@@ -13,8 +6,7 @@ const RED = "e53935";
 const colorCvars = (hex) => [tt("color", hex)];
 // B's save calls its horse Lilly (the design's example: "Dad's Lilly").
 const B_START = { ...STAGES.faronField, horseName: "Lilly" };
-// Cards and tags are only drawn on screen: the checks that read them and the window captures run
-// with the camera frozen on the horse (horseCamera hold, released after).
+// Cards and tags are read from the screen: those checks hold the camera on the horse.
 const CAM = { target: "remote", back: 450, up: 320 };
 const onCamera = (steps, what, camera = CAM, sec = 4) => [
     { op: "horseCamera", ...camera, hold: true },

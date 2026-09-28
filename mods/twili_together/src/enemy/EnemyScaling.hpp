@@ -6,8 +6,7 @@
 
 class fopAc_ac_c;
 
-// Enemy health multiplier (room setting enemyHealthMultiplier): every client applies the room's
-// percentage to its own enemies. No packets.
+// Enemy health multiplier: each client applies the room's percent to its own enemies.
 namespace twili::enemy_scaling {
 
 // fopAc_Create returned cPhs_COMPLEATE_e.

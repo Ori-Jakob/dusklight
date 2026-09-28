@@ -1,8 +1,6 @@
 #pragma once
 
-// A story move is a stage change requested while a story event ran. Teammates elsewhere may
-// follow: the destination entrance loads with their own synced flags, so the game builds the
-// state a reload there would. Story segments say, from synced flags alone, where a player may be.
+// A story move is a stage change requested while a story event ran.
 
 #include <nlohmann/json.hpp>
 

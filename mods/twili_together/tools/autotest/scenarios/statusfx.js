@@ -1,9 +1,4 @@
-// Status effects on remote players (fx/StatusFx.cpp, the "sx"/"sf" groups of PLAYER_UPDATE,
-// DummyPlayer updateRemoteStatus): B gets a status the way the game gives it, A checks its dummy
-// of B. Steps in src/autotest/StepsStatusFx.cpp.
-//
-// The ice block and the sparks are scene effects South Faron's pack lacks: checks there take
-// "ifAvailable"; status-ice and status-elec run where the pack has them.
+// Status effects on remote players; South Faron lacks the ice block and sparks (ifAvailable).
 
 const { STAGES, COMMON_CVARS, warp, waitStage, barrier, meetIn, connect } = require("../lib");
 
@@ -15,8 +10,7 @@ const WOOD_SHIELD = 0x2a;
 const NO_SHIELD = 0xff;
 // One press of B draws the sword, which puts the shield on the arm.
 const drawSword = [{ op: "walk", frames: 1, stickX: 0, stickY: 0, buttons: 0x200 }, { op: "wait", frames: 45 }];
-// Packs with the ice block (Snowpeak, in snow Link sinks into) and the sparks (Lakebed; room 0
-// starts under water). Snowpeak room 1 point 1 is no good: the dummy trails by ~800 units there.
+// Packs with the ice block (Snowpeak) and the sparks (Lakebed, room 0 starts under water).
 const SNOWPEAK = { stage: "F_SP114", room: 1, point: 5 };
 const LAKEBED = { stage: "D_MN01", room: 1, point: 0 };
 const room = (name, value) => [
@@ -44,8 +38,7 @@ const meetInPlace = (s, other) => [
     ...barrier(`met-${s.stage}-${s.room}`, other),
 ];
 
-// A and B meet in `start`, run their steps and finish together; `pre(name)` runs before they
-// connect, `before` once connected.
+// A and B meet in `start` and finish together; `pre(name)` runs before connecting.
 const duo = (name, description, { a, b, start = STAGES.southFaron, timeoutSec = 300, pre = () => [], before = [], meet = meetIn }) => ({
     name,
     description,

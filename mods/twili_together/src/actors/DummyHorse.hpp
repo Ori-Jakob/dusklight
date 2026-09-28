@@ -1,9 +1,6 @@
 #pragma once
 
-// A remote player's Epona: a daHorse_c that never runs daHorse_c's create, execute or draw and
-// never becomes dComIfGp_getHorseActor(). It reuses daHorse's pure pose members on models from
-// a privately mounted Horse.arc, has no attention flags and no collision, so only our own Epona
-// can be ridden. Live, its owner's dummy poses it; parked, it stands where the owner's save says.
+// A remote player's Epona: daHorse_c pose members on a private Horse.arc, never the game's horse.
 
 #include "fx/PlayerRecolor.hpp"
 #include "presence/RemotePose.hpp"

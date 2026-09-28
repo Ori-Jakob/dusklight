@@ -1,6 +1,4 @@
-// Scales the health pool (not incoming damage), so wolf bites and clawshot pulls scale too. Live
-// enemies are rescaled whenever the percent changes, keeping their health fraction; health an
-// enemy gives itself again (getting up, reviving) is scaled by the watch in tick().
+// Scales the health pool, not damage; live enemies rescale keeping their health fraction.
 
 #include "enemy/EnemyScaling.hpp"
 
@@ -37,8 +35,7 @@ s16 scaledValue(int v, int pct) {
     return clampHealth((v * pct + 50) / 100);
 }
 
-// Enemies whose health really decides when they die; each entry was checked for the create-time
-// assignment, every later write to health and the damage paths.
+// Enemies whose health decides when they die (each checked for every write to health).
 bool isHealthScalable(fopAc_ac_c* ac) {
     const u8 arg0 = fopAcM_GetParam(ac) & 0xFF;
     switch (fopAcM_GetName(ac)) {
@@ -77,8 +74,7 @@ bool isHealthScalable(fopAc_ac_c* ac) {
     }
 }
 
-// Health of 1 or less is a dying state many enemies test for: left alone, and a lower percent
-// never rounds a live enemy into it.
+// Health <= 1 is a dying state: left alone, and never rounded into by a lower percent.
 void rebake(Tracked& t, int pct) {
     fopAc_ac_c* ac = t.actor;
     if (ac->health > 1) {

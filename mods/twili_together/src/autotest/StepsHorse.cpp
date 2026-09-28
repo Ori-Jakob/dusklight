@@ -1,36 +1,4 @@
-// Steps for Epona sync (horse/, actors/DummyHorse.cpp).
-//
-// spawnHorse  dist (250), side (0), timeoutSec (30)
-//     Our Epona present and shown `dist` in front of our Link (`side` to his right), facing where
-//     he faces; created (HORSE, param 0x00FF: no path) when the stage has none.
-// rideHorse  ride (true), mode ("force" or "mount"), timeoutSec (20)
-//     force: the horse-start sequence; mount: the real mount from beside her; ride false:
-//     procHorseGetOffInit. Done once checkHorseRide() matches and no mount/dismount runs.
-// expectLocalHorse  present (true), ridden, timeoutSec (5)
-//     Our horse as shown (not waiting to be called, no demo hiding it) and ridden.
-// setHorseHidden  hidden (true)
-//     Sets or clears our horse's call wait (FLG0_NO_DRAW_WAIT) without a stage change.
-// expectRemoteHorse  count (1), name, ridden, parked, maxDist (400), maxSeatDist (60),
-//                    card (string or false), tagLine2, onScreen (false), tint, vanilla,
-//                    hueGain (1), frames (0), timeoutSec (20)
-//     At least `count` peers have a shown puppet (never our own horse, no attention flags, no
-//     refused clip) near their latest horse positions or at their horse place; ridden: the
-//     peer's dummy sits within maxSeatDist of the saddle; card / tagLine2: what the tag pass
-//     shows (onScreen: also drawn in the last frame); tint: the mane holds the owner's colour.
-//     Holds for `frames` more ticks.
-// expectNoRemoteHorse  timeoutSec (10)
-//     No peer's puppet is shown and no horse card drawn.
-// expectRidePrompt  target ("own" or "remote"), frames (60), dist (110)
-//     Our Link `dist` from the horse's left flank, facing it. own: GET_ON on our horse within
-//     `frames`; remote: for `frames` ticks neither the prompt nor the ride is ever the puppet.
-// expectNotRiding  frames (30)
-//     For `frames` ticks our Link rides nothing, never a puppet.
-// clearEnemies  radius (8000)
-//     Deletes every enemy near our Link (Faron Field's Bokoblin knocks a rider off).
-// horseCamera  target ("remote", "own" or "both"), back (250), up (200), side (0), height (130),
-//              hold (false) | release (true)
-//     Turns our Link toward the target and puts the camera behind him looking at it; hold keeps
-//     the view (a CameraService operator) until a release.
+// Steps for Epona sync; reference in the runner README.
 
 #include "autotest/AutoTestSteps.hpp"
 
@@ -93,8 +61,7 @@ cXyz jointPos(J3DModel* model, int joint) {
     return out;
 }
 
-// From a step the current layer is whatever the main loop left; an actor in another layer
-// is drawn twice a frame.
+// A step runs in whatever layer the main loop left; an actor in another is drawn twice.
 class ScopedPlayerLayer {
 public:
     explicit ScopedPlayerLayer(daAlink_c* link) : mSaved(fpcLy_CurrentLayer()) {

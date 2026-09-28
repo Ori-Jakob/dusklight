@@ -1,7 +1,4 @@
-// Every client runs its own enemies; what is shared is the moment an allowlisted one dies:
-// its own death puff and a game-logic delete request within kPairWindow of each other (or an
-// explicit mark for deaths without a puff). The receiver deletes its copy the way leaving a room
-// does and spawns a drop-less puff, so drops, switches and demos stay the killer's.
+// Shares the death of an allowlisted enemy; the receiver deletes its copy with a drop-less puff.
 
 #include "enemy/EnemySync.hpp"
 
@@ -91,8 +88,7 @@ void logKill(const char* what, const Kill& k) {
     TwiliLog.info("[enemy] {} ({})", what, keyText(k.key));
 }
 
-// The ENEMY group also holds bosses and mini-bosses: an explicit allowlist, each entry checked
-// for a death that puffs and deletes and for puffs that are no death.
+// An explicit allowlist: the ENEMY group also holds bosses and mini-bosses.
 bool isKillSyncable(s16 procName, u32 params) {
     switch (procName) {
     case fpcNm_E_OC_e:   // Bokoblin (its fall death has no puff: markDefeated)
@@ -180,8 +176,7 @@ Record* live(const fopAc_ac_c* ac) {
 
 enum class Apply { Done, NoMatch, Deferred };
 
-// Removing an enemy under a local cutscene, or one Link holds or bites, would pull it out from
-// under that code. Why to wait, or nullptr.
+// Why removing the enemy must wait (our cutscene, Link holds or bites it), or nullptr.
 const char* deferReason(fopAc_ac_c* ac) {
     if (dComIfGp_event_runCheck()) {
         switch (dComIfGp_event_getMode()) {
@@ -212,8 +207,7 @@ Apply tryApply(const Pending& p, const char*& why) {
         if (r.reported || r.remoteRemoved || !sameKey(r.key, p.kill.key)) {
             continue;
         }
-        // Before the IsExecuting skip: an accepted delete leaves the layer at once, and an
-        // unconsumed kill would remove the enemy when it respawns.
+        // Before the IsExecuting skip: an unconsumed kill would remove a respawned enemy.
         const bool executing = fopAcM_IsExecuting(id);
         if (r.defeated || (!isUnset(r.deleteAt) && !executing) ||
             (!isUnset(r.disappearAt) && now - r.disappearAt < kStillDying))
@@ -240,8 +234,7 @@ Apply tryApply(const Pending& p, const char*& why) {
             return Apply::Deferred;
         }
         r.remoteRemoved = true;
-        // fopAcM_createDisappear's parameters with enemy id 0xFF, which skips the item roll; a
-        // queued create in the enemy's layer, since we run between frames.
+        // createDisappear's parameters, enemy id 0xFF (no item roll), queued in the enemy's layer.
         if (layer != nullptr) {
             const u32 prm = (0xFFu << 16) | (u32(p.kill.fxSize) << 8) | p.kill.fxType;
             layer_class* saved = fpcLy_CurrentLayer();

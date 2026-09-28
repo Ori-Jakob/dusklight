@@ -1,29 +1,4 @@
-// Steps for status effects on remote players (fx/StatusFx.cpp, the "sx" and "sf" groups of
-// presence/PlayerUpdate.cpp, DummyPlayer updateRemoteStatus).
-//
-// forceStatus  kind, value, frames, timeoutSec (5)
-//     Puts a status on the local player the way the game does:
-//       "freeze"      procDamageInit / procWolfDamageInit: an ice attack's freeze (costs a
-//                     quarter heart every 45 ticks)
-//       "burn"        initFirePointDamageEffectAll: four fire points
-//       "shieldBurn"  field_0x2fcb = value (120); fails unless a wooden shield is in hand
-//       "douse"       clearWoodShieldBurnEffect
-//       "elec"        procCoElecDamageInit, retried while the event is refused
-//       "hurt"        setDamagePoint(value (1))
-//       "chill"       mIceDamageWaitTimer = value (10) on every tick for `frames` (30) ticks
-//       "extinguish"  clearFirePointDamageEffect(0..3)
-// expectLocalStatus  frozen, iceBlock, elec, armorDrained, firePoints, shieldBurnMin,
-//                    shieldBurnMax, shield, shieldInHand, damageTimerMin, sinkMin, sinkMax,
-//                    timeoutSec (1)
-//     statusfx::lastCaptured() and the local player; shield is the equipped one (255 none).
-// expectDummyStatus  frozen, iceBlock, thaws, fireMin, fireMax, fireEmittersMin, fireEmittersMax,
-//                    fireReceived, shieldBurnMin, shieldBurnMax, shieldBurnFx, shieldBurnOuts,
-//                    shieldItem, elec, elecFx, damageTimerMin, damageTimerMax, flashesMin,
-//                    iceWait, sinkMin, sinkMax, statusFlags; frames (0), timeoutSec (10)
-//     The first peer dummy in our layer; iceBlock and elecFx also take "ifAvailable" (whether
-//     this stage's particle pack has the effect).
-// statusFxPack  iceBlock, elec
-//     Logs whether this stage's particle pack has the ice block and the sparks.
+// Steps for status effects on remote players; reference in the runner README.
 
 #include "autotest/AutoTestSteps.hpp"
 

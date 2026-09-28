@@ -22,8 +22,7 @@ Prompt& slot(void* userData) {
     return s_prompts[reinterpret_cast<uintptr_t>(userData) % std::size(s_prompts)];
 }
 
-// The dialog closes itself after an action or a dismiss: forget it before running the callback,
-// which may open the next prompt.
+// Forget the closing dialog before the callback, which may open the next prompt.
 void onAccept(ModContext*, UiDialogHandle, void* userData) {
     Prompt& p = slot(userData);
     auto accept = std::move(p.props.onAccept);

@@ -2,8 +2,7 @@
 
 const { STAGES, COMMON_CVARS, connect, barrier, meetIn } = require("../lib");
 
-// Snowpeak's arrival point 1 lies in a suspend region (daSus_c): a dummy spawned there was
-// suspended like any NPC-group actor and stayed frozen at its spawn point.
+// Snowpeak point 1 is in a suspend region: a dummy spawned there used to stay frozen.
 const SNOWPEAK_TOP = { stage: "F_SP114", room: 1, point: 1 };
 const suspendSteps = (other) => [
     ...connect,
@@ -19,9 +18,7 @@ const suspendSteps = (other) => [
     { op: "quit" },
 ];
 
-// A reconnect's catch-up replays the whole queue: key deltas applied live before the drop were
-// applied again (2 keys became 4). Queued packets are numbered and applied once; a key picked up
-// while offline still arrives.
+// A reconnect's catch-up used to apply live key deltas again (2 keys became 4).
 const reconnectKeysA = [
     ...connect,
     ...meetIn(STAGES.forestTemple, "B"),
@@ -59,8 +56,7 @@ const reconnectKeysB = [
     { op: "quit" },
 ];
 
-// Wooden shields burn: personal while the room's shareWoodenShield is off, so a merge after a
-// reconnect must not bring back a burnt one; shared (the default), it does.
+// shareWoodenShield off: a merge must not bring back a burnt shield; on (default), it does.
 const WOOD_SHIELD = 0x2a;
 const NO_SHIELD = 255;
 const woodShieldA = [

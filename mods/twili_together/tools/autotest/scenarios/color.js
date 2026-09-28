@@ -1,8 +1,4 @@
-// The player colour: the host's colour control in the Twili-Together window and its live sync
-// (Session::tickSelfColor). Steps in src/autotest/StepsColor.cpp: the picker is driven with key
-// presses posted to the game window and checked through the colour setting.
-//
-// Scenarios log COLOR_HOLD <what> and wait where a window capture is worth taking.
+// Player colour and its live sync; COLOR_HOLD <what> marks a moment worth a window capture.
 
 const { STAGES, COMMON_CVARS, tt, barrier, meetIn, connect, waitStage } = require("../lib");
 
@@ -14,17 +10,14 @@ const colorCvars = (hex) => [tt("color", hex.slice(1).toLowerCase())];
 const other = (name) => (name === "A" ? "B" : "A");
 const hold = (what, sec = 3) => [{ op: "mark", msg: `COLOR_HOLD ${what}` }, { op: "wait", sec }];
 const key = (k, count = 1) => ({ op: "pickerKey", key: k, count });
-// What a peer must show for `name` once its colour is `rgb`: client state, the dummy's tint, the
-// map marker (name tags read the same client entry every frame).
+// What a peer shows for `name` in colour `rgb`: client state, dummy tint and map marker.
 const seesColor = (name, rgb, timeoutSec = 5) => [
     { op: "expectPeerColor", name, rgb, timeoutSec },
     { op: "expectDummyColor", name, rgb, timeoutSec },
     { op: "expectMapCursor", target: name, color: rgb, timeoutSec },
 ];
 
-// The picker: the square, the hue bar, the presets (8 a row), the colours used before (from the
-// second opening on), then Hex / Default / the value. Grabbed with confirm, the square moves 1/255
-// and the hue bar 1 degree a tap.
+// Picker layout: square, hue bar, presets (8 a row), recent colours, then Hex / Default.
 const PRESET = "#7CB342";
 const LATE = "#0A64C8";
 const bPicks = [
@@ -34,8 +27,7 @@ const bPicks = [
     { op: "expectColor", rgb: PRESET },
     ...barrier("b-preset", "A"),
     ...barrier("a-saw-preset", "A"),
-    // A held hue change, then cancel back to the grab's start right behind it: the last value
-    // has to go out although it comes inside the 250 ms throttle.
+    // A held hue change then a cancel: the last value goes out despite the 250 ms throttle.
     { op: "resetColorPushes" },
     key("up"), key("confirm"),
     { op: "pickerKey", key: "right", holdMs: 3000 },

@@ -1,7 +1,4 @@
-// Protocol tests for the Twili-Together relay server. Each test spawns a fresh server on
-// ephemeral ports and drives it with fake WebSocket and TCP clients, so no game is needed.
-//
-//   cd mods/twili_together/tools/server && npm test
+// Relay protocol tests with fake WebSocket and TCP clients (npm test).
 
 const { test } = require("node:test");
 const assert = require("node:assert/strict");

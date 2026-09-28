@@ -29,8 +29,7 @@
 namespace twili::story {
 namespace {
 
-// An instance stays open this long after it ends: a tag's actionNext or an auto-next reset
-// still continues it.
+// An instance stays open this long after it ends, so a tag's actionNext still continues it.
 constexpr uint32_t kContinueTicks = 30;
 // An actor may set the next stage just as its event ends.
 constexpr uint32_t kDepartAfterEndTicks = 3;
@@ -217,8 +216,7 @@ void Tracker::onEventAccepted(const dEvt_order_c& order) {
     in.bitsAtAccept = mLocalEventBitsSet;
     in.acceptedTick = nowTick();
 
-    // Skips, auto-next chains and actor event changes continue the event they belong to; so does
-    // the open event's chain successor ordered by a tag.
+    // Skips, auto-next chains, actor event changes and tag successors continue their event.
     const Instance* open = openInstance();
     if (open != nullptr &&
         ((order.mFlag & 0x600) != 0 || (open->next != 0xFF && order.mMapToolId == open->next)))

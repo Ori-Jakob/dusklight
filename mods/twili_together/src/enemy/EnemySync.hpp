@@ -11,8 +11,7 @@
 class fopAc_ac_c;
 class e_s1_class;
 
-// Enemy-death sync (room setting syncNPCs, "Sync Enemy Deaths"): when a teammate in our stage and
-// layer defeats an allowlisted enemy, our copy is removed with a drop-less death puff.
+// Enemy-death sync (syncNPCs): a teammate's kill removes our copy with a drop-less puff.
 namespace twili::enemy_sync {
 
 // Identifies one enemy on every client: its spawn data, read before the engine frees it.

@@ -1,9 +1,4 @@
-// Weapons and items out in the world on remote players (fx/ItemFx.cpp, actors/DummyItemFx.cpp,
-// the held items in actors/DummyPlayer.cpp) and PvP projectiles (pvp/). Steps in
-// src/autotest/StepsItemFx.cpp; pvp-bomb also needs the PvP steps.
-//
-// B makes real item actors or uses real items on X; A checks what its dummy of B draws and
-// plays. The copies are visual only: with PvP off B's projectiles fly through A's dummy.
+// Remote players' items and projectiles (visual only: with PvP off they fly through).
 
 const { STAGES, ITEMS, EVENTS, COMMON_CVARS, barrier, meetIn, connect } = require("../lib");
 
@@ -615,8 +610,7 @@ module.exports = [
         ],
     },
     {
-        // Window captures (A logs ITEMFX_LOOK <what>) at the Forest Temple entrance: B faces A
-        // from 220 units and throws and shoots toward A while A's camera looks past A at B.
+        // Window captures (A logs ITEMFX_LOOK <what>): B throws and shoots toward A.
         name: "itemfx-look",
         description: "B throws, shoots and blasts toward A for window captures (no checks)",
         timeoutSec: 360,

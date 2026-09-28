@@ -36,8 +36,7 @@ void toastRml(const std::string& titleRml, const std::string& bodyRml, const cha
 
 void toast(std::string_view title, std::string_view body, const char* type,
     uint32_t durationMs) {
-    // The host inserts text starting with '<' as RML, anything else as text: always send RML,
-    // in the elements the host uses for plain toasts.
+    // Text starting with '<' is RML to the host: always send RML, in its plain toast elements.
     const std::string titleRml =
         title.empty() ? std::string{} : "<toast-title>" + escapeRml(title) + "</toast-title>";
     const std::string bodyRml = body.empty() ? std::string{}

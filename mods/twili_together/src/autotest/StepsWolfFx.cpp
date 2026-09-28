@@ -1,20 +1,4 @@
-// Steps for a remote wolf's attack effects (fx/WolfFx.cpp, the "wx" group of PLAYER_UPDATE,
-// actors/DummyWolfFx.cpp). spin fields take none | left | right (| any for the local capture).
-//
-// wolfSpin  dir (right | left), trail (true), timeoutSec (10)
-//     procWolfRollAttackInit on the local wolf, again on every call until the proc takes.
-// wolfDome  force (true), radius (550), minLocks (0), timeoutSec (20)
-//     Needs B held by an async walk before it. With force, opens the dome once the charge ran
-//     out in PROC_WOLF_ROLL_ATTACK_MOVE (a light-world Midna is tired and never opens it).
-// expectLocalWolfFx  spin, charge, dome, minRadius, lockBlur, timeoutSec (1)
-// expectPeerWolfFx  spin, dome, minRadius, lockBlur, lockDashSeq, hairAim, timeoutSec (10)
-//     What the first peer in our layer last sent. hairAim: false, or an angle (within 0x100).
-// expectRemoteWolfFx  spin, lastSpin, minSpinTicks, maxSpinTicks, spinEmitters, dome, domeShown,
-//                     minRadius, maxRadius, lockBlur, minLockDashes, maxLockDashes, hairAim,
-//                     count (1), frames (0), timeoutSec (10)
-//     What the peers' dummies show; spin ticks and lock dashes count from the step's first call.
-// viewDummy  back (250), side (0), up (250)
-//     Our camera behind our Link, looking between him and the first peer's dummy.
+// Steps for a remote wolf's attack effects; reference in the runner README.
 
 #include "autotest/AutoTestSteps.hpp"
 

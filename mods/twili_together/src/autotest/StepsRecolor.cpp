@@ -1,22 +1,4 @@
-// Steps for the remote player recolour (fx/PlayerRecolor.cpp).
-//
-// recolorSelfTest
-//     The recolour maths: block modes, identity outside the band, golden vectors, the mane tint.
-// expectDummyRecolor  set (kokiri|zora|magic|ordon|wolf), rgb | peerColor | vanilla, name,
-//                     hueTol (20), minSat (0.25), c1Max (3), c1Min (0), maxBytes (0), frames (0),
-//                     timeoutSec (20)
-//     The first peer's dummy (or `name`'s) wears `set` in that colour: untouched blocks intact,
-//     vanilla -> no replacement, a colour -> mean hue of its tunic ends within hueTol, a grey ->
-//     saturation at most 0.12; C1 within [c1Min, c1Max]; stores within maxBytes.
-// markRecolor  name
-// expectRecolorDelta  name, minApplies, maxApplies, minDraws, maxGpuGrowthMB, maxPrivateGrowthMB
-//     Since markRecolor; GPU memory is the process's video memory on every adapter (DXGI).
-// colorCycle  count (200), everyTicks (8), s (0.8), v (0.85)
-//     Changes our colour `count` times by the golden angle, like the picker.
-// setRupees  value (0), timeoutSec (5)
-//     In Magic Armor that drains, done once execute bound its BRK: power_down at 0, power_up else.
-// recolorCamera  target (dummy|self), dist (150), height (75), up (25), side (0)
-//     Our camera close on the first peer's dummy (or our Link), for window captures.
+// Steps for recolouring remote players; reference in the runner README.
 
 #include "autotest/AutoTestSteps.hpp"
 

@@ -1,11 +1,8 @@
-// Remote players in wolf form (actors/DummyPlayer.cpp), Midna on their back
-// (actors/DummyMidna.cpp) and their transformations' effects (fx/RemoteTransformFx.cpp).
-// Steps in src/autotest/StepsWolf.cpp.
+// Remote wolves, Midna on their back and their transformations' effects.
 
 const { STAGES, COMMON_CVARS, tt, warp, waitStage, barrier, meetIn, connect } = require("../lib");
 
-// The form is picked when the player actor is created, so reload the stage. setForm's M_077
-// can move stages to other layers: instances that are to meet all run this.
+// The form is picked at player create, so reload; M_077 can move stages to other layers.
 const spawnAs = (form, s) => [
     { op: "setForm", form },
     warp(s),
@@ -20,8 +17,7 @@ const WTOA_A = 1 << 3;
 // Every instance sets the room option: whichever one owns the room pushes it.
 const hideInCutscenes = [...COMMON_CVARS, tt("hide_players_in_cutscene", 1)];
 
-// B transforms to a wolf, back to human, and to a wolf again from a run; A's dummy of B replays
-// each on B's ticks.
+// B transforms to wolf, human and wolf again; A's dummy replays each on B's ticks.
 const transformFx = (name, description, serverEnv = {}) => ({
     name,
     description,
@@ -403,8 +399,7 @@ module.exports = [
                 steps: [
                     ...connect,
                     ...meetIn(STAGES.southFaron, "B"),
-                    // After the swap on a human body: WTOA_A, bright, at the fallback anchor
-                    // (the one sent is 100000 units away).
+                    // After the swap on a human body: WTOA_A, bright, at the fallback anchor.
                     { op: "waitSignal", name: "syn-post", from: "B", timeoutSec: 30 },
                     { op: "expectDummyTransformFx", emitters: WTOA_A, tev: 50, silhouette: false, anchorSource: 2, frames: 30, timeoutSec: 8 },
                     ...barrier("a-saw-post", "B"),

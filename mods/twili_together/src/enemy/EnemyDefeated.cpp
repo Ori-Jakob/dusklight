@@ -1,6 +1,4 @@
-// ENEMY_DEFEATED: the kills one client reported in one update, all in one stage and layer. The
-// server relays it to teammates there and never caches it (a replay would delete an enemy the
-// game legitimately respawned).
+// ENEMY_DEFEATED: one update's kills in one stage and layer; relayed to teammates there, uncached.
 
 #include "enemy/EnemySync.hpp"
 

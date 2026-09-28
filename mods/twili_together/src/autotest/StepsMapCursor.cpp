@@ -1,26 +1,4 @@
-// Steps for remote players on the maps (src/ui/MapCursors.cpp). Every map draw records what it
-// drew (map_cursor::Frame); these steps read that record. "Fresh" means drawn at most
-// maxAgeTicks (3) game ticks ago. Targets are peer names or "#<client id>".
-//
-// mapCursorSelfTest
-// showMinimap  minAlpha (255), timeoutSec (20)
-// injectMapCursorClients  clients: [{id, color, dx, dz, dy (0), angle (0)}], unit (cm | texel)
-// clearMapCursorClients
-// expectMapCursor  surface (minimap | dmap), target(s), color(s) ("#RRGGBB" or "peer"), pinned,
-//                  floorDelta, facing ([x, y], 3 degrees), count, holdTicks (0),
-//                  maxAgeTicks (3), timeoutSec (20)
-// expectNoMapCursor  surface, target, reason, holdTicks (30), maxAgeTicks (3), timeoutSec (20)
-//     A frame reason (locationsOff, cutscene, notConnected, alphaZero) or a client reason
-//     (noSave, noUpdate, otherStage, otherLayer, otherFloor, badPose), or "absent".
-// checkMapCursorTransform  target (optional), tolPx (0.75)
-//     Recomputes the minimap anchors with mDoMtx_lookAt and C_MTXOrtho as the offscreen pass
-//     does, and checks each marker's facing and tip.
-// expectMapPaletteClean  groups ([42, 43, 44, 47, 48, 49]), holdTicks (60)
-// dumpMapCursors  surface
-//     Logs "[autotest] MAPCURSOR_PROBE" lines: each marker's centre as a fraction of the 2D
-//     viewport, for a window capture to sample.
-// openPauseMap  timeoutSec (20)
-//     Asks for the dungeon map like the map button (pause status 4). A B press closes it.
+// Steps for remote players on the maps; reference in the runner README.
 
 #include "autotest/AutoTestSteps.hpp"
 
@@ -143,8 +121,7 @@ bool held(bool ok, const StepContext& ctx, int holdTicks) {
     return ctx.ticks - sHoldSince >= holdTicks;
 }
 
-// The minimap anchor of map position (x, z) the way the offscreen pass computes it: the real
-// lookAt and ortho matrices, then NDC onto the picture's rect.
+// The minimap anchor of (x, z) as the offscreen pass computes it, then NDC onto the rect.
 mc::Vec2 referenceAnchor(const mc::MinimapXform& t, f32 x, f32 z) {
     Mtx view;
     Vec eye = {t.centerX, t.centerZ, -5000.0f};

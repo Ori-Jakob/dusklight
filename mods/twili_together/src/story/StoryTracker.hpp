@@ -1,7 +1,6 @@
 #pragma once
 
-// Attributes every accepted event and recognises relocating story events by their effect: a
-// stage change requested while an event runs. Orders, cancels or delays nothing in the game.
+// Recognises story events by their effect: a stage change requested while an event runs.
 
 #include "story/StoryTypes.hpp"
 

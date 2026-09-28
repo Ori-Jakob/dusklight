@@ -1,10 +1,8 @@
-// Smooth remote motion and hiding players in cutscenes (presence/RemotePose.cpp,
-// core/Visibility.cpp). Steps in src/autotest/StepsMotion.cpp.
+// Smooth remote motion and hiding players in cutscenes.
 
 const { STAGES, COMMON_CVARS, tt, waitStage, barrier, meetIn, connect } = require("../lib");
 
-// B walks in circles and measures its own motion (the baseline), while A measures B's dummy:
-// the playout clock has to advance about one sender tick per local tick.
+// B measures its own motion, A measures B's dummy: one sender tick per local tick.
 const smoothMotion = (name, description, cvars, serverEnv = {}) => ({
     name,
     description,

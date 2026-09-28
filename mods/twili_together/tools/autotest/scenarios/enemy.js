@@ -13,11 +13,9 @@ const CVARS = [...COMMON_CVARS, "game.infiniteHearts=1"];
 
 // Kill sync matches spawn data: every instance spawns relative to the shared start point.
 const HOME = { anchor: "playerHome" };
-// Kill sync plays at the Forest Temple entrance: near the South Faron start Bokoblins drown or
-// fall by themselves, and Gerudo Desert keeps a demo running that holds received kills back.
+// Forest Temple entrance: elsewhere Bokoblins drown or fall, or a demo holds kills back.
 
-// Spawns `enemies` ([tag, template, dx, dz, extra]), then waits a few seconds for any that falls
-// off a ledge on its own.
+// Spawns `enemies` ([tag, template, dx, dz, extra]) and waits for any that falls off a ledge.
 const spawnAndSettle = (enemies) => [
     ...enemies.map(([tag, t, dx, dz, extra]) => ({ op: "spawnEnemy", ...t, ...HOME, dx, dz, tag, ...extra })),
     ...enemies.map(([tag]) => ({ op: "expectEnemyHealth", tag })),
@@ -106,14 +104,12 @@ module.exports = [
                     { op: "expectEnemyHealthPercent", value: 300, timeoutSec: 15 },
                     { op: "expectEnemyHealth", tag: "boko", health: 120, max: 120, timeoutSec: 10 },
                     { op: "expectEnemyHealth", tag: "early", health: 120, max: 120, timeoutSec: 10 },
-                    // A deleted enemy leaves the scaling list; the rescale below would write to
-                    // freed memory otherwise.
+                    // A deleted enemy leaves the scaling list (the rescale would write to freed memory).
                     { op: "deleteEnemy", tag: "boko" },
                     { op: "expectEnemyGone", tag: "boko", timeoutSec: 5 },
                     { op: "setEnemyHealth", tag: "early", health: 3 },
                     ...barrier("a-done", "A"),
-                    // Back at 100% (A leaving or our own disconnect, whichever lands first) 3
-                    // rounds to 1, a dying state for several enemies, so it stops at 2.
+                    // Back at 100%, 3 rounds to 1 (a dying state for some enemies), so it stops at 2.
                     { op: "disconnect" },
                     { op: "expectEnemyHealthPercent", value: 100, timeoutSec: 5 },
                     { op: "expectEnemyHealth", tag: "early", health: 2, max: 40, timeoutSec: 5 },
@@ -246,16 +242,14 @@ module.exports = [
                 steps: [
                     waitStage(STAGES.linksHouse),
                     ...connect,
-                    // Without world sync A's switch never reaches B: only B's own ALLdie can
-                    // set it there.
+                    // Without world sync only B's own ALLdie can set its switch.
                     ...(isA ? [{ op: "setRoomOption", name: "syncWorldState", value: false }] : []),
                     { op: "waitRoomOption", name: "syncWorldState", value: false, timeoutSec: 30 },
                     ...syncOn(isA),
                     { op: "waitPeers", count: 1, sameStage: true, timeoutSec: 120 },
                     ...barrier("ready", other),
                     ...spawnAndSettle([["boko", BOKOBLIN, 0, -150]]),
-                    // Event 0xFF (none) and zone switch 0xC5 (d_a_alldie.cpp getEventNo /
-                    // getSwbit); spawned once the room has an enemy, or it would fire at once.
+                    // Event 0xFF, zone switch 0xC5; spawned once the room has an enemy or it fires at once.
                     { op: "spawnEnemy", name: "ALLdie", param: 0xff00c5ff, tag: "alldie" },
                     { op: "expectEnemyHealth", tag: "alldie" },
                     { op: "wait", frames: 90 },

@@ -1,5 +1,4 @@
-// Where the local, synced flags say a player may be. A player outside the active segment's stages
-// gets "Catch up to story"; flags alone decide, so an older broken save is repaired the same way.
+// Where the synced flags say a player may be; outside it, "Catch up to story" repairs.
 
 #include "story/StoryTypes.hpp"
 
@@ -36,8 +35,7 @@ Entrance entrance(const char* stage, int8_t room, int16_t point) {
 }
 
 const StorySegment kSegments[] = {
-    // Point 24 is the wake-up: phase_1 sets transform level 0, and with F_0630 set the cell
-    // loads layer 14, as a reload of the originator's save does.
+    // Point 24, the wake-up: transform level 0, and with F_0630 the cell loads layer 14.
     {"captured", "you were captured and taken to Hyrule Castle", &capturedActive, kCapturedStages,
         entrance("R_SP107", 0, 24), Form::Wolf, "the Hyrule Castle prison cell"},
     // No canonical entrance yet: catch-up teleports to a teammate standing there instead.

@@ -1,6 +1,4 @@
-// The requester asks the target through the server; the target answers with the last spot it
-// stood on static room collision. Same stage and layer with that floor loaded: Link is moved
-// directly; otherwise the destination loads with start point -1, the void-out restart path.
+// Asks the target through the server; Link moves if its floor is loaded, else the stage loads.
 
 #include "teleport/Teleport.hpp"
 
@@ -97,9 +95,7 @@ bool sameScene(const Destination& d) {
            d.layerNo == dComIfG_play_c::getLayerNo(0);
 }
 
-// The layer argument that loads the destination, or nothing: another player's layer could start
-// cutscenes whose events world sync would spread, so only the layer our progress picks (or the
-// one we already run there) is loaded.
+// Only the layer our progress picks (or the one we run) loads: another's could spread cutscenes.
 std::optional<int8_t> destinationLayerArg(const Destination& d) {
     if (dComIfG_play_c::getLayerNo_common(d.stageName, d.roomNo, -1) == d.layerNo) {
         return -1;
@@ -160,8 +156,7 @@ void startStageTeleport(const Destination& d, int8_t layerArg) {
     dComIfGp_setNextStage(d.stageName, -1, d.roomNo, layerArg, 0.0f, 0, 1, 0, 0, 1, 0);
 }
 
-// Until phase_1 takes the request, a void-out would load the old stage at our coordinates: take
-// the load back. An exit Link walks into stays, minus our room parameter.
+// A void-out before phase_1 takes the request would load the old stage here: take it back.
 void keepStageTeleport(const Destination& d, int8_t layerArg) {
     if (dComIfGp_getNextStagePoint() != -1) {
         if (dComIfGs_getRestartRoomParam() != 0) {

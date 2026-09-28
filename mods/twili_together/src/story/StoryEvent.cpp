@@ -1,8 +1,4 @@
-// STORY_EVENT: same-room pull-in. The originator's setParam hook sends "start" before the event's
-// switch is written, so it precedes the switch's SET_FLAG. Teammates in the same stage, layer and
-// room who stand safely place the same map event the way the arrival start demo is ordered (no
-// requester, our player as target). One who is not safe misses it; a relocation still brings the
-// follow prompt through STORY_MOVE.
+// STORY_EVENT: same-room pull-in; teammates standing safely in the room place the same event.
 
 #include "story/StoryState.hpp"
 
@@ -51,8 +47,7 @@ bool isEventTag(int16_t profile) {
            profile == fpcNm_TAG_EVTAREA_e;
 }
 
-// Only when our own state kept us out; not while loading, in a cutscene of our own, elsewhere,
-// or when we saw it already or our area differs.
+// Only when our own state kept us out, not while loading, in our own cutscene or elsewhere.
 bool missToastWorthy(const char* reason) {
     for (const char* quiet :
         {"loading", "cutscene", "room", "seen", "different-event", "trigger", "ended", "refused"})
@@ -157,8 +152,7 @@ struct TagSearch {
     int roomNo;
 };
 
-// A daTag_Event_c in `roomNo` for map event `eventNo` whose own trigger would still fire here:
-// its switch off and its arrival terms met (the area test is skipped: same room).
+// A daTag_Event_c for `eventNo` in `roomNo` whose trigger would still fire (area skipped).
 void* findLiveEventTag(void* proc, void* data) {
     auto* actor = static_cast<fopAc_ac_c*>(proc);
     const auto* want = static_cast<const TagSearch*>(data);
@@ -180,8 +174,7 @@ void orderJoin() {
     JoinInfo& j = state().join;
     const int stay = dComIfGp_roomControl_getStayNo();
     const s16 evId = dComIfGp_getEventManager().getEventIdx(nullptr, j.mapToolId, -1);
-    // Never 0xE00: change() takes any 0xE00 order whose requester equals mChangeActor (NULL
-    // between steps).
+    // Never 0xE00: change() takes any 0xE00 order whose requester is mChangeActor (NULL here).
     const u16 flag = j.autoNext ? 0x101 : 0x001;
     s32 placed = 0;
     if (j.bypassSwitch && j.switchNo != 0xFF && dComIfGs_isSwitch(j.switchNo, stay)) {
@@ -400,8 +393,7 @@ void handleStoryEvent(const nlohmann::json& packet) {
     j.eventName = eventName;
     j.mapToolId = m;
     j.switchNo = sw;
-    // A tag chains its successor itself and ours does not run, and the arrival demo is ordered
-    // with AutoNext: our copy chains on its own.
+    // Ordered with AutoNext, our copy chains its successor itself (the tag does not run).
     j.autoNext =
         (packet.value("flag", 0) & 0x300) != 0 || req == "tag" || packet.value("arrival", false);
     const char* why = pullInBlocker();

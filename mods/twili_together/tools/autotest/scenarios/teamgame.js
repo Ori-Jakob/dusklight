@@ -3,8 +3,7 @@
 const { MODS, STAGES, ITEMS, COMMON_CVARS, RANDOMIZER_MODE_CVARS, tt, waitStage, barrier, meetIn, connect } =
     require("../lib");
 
-// Two generated seeds as the randomizer writes them (yaml-cpp block style), names looked up by
-// ItemService check name. 0x28 is a sword: inventory-dependent, so the probe skips it.
+// Two generated seeds as the randomizer writes them; 0x28 (a sword) is skipped by the probe.
 const SEEDS = {
     X: {
         hash: "Soldier Beth Dragonfly",

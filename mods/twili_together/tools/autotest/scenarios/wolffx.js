@@ -1,8 +1,4 @@
-// A remote wolf's attack effects (fx/WolfFx.cpp, the "wx" group of PLAYER_UPDATE,
-// actors/DummyWolfFx.cpp): the spin, Midna's dome while B is held, the lock-on jumps' burst and
-// tail blur, and her hair hand turned toward the lock target. B attacks; A checks its dummy of B.
-// Steps in src/autotest/StepsWolfFx.cpp. A light-world Midna is tired and never opens the dome,
-// so wolfDome forces it open. "WOLFFX_HOLD <what>" marks where a window capture is worth taking.
+// A remote wolf's attack effects; wolfDome forces the tired light-world Midna's dome open.
 
 const { STAGES, COMMON_CVARS, tt, warp, waitStage, barrier, meetIn, connect } = require("../lib");
 
@@ -44,8 +40,7 @@ const duo = (name, description, { a, b, start = STAGES.southFaron, timeoutSec = 
     })),
 });
 
-// md for a drawn Midna under the dome: WAITA with the pointing WAITTP upper clip, the hair from
-// its clip (kMidnaHairFromBck), the pointing hair hand (2), hands 0 and 2.
+// md for a drawn Midna under the dome: WAITA, pointing upper clip and hair hand, hands 0/2.
 const POINTING_MIDNA = {
     md: [1 | (2 << 2) | (0x8 << 4), 0x1dc, 0x1df, 0, 0x3f8, 0x399, 0 | (2 << 8)],
     mf: [0, 192, 0],
@@ -112,9 +107,7 @@ module.exports = [
             { op: "wait", frames: 150 },
         ],
     }),
-    // Forest Temple entrance: spawned enemies stay put. The Bokoblin comes for B at once and a hit
-    // ends the charge, so B spawns it inside the full dome and lets go a second after the dome
-    // caught it. (+z of where meetIn's walk leaves B is open floor.)
+    // The Bokoblin comes at once and a hit ends the charge: spawn it inside the full dome.
     duo("wolf-lock-real", "B's dome locks onto a Bokoblin and B lets go of B: A's dummy of B shows Midna pointing her hair hand at it, then the lock-on jump's burst and tail blur", {
         start: STAGES.forestTemple,
         a: [
@@ -152,8 +145,7 @@ module.exports = [
             fx({ dome: false, spin: "none", maxSpinTicks: 0, maxLockDashes: 0, frames: 60, timeoutSec: 5 }),
             ...barrier("syn-wolf", "B"),
             { op: "expectRemoteForm", form: "wolf", body: "wolf", timeoutSec: 30 },
-            // Three jumps: one burst each, the blur on throughout, none when the sequence goes
-            // back to the real 0.
+            // Three jumps: one burst each, the blur throughout, none on the step back to 0.
             ...barrier("syn-lock", "B"),
             fx({ minLockDashes: 3, maxLockDashes: 3, lockBlur: true, timeoutSec: 8 }),
             ...barrier("syn-lock-reset", "B"),
@@ -165,8 +157,7 @@ module.exports = [
             fx({ hairAim: 0x2000, frames: 30, timeoutSec: 8 }),
             ...barrier("syn-dome", "B"),
             fx({ dome: true, domeShown: true, minRadius: 399, maxRadius: 401, hairAim: false, frames: 30, timeoutSec: 8 }),
-            // Junk: flags masked, the radius clamped, no burst for a sequence jump of 127 (nor
-            // for the one back to 0).
+            // Junk: flags masked, radius clamped, no burst for a sequence jump of 127.
             ...barrier("syn-junk", "B"),
             fx({ dome: true, minRadius: 1000, maxRadius: 1000, maxLockDashes: 0, spin: "right", frames: 30, timeoutSec: 8 }),
             ...barrier("syn-back", "B"),

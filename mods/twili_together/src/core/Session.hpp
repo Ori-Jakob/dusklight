@@ -191,8 +191,7 @@ private:
     std::map<uint32_t, fpc_ProcID> mHorseActors;
     std::set<uint32_t> mHorseSeenExecuting;
     std::map<uint32_t, DummyCreateFailure> mHorseCreateFailures;
-    // Live horses shown here since the last scene change: their puppet waits hidden while they
-    // wait to be called instead of loading Horse.arc again.
+    // Live horses shown here since the last scene change (their puppets wait hidden).
     std::set<uint32_t> mHorseShownHere;
     std::map<uint32_t, std::chrono::steady_clock::time_point> mHorseWantedAt;
     bool mHorseStateSent = false;

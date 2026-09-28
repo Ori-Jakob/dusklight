@@ -1,5 +1,4 @@
-// Steps for enemies spawned by the test, enemy scaling and enemy-death sync; reference in the
-// runner README.
+// Steps for enemies, enemy scaling and enemy-death sync; reference in the runner README.
 
 #include "autotest/AutoTestSteps.hpp"
 
@@ -351,8 +350,7 @@ std::optional<bool> enemySteps(const std::string& op, StepContext& ctx) {
         return expectEnemySync(ctx);
     }
 
-    // Every tagged Shadow Beast into its downed wait: the group is then condemned (all_fail)
-    // without the field demo a real last blow can start.
+    // Tagged Shadow Beasts into their downed wait: the group is condemned without the demo.
     if (op == "forceGroupFail") {
         for (const std::string& tag : ctx.step.value("tags", std::vector<std::string>{})) {
             const auto it = sTags.find(tag);

@@ -1,7 +1,4 @@
-// The remote player recolour (src/fx/PlayerRecolor.cpp): a dummy's tunic-coloured texture blocks
-// (tunic and hat, Zora blue, Magic Armor red, Ordon tunic, wolf tail and ankle chain) shown in its
-// player's colour. coloring-armor-power covers the Magic Armor's drained look (StatusFx).
-// Scenarios log COLORING_HOLD <what> (on A) where a window capture is worth taking.
+// Remote player recolour; COLORING_HOLD <what> (on A) marks a moment worth a capture.
 
 const { STAGES, COMMON_CVARS, tt, barrier, meetIn, connect } = require("../lib");
 
@@ -32,8 +29,7 @@ const wear = (n) => (n === "wolf"
     ? [{ op: "transform", form: "wolf", timeoutSec: 30 }]
     : [{ op: "setClothes", item: CLOTHES[n], timeoutSec: 30 }]);
 
-// B wears each set in red, blue and exact white (as on disc); A checks its dummy of B and holds a
-// close-up of each. A wears the same clothes (not the wolf) and sets M_011 for the wolf's chain.
+// B wears each set in red, blue and white; A checks its dummy of B (A sets M_011 for the chain).
 const COLORS = [["red", RED], ["blue", BLUE], ["white", "#FFFFFF"]];
 const setsA = ORDER.flatMap((n) => [
     ...(n === "wolf" ? [{ op: "setEventBit", no: M_011 }] : wear(n)),

@@ -31,8 +31,7 @@ double contrastOnTagFill(Rgb8 c) noexcept;
 // Lightened until it reads on the tag fill with `minContrast`.
 Rgb8 readableOnTagFill(Rgb8 c, double minContrast);
 
-// Checks the maths over every 8-bit colour, `chunk` per call from `*next` (1 << 24 when done).
-// Empty while all is well, else the first counterexample.
+// Checks every 8-bit colour, `chunk` per call from `*next`; returns the first counterexample.
 std::string selfTest(uint32_t* next, uint32_t chunk);
 
 }  // namespace twili::ui::color

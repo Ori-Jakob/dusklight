@@ -1,35 +1,4 @@
-// Steps for weapons and items out in the world (fx/ItemFx.cpp on the sender, actors/DummyItemFx.cpp
-// and DummyPlayer.cpp on the dummy). Kinds are "arrow", "boomerang", "bomb", "spinner" and
-// "crodBall"; event types "explode", "hitMark", "sound", "water" and "particle".
-//
-// spawnLocalItem  kind ("arrow", "bombArrow", "seed", "bomb", "waterBomb", "bombling"), count (1),
-//                 forward (150), up (40), pitch (degrees down, 0), aimAtDummy, atDummy,
-//                 timeoutSec (5)
-//     Our real item actors in our player's layer, without the aim. Arrows and seeds fly from our
-//     chest along our facing, or at the first peer's dummy with aimAtDummy; bombs appear
-//     `forward` ahead, or at the dummy with atDummy. Done once every arrow flies.
-// explodeAtDummy
-//     A bomb arrow's explosion (setBombArrowExplode) beside the first peer's dummy.
-// injectItemFx  slots ([{kind, sub, state, flags, forward (100), up (0), aux, fuse}]),
-//               events ([{type, arg, forward (100), up (0)}]), hook ({mode (3), sub,
-//               forward (300), up (100)}), ball ({mode (6), links (30), forward (250), up (0)}),
-//               packets (60)
-//     Our next `packets` updates show these; `fuse` sets a bomb's aux that many ticks ahead.
-//     The events go out once, with the next update.
-// setOil  value (21600)
-// expectLocalItemFx  objects ({kind: n}), events ({type: n}), hookOutTicks, ironBallTicks,
-//                    levelSfxTicks, minHookDist, timeoutSec (10)
-//     Until our capture's totals since the game started reach these.
-// markRemoteItemFx
-//     Remembers the first peer dummy's counters for expectRemoteItemFx.
-// expectRemoteItemFx  minDrawn / maxDrawn ({kind: n}), minSeen ({kind: n} since the mark),
-//                     explosions, hitMarks, sounds, splashes, particles (since the mark),
-//                     maxExplosions, tornado, boomCharge, minLights, maxLights, minEmitters,
-//                     maxHeapUsed, hookChain, minTipDist, minHookShots (since the mark),
-//                     minHookPeak (the latest chain's longest tip distance), minIronBallMode,
-//                     maxIronBallMode, minIronBallDist, lanternFlame, minLanternGlow,
-//                     maxLanternGlow, levelSfx; frames (0), timeoutSec (20)
-//     Until the first peer's dummy shows every field given, then for `frames` more ticks.
+// Steps for items and projectiles out in the world; reference in the runner README.
 
 #include "autotest/AutoTestSteps.hpp"
 

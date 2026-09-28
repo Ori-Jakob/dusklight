@@ -1,6 +1,4 @@
-// DAMAGE_PLAYER / DAMAGE_RESULT. The server forwards a hit only while pvpMode is on and the two
-// may fight, rebuilt with clamped values and stamped with the attacker's stage and layer; the
-// victim checks it again and queues it for its next damage check. Neither packet is cached.
+// DAMAGE_PLAYER / DAMAGE_RESULT; the server and the victim both check the hit, nothing is cached.
 
 #include "pvp/Pvp.hpp"
 

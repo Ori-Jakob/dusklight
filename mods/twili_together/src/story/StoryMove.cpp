@@ -1,8 +1,4 @@
-// STORY_MOVE: a story event relocated a player, who broadcasts one move once settled at the
-// destination (after its own post-load world state). Teammates elsewhere may follow: the
-// destination entrance loads in the layer their own flags pick, so phase_1 applies the entrance's
-// side effects and Link spawns as a reload of the originator's save there would. Nothing is held
-// back or rewritten; story segments catch a player whose position no longer fits the flags.
+// STORY_MOVE: a story relocation teammates elsewhere may follow, loading with their own flags.
 
 #include "story/StoryState.hpp"
 
@@ -31,16 +27,14 @@ namespace twili::story {
 namespace detail {
 namespace {
 
-// A team move this close to (or older than) our own story arrival is only a menu row: two
-// players triggering story at once must never ping-pong between destinations.
+// A move this close to our own story arrival is only a menu row, so nobody ping-pongs.
 constexpr auto kOwnArrivalGrace = std::chrono::seconds(10);
 // How long an offered pop-up waits for the player to be free.
 constexpr auto kCalmTimeout = std::chrono::minutes(5);
 // How long an accepted follow waits for the player to be free.
 constexpr auto kLoadWaitTimeout = std::chrono::minutes(5);
 constexpr auto kLoadArrivalTimeout = std::chrono::seconds(45);
-// Before M_077 the synced levels decide the spawn form; a disagreeing prediction means the
-// originator's post-arrival world state is not merged yet.
+// Before M_077 synced levels decide the spawn form; a mismatch means a merge is pending.
 constexpr auto kMergeWait = std::chrono::seconds(10);
 // A cutscene layer (TWgate's layer 10) is only right while its cutscene is current.
 constexpr auto kExplicitLayerFresh = std::chrono::seconds(120);
@@ -189,8 +183,7 @@ bool startLoad(const Entrance& e, int8_t layerArg, Form form, const std::string&
     return true;
 }
 
-// A real start point, so dStage_playerInit uses that PLYR entry. The restart room param must be
-// 0 or it would replace the entry's start mode and event.
+// A real start point for dStage_playerInit; room param 0 keeps the entry's start mode.
 void requestEntranceLoad(const LoadState& l) {
     dComIfGs_setRestartRoomParam(0);
     dComIfGp_setNextStage(
@@ -859,8 +852,7 @@ void tick() {
     tickPrompt();
 }
 
-// A load under way and our own last story arrival survive a reconnect; the team's moves come
-// back from the server cache.
+// A load under way and our last arrival survive a reconnect; team moves come from the cache.
 void resetSession() {
     if (s_state.prompt.kind == PromptKind::Move) {
         closePrompt();

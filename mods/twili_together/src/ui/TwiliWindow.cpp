@@ -264,8 +264,7 @@ ModResult updateConnectionTab(ModContext*, void*, ModError*) {
 
 // --- Room tab
 
-// While connected as a non-owner the controls show the room's values and refuse edits;
-// otherwise they edit the defaults pushed to the room whenever we own it.
+// A non-owner sees the room's values, read-only; otherwise the controls edit our defaults.
 bool roomLocked() {
     const Session& session = Session::instance();
     return session.isConnected() && !session.isRoomOwner();

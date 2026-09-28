@@ -1,46 +1,4 @@
-/**
- * Twili-Together relay server.
- * Usage:  npm install && node server.js [wsPort] [tcpPort]
- *
- * The server never simulates the game. It keeps connection metadata and relays packets:
- *
- *   Transports WebSocket (ws://, or wss:// with TT_TLS_CERT and TT_TLS_KEY) and length-prefixed
- *              JSON over TCP (tcp://, for LAN). Both kinds of client share rooms and rules.
- *   Handshake  Only app "twili-together" with protocolVersion >= 5 joins. Anything else gets
- *              SERVER_MESSAGE and DISABLE_CLIENT and is disconnected.
- *   Rooms      Keyed by roomId ("" = the public room). The first client owns a room; when the
- *              owner leaves, the longest-connected client takes over. The owner may hand the room
- *              to any member (SET_ROOM_OWNER). A room left empty for TT_ROOM_TTL_SEC (default
- *              6 h) is deleted with its caches.
- *   Room state UPDATE_ROOM_STATE is accepted from the owner only and echoed to the room.
- *   Teams      Flag, event, item, dungeon and world-state packets go to the same room, teamId and
- *              save layout, stamped with the sender's clientId, teamId, session key, name and colour.
- *   Team game  Each client announces what it plays (HANDSHAKE "game", then GAME_IDENTITY). Every
- *              team has a leader (its longest-connected member, or whom the leader promoted with
- *              SET_TEAM_OWNER) and a sticky team game: set by the first member in game, switched
- *              only by the leader (after CLAIM_TEAM_GAME while teammates still play the old one). Team
- *              packets flow only between members whose state is "ok" (in game on the team game).
- *              TEAM_STATE tells the room each team's owner, game and member states; the seed's
- *              permalink ("share") reaches that team only. A named team has a colour (a default
- *              from its id, or its leader's SET_TEAM_COLOR) that its members show in.
- *   Catch-up   The last untargeted UPDATE_WORLD_STATE and the addToQueue packets since are kept
- *              per team, team game and layout. REQUEST_WORLD_STATE goes to caught-up teammates on the same
- *              protocol and layout; the cache answers only when none can, and catchUp:true also
- *              replays the queue and the latest STORY_MOVE arrive. Replays skip the requester's
- *              own session.
- *   Presence   PLAYER_UPDATE / PLAYER_SFX go to room members in the same stage, layer and protocol.
- *   Kills      ENEMY_DEFEATED / STORY_EVENT go to teammates in the same stage and layer, uncached.
- *   Story      STORY_MOVE goes to the whole team and is never queued.
- *   Teleport   REQUEST_TELEPORT / TELEPORT_TO go only to the client named, while teleportMode is on.
- *              Across teams only with teleportAcrossTeams, and never between different team games.
- *   PvP        DAMAGE_PLAYER goes only to the client named, while pvpMode is on and the rules allow
- *              it, at most once per TT_DAMAGE_INTERVAL_MS per pair. DAMAGE_RESULT goes back to the
- *              attacker. Refusals are answered by the server.
- *   Rejected   ALL_CLIENT_STATE / SERVER_MESSAGE / DISABLE_CLIENT are server-to-client only, and
- *              a repeated HANDSHAKE is ignored.
- *   Heartbeat  WebSocket connections are pinged every TT_PING_MS (default 10 s). TCP clients send
- *              KEEPALIVE and are dropped after TT_TCP_TIMEOUT_MS (default 30 s) of silence.
- */
+// Twili-Together relay server; routing rules in ../../docs/protocol.md.
 
 const { WebSocketServer } = require("ws");
 const { EventEmitter } = require("events");
@@ -378,8 +336,7 @@ function broadcastTeamPresence(room, sender, packet) {
     }
 }
 
-// Everything stored or relayed is coerced to the type the game expects.
-// Strings are cut by code points and lose lone surrogates and control characters.
+// Stored and relayed values are coerced to the types the game expects.
 function asString(v, fallback, maxLen = 64) {
     if (typeof v !== "string") return fallback;
     return Array.from(v.replace(/[\u0000-\u001f\u007f]/g, ""))
@@ -573,8 +530,7 @@ function describeTeam(team) {
     return team.id === "" ? "<no team>" : team.id;
 }
 
-// ok: in game on the team game. unverified: the same probe key, not confirmed by the member.
-// pending: not in game, or no team game yet. mismatch: in game on another game.
+// ok: on the team game; unverified: unconfirmed probe match; pending: not in game; mismatch.
 function memberSync(team, c) {
     if (!c.game.inGame || team.game === null) return "pending";
     if (c.game.key !== team.game.key) return "mismatch";
@@ -629,9 +585,7 @@ function publicGame(game, own) {
     return out;
 }
 
-// G1: the first member in game sets an unset team game. G2: the owner switches it while no
-// teammate plays it. G3: otherwise the owner is asked (TEAM_GAME_CONFLICT, answered by
-// CLAIM_TEAM_GAME). G4: other members never change it.
+// Team game rules G1-G4: first in game sets it, then only the owner switches it.
 function applyTeamGameRules(room, team, client) {
     const g = client.game;
     if (!g.inGame) return;
@@ -678,8 +632,7 @@ function updateTeam(room, team, change) {
     }
 }
 
-// The team's own members get the game key, the member keys and the permalink; other teams see
-// the game's mode and seed name only.
+// Only the team's own members get the keys and the permalink.
 function teamStatePacket(room, team, recipient) {
     const own = recipient.teamId === team.id;
     const packet = {
@@ -700,8 +653,7 @@ function teamStatePacket(room, team, recipient) {
     return packet;
 }
 
-// On any change of a team's owner, game or member states; a new team game re-sends every team
-// (sameGameAsYours depends on the recipient's team).
+// On a change of a team's owner, game or members; a new team game re-sends every team.
 function broadcastTeams(room, skipClientId = -1) {
     const gameKeys = JSON.stringify([...room.teams.values()].map((t) => [t.id, t.game ? t.game.key : ""]));
     const gamesChanged = gameKeys !== room.teamGameKeys;
@@ -1211,8 +1163,7 @@ function handlePacket(client, packet) {
     broadcastRoom(room, client.clientId, relayed);
 }
 
-// A TCP socket with the surface the relay uses on a WebSocket. Each message is a 4-byte
-// little-endian length followed by that many bytes of UTF-8 JSON.
+// A TCP socket with a WebSocket's surface; messages are a 4-byte LE length plus UTF-8 JSON.
 class TcpConnection extends EventEmitter {
     constructor(socket) {
         super();

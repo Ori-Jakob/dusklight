@@ -1,6 +1,4 @@
-// Item pickup toasts (src/ui/ItemToasts.cpp) with the item's icon from the host's item:// provider.
-// Steps in src/autotest/StepsItemToast.cpp. The mod logs "[toast] shown" / "[toast] summary" when
-// a toast goes on screen: capture triggers.
+// Item pickup toasts; "[toast] shown" / "[toast] summary" in the log are capture triggers.
 
 const { STAGES, ITEMS, COMMON_CVARS, tt, warp, waitStage, barrier, meetIn, connect } = require("../lib");
 
