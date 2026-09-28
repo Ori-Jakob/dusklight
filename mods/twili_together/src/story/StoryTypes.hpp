@@ -108,14 +108,12 @@ extern const int kStoryMoveCount;
 
 int matchCuratedMove(const MoveRecord& m);
 const StoryMoveDef* curatedMove(int index);
-const StoryMoveDef* curatedMoveById(const std::string& id);
 // The entrance loads with a phase_1 side effect (twilight clear, transform level, horse flute).
 bool isSideEffectPoint(const char* stage, int room, int point);
 // kQual* bits of an arrived move; `localBitsDuring` synced event bits we set meanwhile.
 uint32_t qualify(const MoveRecord& m, uint32_t localBitsDuring);
 bool isNotStory(const std::string& eventName);
 std::string placeName(const MoveRecord& m);
-std::string stageDisplayName(const char* stage);
 
 // A stretch of the story whose places cannot be reached from anywhere else.
 struct StorySegment {

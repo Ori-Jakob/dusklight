@@ -24,8 +24,6 @@ enum class Group : uint8_t {
     Count,
 };
 
-const char* groupName(Group group);
-
 // Core failing is fatal; a failed feature group stays inactive and its callbacks check active().
 ModResult install(Group group, std::string& error);
 bool active(Group group);

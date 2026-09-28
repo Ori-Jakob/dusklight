@@ -283,15 +283,6 @@ const StoryMoveDef* curatedMove(int index) {
     return index >= 0 && index < kStoryMoveCount ? &kStoryMoves[index] : nullptr;
 }
 
-const StoryMoveDef* curatedMoveById(const std::string& id) {
-    for (int i = 0; i < kStoryMoveCount; i++) {
-        if (id == kStoryMoves[i].id) {
-            return &kStoryMoves[i];
-        }
-    }
-    return nullptr;
-}
-
 bool isSideEffectPoint(const char* stage, int room, int point) {
     for (const SidePoint& p : kSideEffectPoints) {
         if (std::strncmp(p.stage, stage, 8) == 0 && p.room == room && p.point == point) {
@@ -334,10 +325,6 @@ uint32_t qualify(const MoveRecord& m, uint32_t localBitsDuring) {
         q |= kQualStoryBits;
     }
     return q;
-}
-
-std::string stageDisplayName(const char* stage) {
-    return local::mapName(stage, -1);
 }
 
 std::string placeName(const MoveRecord& m) {

@@ -70,10 +70,6 @@ size_t s_scopeDepth = 0;
 
 }  // namespace
 
-const char* groupName(Group group) {
-    return kGroups[static_cast<size_t>(group)].name;
-}
-
 ModResult install(Group group, std::string& error) {
     const auto& info = kGroups[static_cast<size_t>(group)];
     auto& active = s_active[static_cast<size_t>(group)];

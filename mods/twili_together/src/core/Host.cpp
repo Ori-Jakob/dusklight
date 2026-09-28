@@ -48,10 +48,4 @@ void recordFinalMtx(const float mtx[3][4], const void* key) {
     }
 }
 
-void forgetMtx(const void* key) {
-    if (svc_interp != nullptr) {
-        svc_interp->forget_mtx(mod_ctx, key);
-    }
-}
-
 }  // namespace twili::interp

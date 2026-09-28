@@ -19,8 +19,6 @@ bool enabled();
 // Save layout we announce and require from teammates (a test may force another one).
 const std::string& localLayout();
 void setLayoutOverrideForTest(const std::string& layout);
-// False for a teammate whose save layout differs from ours; world packets from it are dropped.
-bool layoutCompatible(const Client& client);
 
 // Adds the team, protocol and layout fields every team-scoped packet carries.
 void stampPacket(nlohmann::json& packet, bool addToQueue);

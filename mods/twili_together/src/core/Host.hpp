@@ -24,6 +24,5 @@ uint64_t simTickSeq();
 // Seconds per simulation tick.
 float simPace();
 void recordFinalMtx(const float mtx[3][4], const void* key);
-void forgetMtx(const void* key);
 
 }  // namespace twili::interp
