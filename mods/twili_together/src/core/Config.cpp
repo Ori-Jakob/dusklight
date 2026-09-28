@@ -144,4 +144,26 @@ bool hostBool(const char* key, bool fallback) {
     return value;
 }
 
+double hostFloat(const char* key, double fallback) {
+    static std::unordered_map<std::string, ConfigVarHandle> s_hostHandles;
+    if (!SERVICE_HAS(svc_config, ConfigService, find_host_var) ||
+        svc_config->find_host_var == nullptr)
+    {
+        return fallback;
+    }
+    auto it = s_hostHandles.find(key);
+    if (it == s_hostHandles.end()) {
+        ConfigVarHandle found = 0;
+        if (svc_config->find_host_var(mod_ctx, key, CONFIG_VAR_FLOAT, &found) != MOD_OK) {
+            found = 0;
+        }
+        it = s_hostHandles.emplace(key, found).first;
+    }
+    double value = fallback;
+    if (it->second == 0 || svc_config->get_float(mod_ctx, it->second, &value) != MOD_OK) {
+        return fallback;
+    }
+    return value;
+}
+
 }  // namespace twili::config

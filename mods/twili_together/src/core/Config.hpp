@@ -51,5 +51,6 @@ ModResult setString(Var var, const std::string& value);
 
 // Host setting via find_host_var, or `fallback` when unavailable.
 bool hostBool(const char* key, bool fallback);
+double hostFloat(const char* key, double fallback);
 
 }  // namespace twili::config

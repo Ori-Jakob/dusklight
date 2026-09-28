@@ -15,4 +15,8 @@ uint32_t riddenShadowId(uint32_t) {
     return 0;
 }
 
+bool tagInfo(uint32_t, TagInfo&) {
+    return false;
+}
+
 }  // namespace twili::horse

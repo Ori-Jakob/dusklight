@@ -13,6 +13,7 @@ ModResult installActor(std::string& error);
 ModResult installSync(std::string& error);
 ModResult installClothes(std::string& error);
 ModResult installFx(std::string& error);
+ModResult installMap(std::string& error);
 #if TWILI_ENABLE_AUTOTEST
 ModResult installAutotest(std::string& error);
 #endif
@@ -49,7 +50,7 @@ constexpr std::array<GroupInfo, static_cast<size_t>(Group::Count)> kGroups{{
     {"pvp", nullptr},
     {"enemy", nullptr},
     {"story", nullptr},
-    {"map", nullptr},
+    {"map", installMap},
 #if TWILI_ENABLE_AUTOTEST
     {"autotest", installAutotest},
 #else

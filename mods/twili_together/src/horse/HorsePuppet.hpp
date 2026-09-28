@@ -20,4 +20,12 @@ void applyRider(uint32_t clientId, daAlink_c& rider, const RemoteHorsePose& pose
 // The puppet's real shadow while it is ridden, 0 otherwise.
 uint32_t riddenShadowId(uint32_t clientId);
 
+// What a name tag needs of `clientId`'s puppet; false while none is shown.
+struct TagInfo {
+    bool ridden = false;
+    float pos[3] = {};
+    float eye[3] = {};  // the head joint's eye point
+};
+bool tagInfo(uint32_t clientId, TagInfo& out);
+
 }  // namespace twili::horse

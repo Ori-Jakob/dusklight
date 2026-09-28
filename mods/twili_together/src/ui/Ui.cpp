@@ -2,7 +2,10 @@
 
 #include "core/Log.hpp"
 #include "core/Session.hpp"
+#include "hooks/Hooks.hpp"
 #include "ui/ItemToasts.hpp"
+#include "ui/MapCursors.hpp"
+#include "ui/NameTags.hpp"
 #include "ui/TwiliWindow.hpp"
 
 #include <mods/svc/ui.h>
@@ -27,6 +30,11 @@ void init() {
     if (registerWindow() != MOD_OK) {
         TwiliLog.warn("[ui] could not add the menu tab");
     }
+    name_tags::install();
+    std::string error;
+    if (hooks::install(hooks::Group::Map, error) != MOD_OK) {
+        TwiliLog.warn("[ui] map cursors are off: {}", error);
+    }
 }
 
 void tick() {
@@ -41,6 +49,8 @@ void tick() {
 
 void shutdown() {
     shutdownWindow();
+    name_tags::uninstall();
+    map_cursor::reset();
     item_toasts::clearForTest();
     s_wasConnected = false;
 }

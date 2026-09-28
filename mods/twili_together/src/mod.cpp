@@ -1,6 +1,7 @@
 #include "mods/service.hpp"
 #include "mods/svc/actor.h"
 #include "mods/svc/config.h"
+#include "mods/svc/gfx.h"
 #include "mods/svc/hook.h"
 #include "mods/svc/host.h"
 #include "mods/svc/interp.h"
@@ -35,6 +36,8 @@ IMPORT_SERVICE_VERSION(ConfigService, svc_config, 0);
 IMPORT_SERVICE(ActorService, svc_actor);
 IMPORT_SERVICE(UiService, svc_ui);
 IMPORT_OPTIONAL_SERVICE(InterpService, svc_interp);
+// Name tags only.
+IMPORT_OPTIONAL_SERVICE(GfxService, svc_gfx);
 // Without it items are not shared; the rest of world sync still works.
 IMPORT_OPTIONAL_SERVICE(ItemService, svc_item);
 // Either transport may be missing on a platform; the URL scheme picks one.

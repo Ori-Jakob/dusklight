@@ -51,6 +51,7 @@ set(TWILI_SOURCES
     src/hooks/Hooks.cpp
     src/hooks/hooks_actor.cpp
     src/hooks/hooks_fx.cpp
+    src/hooks/hooks_map.cpp
     src/hooks/hooks_player.cpp
     src/hooks/hooks_save.cpp
     src/hooks/hooks_sync.cpp
@@ -74,6 +75,8 @@ set(TWILI_SOURCES
     src/ui/ColorMath.cpp
     src/ui/ItemNames.cpp
     src/ui/ItemToasts.cpp
+    src/ui/MapCursors.cpp
+    src/ui/NameTags.cpp
     src/ui/StoryPrompt.cpp
     src/ui/Toasts.cpp
     src/ui/TwiliWindow.cpp
