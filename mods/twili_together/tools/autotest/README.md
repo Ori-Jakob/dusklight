@@ -135,6 +135,16 @@ Motion (`StepsMotion.cpp`):
 | `teleportSelf` | `dx`, `dy`, `dz` | moves our player at once |
 | `expectDummyTeleport` | `minDist`, `maxPreStep`, `timeoutSec` | the first peer's dummy jumps `minDist` within one frame, without a slide before |
 
+World sync (`StepsWorld.cpp`):
+
+| op | fields | does |
+| --- | --- | --- |
+| `setRoomOption` / `waitRoomOption` | `name` (`syncWorldState`, `shareWoodenShield`, `teleportMode`, `hidePlayersInCutscene`, `syncNPCs`, `pvpMode`, `pvpFriendlyFire`, `pvpLethal`, `showLocationsMode`, `cutsceneSync`), `value`, `timeoutSec` | sets our room-setting default (the owner's is the room's, so every instance sets it) / waits until the room reports that value |
+| `forceLayout` | `layout` (16 hex digits) | before `connect`: announce another save layout, as a different game build would |
+| `waitLayoutMismatch` | `peer`, `timeoutSec` | until the incompatible-layout toast was shown for that peer |
+| `expectNoItem` | `item`, `forSec` (5) | fails if the item's first-get bit gets set within `forSec` |
+| `expectMerges` | `min`, `max`, `timeoutSec` | world-state merges applied so far: waits for `min`, fails above `max` |
+
 ## Adding a scenario
 
 Core scenarios are in `scenarios.js`; feature scenarios in `scenarios/<feature>.js`, each
