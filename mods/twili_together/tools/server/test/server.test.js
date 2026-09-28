@@ -16,8 +16,10 @@ const WebSocket = require("ws");
 
 const SERVER = path.join(__dirname, "..", "server.js");
 
+// Vanilla and in game, so team traffic flows as it did before team games.
+const VANILLA = { inGame: true, kind: "vanilla", key: "vanilla", display: { name: "", mode: "Vanilla" } };
 const HANDSHAKE = { type: "HANDSHAKE", app: "twili-together", protocolVersion: 5, modVersion: "test",
-                    layout: "0123456789abcdef", name: "P", teamId: "", roomId: "" };
+                    layout: "0123456789abcdef", name: "P", teamId: "", roomId: "", game: VANILLA };
 
 // Resolves once both the WebSocket and the TCP listener are up.
 async function startServer(env = {}, args = ["0"]) {
@@ -477,7 +479,8 @@ test("STORY_MOVE reaches teammates in any stage, not other teams, and is never q
     assert.equal(got.teamId, "red");
     assert.equal(got.senderSessionKey, "ka");
     assert.equal(got.addToQueue, false);
-    assert.ok(got.serverTime >= before, "stamped with the server's time");
+    // Process clocks may differ by a millisecond or two.
+    assert.ok(Math.abs(got.serverTime - before) < 5000, "stamped with the server's time");
     assert.equal(got.fromCache, undefined);
     await otherTeam.expectNone((p) => p.type === "STORY_MOVE", "STORY_MOVE to another team");
     await a.expectNone((p) => p.type === "STORY_MOVE", "STORY_MOVE to the sender");
@@ -1713,3 +1716,448 @@ test("the server restarts on the same explicit ports", async () => {
         assert.deepEqual(all.clients.map((c) => c.name).sort(), ["T", "W"]);
     }, {}, [String(port), String(tcpPort)]);
 });
+
+// --- Team games: owner, team game, member states and routing by game.
+
+const rando = (key, extra = {}) => ({ inGame: true, kind: "randomizer", key,
+                                     display: { name: `Seed ${key.slice(-2)}`, mode: "Randomizer 1.0.5" }, ...extra });
+const AT_TITLE = { inGame: false, kind: "vanilla" };
+const SHARE = { permalink: "djEuMC41LUhFQUQtMjc1ZWQ4NwA3Mzg2MjUzMzQ=", seed: "EarlyElatedPoe", version: "v1.0.5-HEAD-275ed87" };
+
+function publish(c, game) {
+    c.send({ type: "GAME_IDENTITY", ...game });
+}
+
+const syncOf = (p, id) => p.members.find((m) => m.clientId === id)?.sync;
+
+// The first TEAM_STATE for teamId that satisfies pred (older ones stay in the inbox).
+function teamState(c, teamId, pred = () => true, timeoutMs) {
+    return c.waitType("TEAM_STATE", (p) => p.teamId === teamId && pred(p), timeoutMs);
+}
+
+// Waits until every listed member of teamId has the given sync state, as c sees it.
+function waitSync(c, teamId, states) {
+    return teamState(c, teamId, (p) => Object.entries(states).every(([id, s]) => syncOf(p, Number(id)) === s));
+}
+
+test("the room owner owns the no-team group; a named team is owned by its first member", () => withServer(async (mk) => {
+    const a = mk();
+    const b = mk();
+    const c = mk();
+    await a.join({ name: "A" });
+    await b.join({ name: "B", teamId: "red" });
+    await c.join({ name: "C" });
+    const none = await teamState(c, "", (p) => p.members.length === 2);
+    assert.equal(none.ownerClientId, a.id);
+    const red = await teamState(c, "red");
+    assert.equal(red.ownerClientId, b.id);
+    assert.equal(red.game.kind, "vanilla");
+    assert.equal(red.game.key, undefined, "other teams do not see the game key");
+}));
+
+test("a joiner gets every team's TEAM_STATE right after ALL_CLIENT_STATE", () => withServer(async (mk) => {
+    const a = mk();
+    const b = mk();
+    await a.join({ teamId: "red", game: rando("rando/f3/aaaaaaaaaaaaaaaa") });
+    await b.join({ teamId: "blue" });
+    const types = [];
+    const c = mk();
+    await c.open();
+    c.ws.on("message", (d) => types.push(JSON.parse(d.toString()).type));
+    await c.join({ teamId: "red" });
+    await teamState(c, "blue");
+    await teamState(c, "red");
+    assert.equal(types[0], "ALL_CLIENT_STATE");
+    assert.equal(types[1], "TEAM_STATE");
+}));
+
+test("the first member in game sets the team game, even while the owner is at the title screen", () => withServer(async (mk) => {
+    const a = mk();
+    const b = mk();
+    await a.join({ name: "A", teamId: "red", game: AT_TITLE });
+    await b.join({ name: "B", teamId: "red", game: AT_TITLE });
+    let s = await teamState(a, "red", (p) => p.members.length === 2);
+    assert.equal(s.ownerClientId, a.id);
+    assert.equal(s.game, null);
+    assert.deepEqual([syncOf(s, a.id), syncOf(s, b.id)], ["pending", "pending"]);
+    publish(b, rando("rando/f3/1111111111111111"));
+    s = await teamState(a, "red", (p) => p.game !== null);
+    assert.equal(s.game.key, "rando/f3/1111111111111111");
+    assert.equal(syncOf(s, b.id), "ok");
+    assert.equal(syncOf(s, a.id), "pending");
+    assert.equal(s.ownerClientId, a.id, "ownership stays with the owner");
+}));
+
+test("a non-owner on another game is mismatched and never changes the team game", () => withServer(async (mk) => {
+    const a = mk();
+    const b = mk();
+    await a.join({ teamId: "red", game: rando("rando/f3/1111111111111111") });
+    await b.join({ teamId: "red", game: rando("rando/f3/2222222222222222") });
+    const s = await waitSync(a, "red", { [a.id]: "ok", [b.id]: "mismatch" });
+    assert.equal(s.game.key, "rando/f3/1111111111111111");
+    publish(b, AT_TITLE);
+    await waitSync(a, "red", { [b.id]: "pending" });
+    publish(b, rando("rando/f3/1111111111111111"));
+    await waitSync(a, "red", { [b.id]: "ok" });
+}));
+
+test("the owner switches the team game while no teammate plays it; the others turn mismatched", () => withServer(async (mk) => {
+    const a = mk();
+    const b = mk();
+    await a.join({ name: "A", teamId: "red", game: rando("rando/f3/1111111111111111") });
+    await b.join({ name: "B", teamId: "red", game: AT_TITLE });
+    publish(a, rando("rando/f3/3333333333333333"));
+    const s = await teamState(b, "red", (p) => p.game?.key === "rando/f3/3333333333333333");
+    assert.equal(syncOf(s, a.id), "ok");
+    assert.equal(syncOf(s, b.id), "pending");
+    publish(b, rando("rando/f3/1111111111111111"));
+    await waitSync(b, "red", { [b.id]: "mismatch" });
+    await a.expectNone((p) => p.type === "TEAM_GAME_CONFLICT", "a conflict with nobody playing");
+}));
+
+test("an owner switching games while a teammate plays is asked; only CLAIM_TEAM_GAME switches", () => withServer(async (mk, server) => {
+    const a = mk();
+    const b = mk();
+    await a.join({ name: "A", teamId: "red", game: rando("rando/f3/1111111111111111", { share: SHARE }) });
+    await b.join({ name: "B", teamId: "red", game: rando("rando/f3/1111111111111111") });
+    await waitSync(a, "red", { [a.id]: "ok", [b.id]: "ok" });
+    publish(a, rando("rando/f3/4444444444444444"));
+    const conflict = await a.waitType("TEAM_GAME_CONFLICT");
+    assert.equal(conflict.teamId, "red");
+    assert.equal(conflict.teammatesInGame, 1);
+    assert.equal(conflict.yourKey, "rando/f3/4444444444444444");
+    assert.equal(conflict.game.key, "rando/f3/1111111111111111");
+    assert.equal(conflict.game.share.permalink, SHARE.permalink);
+    const s = await waitSync(b, "red", { [a.id]: "mismatch", [b.id]: "ok" });
+    assert.equal(s.game.key, "rando/f3/1111111111111111");
+    await b.expectNone((p) => p.type === "TEAM_GAME_CONFLICT", "a conflict sent to a non-owner");
+
+    b.send({ type: "CLAIM_TEAM_GAME" });
+    await waitForLog(server, /\[B\] rejected CLAIM_TEAM_GAME \(not the team owner\)/);
+    a.send({ type: "CLAIM_TEAM_GAME" });
+    const claimed = await waitSync(b, "red", { [a.id]: "ok", [b.id]: "mismatch" });
+    assert.equal(claimed.game.key, "rando/f3/4444444444444444");
+    await b.expectNone((p) => p.type === "CLAIM_TEAM_GAME" || p.type === "GAME_IDENTITY", "relayed team-game packet");
+}));
+
+test("the owner leaving keeps the team game; a teammate on it is preferred over join order", () => withServer(async (mk) => {
+    // The room owner plays elsewhere, so it takes no part in red's election.
+    await mk().join({ name: "H", teamId: "blue" });
+    const owner = mk();
+    const early = mk();
+    const matched = mk();
+    await owner.join({ name: "O", teamId: "red", game: rando("rando/f3/1111111111111111") });
+    await early.join({ name: "E", teamId: "red", game: rando("rando/f3/9999999999999999") });
+    await matched.join({ name: "M", teamId: "red", game: rando("rando/f3/1111111111111111") });
+    await owner.close();
+    const s = await teamState(early, "red", (p) => !p.members.some((m) => m.clientId === owner.id));
+    assert.equal(s.ownerClientId, matched.id);
+    assert.equal(s.game.key, "rando/f3/1111111111111111");
+    assert.equal(syncOf(s, early.id), "mismatch");
+    const late = mk();
+    await late.join({ name: "L", teamId: "red", game: AT_TITLE });
+    const seen = await teamState(late, "red");
+    assert.equal(seen.game.key, "rando/f3/1111111111111111");
+    assert.equal(seen.ownerClientId, matched.id);
+}));
+
+test("a team left empty keeps its game; the first one back owns it and switches it by playing another", () => withServer(async (mk) => {
+    const keep = mk();
+    await keep.join({ teamId: "blue" });
+    const a = mk();
+    await a.join({ teamId: "red", game: rando("rando/f3/1111111111111111") });
+    await a.close();
+    const b = mk();
+    await b.join({ teamId: "red", game: AT_TITLE });
+    let s = await teamState(b, "red");
+    assert.equal(s.ownerClientId, b.id);
+    assert.equal(s.game.key, "rando/f3/1111111111111111");
+    await b.close();
+    const e = mk();
+    await e.join({ teamId: "red", game: rando("rando/f3/5555555555555555") });
+    s = await teamState(e, "red");
+    assert.equal(s.ownerClientId, e.id);
+    assert.equal(s.game.key, "rando/f3/5555555555555555");
+}));
+
+test("the no-team group follows a new room owner when the old one leaves", () => withServer(async (mk) => {
+    const a = mk();
+    const b = mk();
+    const c = mk();
+    await a.join({ name: "A" });
+    await b.join({ name: "B", teamId: "red" });
+    await c.join({ name: "C" });
+    await a.close();
+    const s = await teamState(c, "", (p) => p.members.length === 1);
+    assert.equal(s.ownerClientId, c.id, "B (the new room owner) plays in red, so C owns the no-team group");
+    const red = await teamState(c, "red");
+    assert.equal(red.ownerClientId, b.id);
+}));
+
+test("a probe-matched member syncs only after it confirmed the unverified match", () => withServer(async (mk) => {
+    const probe = "rando-probe/0123456789abcdef";
+    const a = mk();
+    const b = mk();
+    await a.join({ teamId: "red", game: rando(probe) });
+    await b.join({ teamId: "red", game: rando(probe) });
+    a.enterStage("F_SP103");
+    b.enterStage("F_SP103");
+    await waitSync(a, "red", { [a.id]: "unverified", [b.id]: "unverified" });
+    a.send({ type: "SET_FLAG", flagNo: 1 });
+    await b.expectNone((p) => p.type === "SET_FLAG", "SET_FLAG from an unconfirmed member");
+    publish(a, rando(probe, { allowUnverified: true }));
+    await waitSync(b, "red", { [a.id]: "ok", [b.id]: "unverified" });
+    a.send({ type: "SET_FLAG", flagNo: 2 });
+    await b.expectNone((p) => p.type === "SET_FLAG", "SET_FLAG to an unconfirmed member");
+    publish(b, rando(probe, { allowUnverified: true }));
+    await waitSync(a, "red", { [b.id]: "ok" });
+    a.send({ type: "SET_FLAG", flagNo: 3 });
+    assert.equal((await b.waitType("SET_FLAG")).flagNo, 3);
+}));
+
+test("team traffic flows only between members on the team game; presence reaches everyone", () => withServer(async (mk, server) => {
+    const a = mk();
+    const b = mk();
+    const off = mk();
+    await a.join({ name: "A", teamId: "red", game: rando("rando/f3/1111111111111111") });
+    await b.join({ name: "B", teamId: "red", game: rando("rando/f3/1111111111111111") });
+    await off.join({ name: "X", teamId: "red", game: rando("rando/f3/2222222222222222") });
+    for (const c of [a, b, off]) c.enterStage("F_SP103");
+    await waitSync(a, "red", { [off.id]: "mismatch" });
+    await settle();
+    a.send({ type: "SET_FLAG", flagNo: 1, addToQueue: true });
+    a.send({ type: "GIVE_ITEM", itemNo: 0x40, addToQueue: true });
+    a.send({ type: "ENEMY_DEFEATED", stageName: "F_SP103", layerNo: 0, kills: [] });
+    a.send({ type: "STORY_MOVE", ph: "arrive", from: {}, to: {} });
+    await b.waitType("SET_FLAG");
+    await b.waitType("GIVE_ITEM");
+    await b.waitType("ENEMY_DEFEATED");
+    await b.waitType("STORY_MOVE");
+    await off.expectNone((p) => ["SET_FLAG", "GIVE_ITEM", "ENEMY_DEFEATED", "STORY_MOVE"].includes(p.type),
+        "team traffic to a mismatched member");
+
+    off.send({ type: "SET_FLAG", flagNo: 9, addToQueue: true });
+    off.send({ type: "UPDATE_WORLD_STATE", save: "WRONG" });
+    off.send({ type: "STORY_EVENT", ph: "start" });
+    off.send({ type: "REQUEST_WORLD_STATE", catchUp: true });
+    await a.expectNone((p) => ["SET_FLAG", "UPDATE_WORLD_STATE", "STORY_EVENT", "REQUEST_WORLD_STATE"].includes(p.type),
+        "team traffic from a mismatched member");
+    await off.expectNone((p) => p.fromQueue === true || p.fromCache === true, "catch-up for a mismatched member");
+    await waitForLog(server, /\[X\] team traffic dropped \(SET_FLAG\): sync mismatch, game rando\/f3\/2222222222222222/);
+    const text = fs.readFileSync(server.logPath, "utf8");
+    assert.equal(text.match(/\[X\] team traffic dropped/g).length, 1, "logged once per member and game");
+
+    a.send({ type: "PLAYER_UPDATE", quiet: true, pos: { x: 1, y: 2, z: 3 } });
+    assert.equal((await off.waitType("PLAYER_UPDATE")).clientId, a.id);
+    off.send({ type: "PLAYER_UPDATE", quiet: true, pos: { x: 4, y: 5, z: 6 } });
+    assert.equal((await a.waitType("PLAYER_UPDATE")).clientId, off.id);
+}));
+
+test("a client without a game identity is pending and gets no team traffic", () => withServer(async (mk) => {
+    const a = mk();
+    const b = mk();
+    await a.join({ teamId: "red" });
+    await b.join({ teamId: "red", game: undefined });
+    const s = await waitSync(a, "red", { [a.id]: "ok", [b.id]: "pending" });
+    assert.equal(s.game.key, "vanilla");
+    a.send({ type: "SET_FLAG", flagNo: 1 });
+    await b.expectNone((p) => p.type === "SET_FLAG", "SET_FLAG to a member without a game");
+}));
+
+test("two teams on different seeds share a room: presence crosses, world sync does not", () => withServer(async (mk) => {
+    const r1 = mk();
+    const r2 = mk();
+    const b1 = mk();
+    const b2 = mk();
+    await r1.join({ teamId: "red", game: rando("rando/f3/1111111111111111", { share: SHARE }) });
+    await r2.join({ teamId: "red", game: rando("rando/f3/1111111111111111") });
+    await b1.join({ teamId: "blue", game: rando("rando/f3/2222222222222222") });
+    await b2.join({ teamId: "blue", game: rando("rando/f3/2222222222222222") });
+    for (const c of [r1, r2, b1, b2]) c.enterStage("F_SP103");
+    await waitSync(b2, "blue", { [b1.id]: "ok", [b2.id]: "ok" });
+    await settle();
+    r1.send({ type: "SET_FLAG", flagNo: 1 });
+    b1.send({ type: "SET_FLAG", flagNo: 2 });
+    assert.equal((await r2.waitType("SET_FLAG")).flagNo, 1);
+    assert.equal((await b2.waitType("SET_FLAG")).flagNo, 2);
+    await b1.expectNone((p) => p.type === "SET_FLAG", "red's flag on blue");
+    await r1.expectNone((p) => p.type === "SET_FLAG", "blue's flag on red");
+    r1.send({ type: "PLAYER_UPDATE", quiet: true });
+    await b1.waitType("PLAYER_UPDATE");
+    await b2.waitType("PLAYER_UPDATE");
+}));
+
+test("the permalink reaches the team only; other teams see the mode and seed name", () => withServer(async (mk) => {
+    const r1 = mk();
+    const r2 = mk();
+    const blue = mk();
+    const green = mk();
+    await r1.join({ teamId: "red", game: rando("rando/f3/1111111111111111", { share: SHARE }) });
+    await r2.join({ teamId: "red", game: AT_TITLE });
+    await blue.join({ teamId: "blue", game: rando("rando/f3/2222222222222222") });
+    const mine = await teamState(r2, "red", (p) => p.game !== null);
+    assert.deepEqual(mine.game.share, SHARE);
+    assert.equal(mine.game.key, "rando/f3/1111111111111111");
+    const theirs = await teamState(blue, "red");
+    assert.deepEqual(theirs.game, { kind: "randomizer", display: { name: "Seed 11", mode: "Randomizer 1.0.5" } });
+    assert.equal(theirs.sameGameAsYours, undefined);
+    assert.ok(theirs.members.every((m) => !("key" in m)), "no member keys for other teams");
+    assert.equal(theirs.members.find((m) => m.clientId === r1.id).name, "Seed 11");
+    await green.join({ teamId: "green", game: rando("rando/f3/1111111111111111") });
+    const race = await teamState(green, "red");
+    assert.equal(race.sameGameAsYours, true);
+    assert.equal(race.game.share, undefined);
+    await settle();
+    const leaked = [...blue.inbox, ...green.inbox].some((p) => JSON.stringify(p).includes(SHARE.permalink));
+    assert.equal(leaked, false, "red's permalink reached another team");
+}));
+
+test("a member with the permalink fills in a team game announced without one", () => withServer(async (mk) => {
+    const a = mk();
+    const b = mk();
+    await a.join({ teamId: "red", game: rando("rando/f3/1111111111111111") });
+    await b.join({ teamId: "red", game: AT_TITLE });
+    let s = await teamState(b, "red", (p) => p.game !== null);
+    assert.equal(s.game.share, undefined);
+    publish(b, rando("rando/f3/1111111111111111", { share: SHARE }));
+    s = await teamState(a, "red", (p) => p.game?.share !== undefined);
+    assert.equal(s.game.share.permalink, SHARE.permalink);
+}));
+
+test("the world cache and queue are kept per team game; switching back resumes the old one", () => withServer(async (mk) => {
+    const X = "rando/f3/1111111111111111";
+    const Y = "rando/f3/2222222222222222";
+    const a = mk();
+    await a.join({ name: "A", teamId: "red", game: rando(X) });
+    a.enterStage("F_SP103");
+    a.send({ type: "REQUEST_WORLD_STATE", catchUp: true });
+    a.send({ type: "UPDATE_WORLD_STATE", save: "SX" });
+    a.send({ type: "GIVE_ITEM", itemNo: 0x40, addToQueue: true });
+    await settle();
+    publish(a, rando(Y));
+    await teamState(a, "red", (p) => p.game.key === Y);
+    a.send({ type: "UPDATE_WORLD_STATE", save: "SY" });
+    a.send({ type: "GIVE_ITEM", itemNo: 0x41, addToQueue: true });
+    await settle();
+    await a.close();
+
+    const b = mk();
+    await b.join({ name: "B", teamId: "red", game: rando(Y) });
+    b.enterStage("F_SP103");
+    b.send({ type: "REQUEST_WORLD_STATE", catchUp: true });
+    assert.equal((await b.waitType("UPDATE_WORLD_STATE")).save, "SY");
+    const gy = await b.waitType("GIVE_ITEM", (p) => p.fromQueue === true);
+    assert.equal(gy.itemNo, 0x41);
+    assert.ok(gy.queueEpoch.endsWith(`:red:${Y}`), gy.queueEpoch);
+    await b.expectNone((p) => p.save === "SX" || p.itemNo === 0x40, "the other game's cache");
+
+    // B, alone and so the owner, switches the team back to X: X's cache is still there.
+    publish(b, rando(X));
+    await teamState(b, "red", (p) => p.game.key === X);
+    b.send({ type: "REQUEST_WORLD_STATE", catchUp: true });
+    assert.equal((await b.waitType("UPDATE_WORLD_STATE", (p) => p.save === "SX")).fromCache, true);
+    assert.equal((await b.waitType("GIVE_ITEM", (p) => p.itemNo === 0x40)).fromQueue, true);
+}));
+
+test("a member that turns ok catches up before it answers anyone's world-state request", () => withServer(async (mk) => {
+    const X = "rando/f3/1111111111111111";
+    const a = mk();
+    const b = mk();
+    await a.join({ teamId: "red", game: rando(X) });
+    await b.join({ teamId: "red", game: rando("rando/f3/2222222222222222") });
+    a.enterStage("F_SP103");
+    b.enterStage("F_SP103");
+    a.send({ type: "REQUEST_WORLD_STATE", catchUp: true });
+    await settle();
+    publish(b, rando(X));
+    await waitSync(a, "red", { [b.id]: "ok" });
+    const c = mk();
+    await c.join({ teamId: "red", game: rando(X) });
+    c.enterStage("F_SP103");
+    await settle();
+    c.send({ type: "REQUEST_WORLD_STATE", catchUp: true });
+    await a.waitType("REQUEST_WORLD_STATE", (p) => p.clientId === c.id);
+    await b.expectNone((p) => p.type === "REQUEST_WORLD_STATE", "request forwarded to a member that never caught up");
+}));
+
+test("hostile GAME_IDENTITY payloads are sanitized and cannot break the team", () => withServer(async (mk, server) => {
+    const a = mk();
+    const b = mk();
+    await a.join({ name: "A", teamId: "red", game: { inGame: true, kind: "randomizer", key: "rando/../\u0000bad key!" } });
+    let s = await teamState(a, "red");
+    assert.equal(s.game, null, "an invalid key is no key");
+    assert.equal(syncOf(s, a.id), "pending");
+    for (const bad of [
+        { inGame: "yes", key: "vanilla" },
+        { inGame: true, key: "x".repeat(97) },
+        { inGame: true, key: 42, kind: { a: 1 } },
+        { inGame: true, key: "vanilla", display: "nope", share: [1, 2] },
+        { inGame: true, key: "vanilla", kind: "evil", display: { name: "N".repeat(500), mode: ["m"] },
+          share: { permalink: "not a permalink!", seed: 7, version: "v".repeat(300) } },
+    ]) {
+        publish(a, bad);
+    }
+    s = await teamState(a, "red", (p) => p.game?.share !== undefined);
+    assert.deepEqual(s.game, { kind: "", key: "vanilla", display: { name: "N".repeat(64), mode: "" },
+                               share: { permalink: "", seed: "", version: "v".repeat(64) } });
+    await b.join({ teamId: "red" });
+    await waitSync(b, "red", { [b.id]: "ok" });
+    a.send({ type: "TEAM_STATE", teamId: "red", ownerClientId: 99, game: null, members: [] });
+    a.send({ type: "TEAM_GAME_CONFLICT", teamId: "red" });
+    await waitForLog(server, /\[A\] rejected TEAM_GAME_CONFLICT \(server-only packet\)/);
+    await b.expectNone((p) => (p.type === "TEAM_STATE" && p.ownerClientId === 99) || p.type === "TEAM_GAME_CONFLICT",
+        "a client-made team packet");
+}));
+
+test("teleport across teams: randomizer teams only with teleportAcrossTeams and never between games", () => withServer(async (mk) => {
+    const a = mk();
+    const b = mk();
+    const c = mk();
+    const d = mk();
+    await a.join({ name: "A", teamId: "red", game: rando("rando/f3/1111111111111111") });
+    await b.join({ name: "B", teamId: "blue", game: rando("rando/f3/2222222222222222") });
+    await c.join({ name: "C", teamId: "green", game: rando("rando/f3/1111111111111111") });
+    await d.join({ name: "D", teamId: "red", game: rando("rando/f3/1111111111111111") });
+    for (const x of [a, b, c, d]) x.enterStage("F_SP108");
+    a.send({ type: "UPDATE_ROOM_STATE", state: { teleportMode: true } });
+    await a.waitType("UPDATE_ROOM_STATE", (p) => p.state.teleportMode === true);
+    await settle();
+    a.send({ type: "REQUEST_TELEPORT", targetClientId: b.id, requestId: 1 });
+    assert.equal((await a.waitType("TELEPORT_TO", (p) => p.requestId === 1)).reason, "other-team");
+    d.send({ type: "REQUEST_TELEPORT", targetClientId: a.id, requestId: 2 });
+    assert.equal((await a.waitType("REQUEST_TELEPORT", (p) => p.requestId === 2)).clientId, d.id, "teammates still teleport");
+    a.send({ type: "UPDATE_ROOM_STATE", state: { teleportAcrossTeams: true } });
+    await a.waitType("UPDATE_ROOM_STATE", (p) => p.state.teleportAcrossTeams === true);
+    await settle(1100);
+    a.send({ type: "REQUEST_TELEPORT", targetClientId: b.id, requestId: 3 });
+    assert.equal((await a.waitType("TELEPORT_TO", (p) => p.requestId === 3)).reason, "other-game");
+    await settle(1100);
+    a.send({ type: "REQUEST_TELEPORT", targetClientId: c.id, requestId: 4 });
+    await c.waitType("REQUEST_TELEPORT", (p) => p.requestId === 4);
+}));
+
+test("vanilla players on different teams still teleport to each other", () => withServer(async (mk) => {
+    const a = mk();
+    const b = mk();
+    await a.join({ teamId: "red" });
+    await b.join({ teamId: "blue" });
+    a.enterStage("F_SP108");
+    b.enterStage("F_SP108");
+    a.send({ type: "UPDATE_ROOM_STATE", state: { teleportMode: true } });
+    await a.waitType("UPDATE_ROOM_STATE", (p) => p.state.teleportMode === true);
+    a.send({ type: "REQUEST_TELEPORT", targetClientId: b.id, requestId: 5 });
+    await b.waitType("REQUEST_TELEPORT", (p) => p.requestId === 5);
+}));
+
+test("room state carries teleportAcrossTeams, off by default and owner-only", () => withServer(async (mk) => {
+    const a = mk();
+    const b = mk();
+    const all = await a.join();
+    assert.equal(all.roomState.teleportAcrossTeams, false);
+    await b.join();
+    b.send({ type: "UPDATE_ROOM_STATE", state: { teleportAcrossTeams: true } });
+    await settle();
+    a.send({ type: "UPDATE_ROOM_STATE", state: { teleportAcrossTeams: "yes" } });
+    const s = await b.waitType("UPDATE_ROOM_STATE");
+    assert.equal(s.state.teleportAcrossTeams, false);
+}));

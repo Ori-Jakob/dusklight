@@ -73,6 +73,17 @@ A client joins with a `HANDSHAKE` carrying `app: "twili-together"` and an intege
 4000). Newer protocol versions join, but presence, kills, story events, world-state requests
 and PvP only pass between clients on the same version.
 
+The handshake may also carry `game`, the client's game identity; `GAME_IDENTITY` updates it:
+`{inGame, kind, key, display: {name, mode}, share: {permalink, seed, version}, allowUnverified}`.
+`key` is `vanilla`, `rando/<format>/<digest>` (a randomizer seed found on disk and checked
+against the running randomizer), `rando-probe/<fingerprint>` (checked only by probing item
+checks: syncs once the player confirmed it, `allowUnverified`) or `mode/<game mode id>`. Each
+team has an owner and a team game, and team traffic only flows between members in game on it.
+`TEAM_STATE {teamId, ownerClientId, game, members: [{clientId, sync, ...}]}` goes to the room
+on every change (and to a joiner for every team); only the team's own members get the keys and
+`game.share`. `TEAM_GAME_CONFLICT` asks a team owner who loaded another game while teammates
+still play the team's; `CLAIM_TEAM_GAME` switches the team to the owner's game anyway.
+
 WebSocket clients may offer the subprotocol `twili-together.5`. The server selects it when it is
 offered and accepts connections that offer none or only unknown ones.
 

@@ -14,8 +14,15 @@
  *   Room state UPDATE_ROOM_STATE is accepted from the owner only and echoed to the room.
  *   Teams      Flag, event, item, dungeon and world-state packets go to the same room, teamId and
  *              save layout, stamped with the sender's clientId, teamId, session key, name and colour.
+ *   Team game  Each client announces what it plays (HANDSHAKE "game", then GAME_IDENTITY). Every
+ *              team has an owner (the room owner first, then members on the team game, then join
+ *              order) and a sticky team game: set by the first member in game, switched only by
+ *              the owner (after CLAIM_TEAM_GAME while teammates still play the old one). Team
+ *              packets flow only between members whose state is "ok" (in game on the team game).
+ *              TEAM_STATE tells the room each team's owner, game and member states; the seed's
+ *              permalink ("share") reaches that team only.
  *   Catch-up   The last untargeted UPDATE_WORLD_STATE and the addToQueue packets since are kept
- *              per team and layout. REQUEST_WORLD_STATE goes to caught-up teammates on the same
+ *              per team, team game and layout. REQUEST_WORLD_STATE goes to caught-up teammates on the same
  *              protocol and layout; the cache answers only when none can, and catchUp:true also
  *              replays the queue and the latest STORY_MOVE arrive. Replays skip the requester's
  *              own session.
@@ -23,6 +30,8 @@
  *   Kills      ENEMY_DEFEATED / STORY_EVENT go to teammates in the same stage and layer, uncached.
  *   Story      STORY_MOVE goes to the whole team and is never queued.
  *   Teleport   REQUEST_TELEPORT / TELEPORT_TO go only to the client named, while teleportMode is on.
+ *              Across teams where either plays a non-vanilla game only with teleportAcrossTeams,
+ *              and never between different team games.
  *   PvP        DAMAGE_PLAYER goes only to the client named, while pvpMode is on and the rules allow
  *              it, at most once per TT_DAMAGE_INTERVAL_MS per pair. DAMAGE_RESULT goes back to the
  *              attacker. Refusals are answered by the server.
@@ -79,7 +88,13 @@ const TEAM_PRESENCE_PACKET_TYPES = new Set(["ENEMY_DEFEATED", "STORY_EVENT"]);
 // The whole team; the latest arrive is replayed on catch-up (see sendTeamStoryMove).
 const TEAM_STORY_PACKET_TYPES = new Set(["STORY_MOVE"]);
 // Every client obeys these, so a relayed copy could rewrite the roster or disconnect the room.
-const SERVER_ONLY_TYPES = new Set(["ALL_CLIENT_STATE", "SERVER_MESSAGE", "DISABLE_CLIENT"]);
+const SERVER_ONLY_TYPES = new Set(["ALL_CLIENT_STATE", "SERVER_MESSAGE", "DISABLE_CLIENT", "TEAM_STATE",
+    "TEAM_GAME_CONFLICT"]);
+const GAME_KINDS = new Set(["vanilla", "randomizer", "mode"]);
+const GAME_KEY_RE = /^[A-Za-z0-9/._-]{1,96}$/;
+const PERMALINK_RE = /^[A-Za-z0-9+/=_-]{1,512}$/;
+// A key from a probe fingerprint only: it syncs once that member confirmed it.
+const UNVERIFIED_KEY_PREFIX = "rando-probe/";
 
 function envNumber(name, fallback) {
     const v = Number(process.env[name]);
@@ -134,6 +149,9 @@ function packetSummary(packet) {
             return `${packet.type} saveTbl=${text(packet.saveTblNo)} target=${packet.targetClientId ? text(packet.targetClientId) : "team"}`;
         case "REQUEST_WORLD_STATE":
             return `${packet.type}${packet.catchUp === true ? " catchUp" : ""}`;
+        case "GAME_IDENTITY":
+            return `${packet.type} inGame=${text(packet.inGame)} kind=${text(packet.kind)} key=${text(packet.key)}` +
+                (packet.allowUnverified === true ? " allowUnverified" : "");
         case "UPDATE_ROOM_STATE": {
             const state = packet.state && typeof packet.state === "object" ? packet.state : {};
             return `${packet.type} ${Object.entries(state).map(([k, v]) => `${k}=${text(v)}`).join(" ")}`;
@@ -177,10 +195,16 @@ let nextClientId = 1;
  *             isSaveLoaded: boolean, caughtUp: boolean, stageName: string, layerNo: number,
  *             roomNo: number, saveTblNo: number, horseName: string, horsePlace: object|null,
  *             lastTeleportRequestAt: number, lastDamageAt: Map<number, number>,
- *             awaitingResults: Map<string, number> }} Client
+ *             awaitingResults: Map<string, number>, game: GameIdentity,
+ *             gateLogged: Set<string> }} Client
+ * @typedef {{ inGame: boolean, kind: string, key: string, display: { name: string, mode: string },
+ *             share: object|null, allowUnverified: boolean }} GameIdentity
+ * @typedef {{ id: string, ownerClientId: number|null, game: object|null, prevKeys: string[],
+ *             conflictKey: string, sig: string }} Team
  * @typedef {{ id: string, clients: Map<number, Client>, ownerClientId: number|null,
- *             state: object, teamStates: Map<string, object>, teamQueues: Map<string, object[]>,
- *             teamStoryMoves: Map<string, object>, expiryTimer: NodeJS.Timeout|null }} Room
+ *             state: object, teams: Map<string, Team>, teamStates: Map<string, object>,
+ *             teamQueues: Map<string, object[]>, teamStoryMoves: Map<string, object>,
+ *             expiryTimer: NodeJS.Timeout|null }} Room
  */
 
 /** @type {Map<string, Room>} */
@@ -195,6 +219,7 @@ function defaultRoomState() {
         pvpLethal: false,
         showLocationsMode: true,
         teleportMode: false,
+        teleportAcrossTeams: false,
         syncWorldState: true,
         shareWoodenShield: true,
         syncNPCs: false,
@@ -213,6 +238,8 @@ function getOrCreateRoom(roomId) {
             clients: new Map(),
             ownerClientId: null,
             state: defaultRoomState(),
+            // Kept while the room lives, so a team that comes back resumes its game.
+            teams: new Map(),
             teamStates: new Map(),
             teamQueues: new Map(),
             teamStoryMoves: new Map(),
@@ -282,10 +309,11 @@ function broadcastRoom(room, senderClientId, packet) {
     }
 }
 
+// Team traffic reaches only teammates in game on the team game.
 function broadcastTeam(room, sender, packet) {
     const msg = JSON.stringify(packet);
     for (const [id, c] of room.clients) {
-        if (id !== sender.clientId && c.teamId === sender.teamId && c.conn.readyState === 1) {
+        if (id !== sender.clientId && c.teamId === sender.teamId && c.conn.readyState === 1 && syncOk(room, c)) {
             c.conn.send(msg);
         }
     }
@@ -296,15 +324,15 @@ function broadcastWorld(room, sender, packet) {
     const msg = JSON.stringify(packet);
     for (const [id, c] of room.clients) {
         if (id !== sender.clientId && c.teamId === sender.teamId && c.layout === sender.layout &&
-            c.conn.readyState === 1) {
+            c.conn.readyState === 1 && syncOk(room, c)) {
             c.conn.send(msg);
         }
     }
 }
 
-// Cache, queue and queue numbers are kept per team and save layout.
-function worldKey(client) {
-    return JSON.stringify([client.teamId, client.layout]);
+// Cache, queue and queue numbers are kept per team, team game and save layout.
+function worldKey(room, client) {
+    return JSON.stringify([client.teamId, teamGameKey(room, client), client.layout]);
 }
 
 function broadcastPresence(room, sender, packet) {
@@ -336,6 +364,7 @@ function broadcastTeamPresence(room, sender, packet) {
             c.online &&
             c.isSaveLoaded &&
             c.teamId === sender.teamId &&
+            syncOk(room, c) &&
             c.stageName === sender.stageName &&
             c.layerNo === sender.layerNo &&
             c.protocolVersion === sender.protocolVersion
@@ -376,6 +405,33 @@ function asColor(v, fallback) {
     if (!v || typeof v !== "object") return fallback;
     const ch = (x, def) => asInt(x, def, 0, 255);
     return { r: ch(v.r, fallback.r), g: ch(v.g, fallback.g), b: ch(v.b, fallback.b) };
+}
+
+// What a randomizer teammate needs to generate the same seed; null when nothing usable.
+function asShare(v) {
+    if (!v || typeof v !== "object") return null;
+    const share = {
+        permalink: typeof v.permalink === "string" && PERMALINK_RE.test(v.permalink) ? v.permalink : "",
+        seed: asString(v.seed, "", 64),
+        version: asString(v.version, "", 64),
+    };
+    return share.permalink || share.seed || share.version ? share : null;
+}
+
+// A client's game: no key while it is not in game.
+function asGameIdentity(v) {
+    const o = v && typeof v === "object" ? v : {};
+    const display = o.display && typeof o.display === "object" ? o.display : {};
+    const key = typeof o.key === "string" && GAME_KEY_RE.test(o.key) ? o.key : "";
+    const inGame = o.inGame === true && key !== "";
+    return {
+        inGame,
+        kind: GAME_KINDS.has(o.kind) ? o.kind : "",
+        key: inGame ? key : "",
+        display: { name: asString(display.name, "", 64), mode: asString(display.mode, "", 64) },
+        share: inGame ? asShare(o.share) : null,
+        allowUnverified: o.allowUnverified === true,
+    };
 }
 
 function updateCachedClientState(client, packet) {
@@ -433,14 +489,14 @@ function sameSession(client, sessionKey) {
 // Cached world state and/or queued packets, skipping the client's own session.
 function sendTeamCatchUp(room, client, withState, withQueue) {
     const ownSession = (p) => p.clientId === client.clientId || sameSession(client, p.senderSessionKey);
-    const cached = withState ? room.teamStates.get(worldKey(client)) : undefined;
+    const cached = withState ? room.teamStates.get(worldKey(room, client)) : undefined;
     const sendState = cached !== undefined && !ownSession(cached);
     if (sendState) {
         send(client, { ...cached, fromCache: true });
     }
     let replayed = 0;
     if (withQueue) {
-        for (const packet of room.teamQueues.get(worldKey(client)) ?? []) {
+        for (const packet of room.teamQueues.get(worldKey(room, client)) ?? []) {
             if (ownSession(packet)) continue;
             send(client, { ...packet, fromQueue: true });
             replayed++;
@@ -451,9 +507,13 @@ function sendTeamCatchUp(room, client, withState, withQueue) {
     }
 }
 
+function storyKey(room, client) {
+    return JSON.stringify([client.teamId, teamGameKey(room, client)]);
+}
+
 // The team's latest STORY_MOVE arrive, never to the session that sent it.
 function sendTeamStoryMove(room, client) {
-    const cached = room.teamStoryMoves.get(client.teamId);
+    const cached = room.teamStoryMoves.get(storyKey(room, client));
     if (!cached || cached.clientId === client.clientId || sameSession(client, cached.senderSessionKey)) {
         return;
     }
@@ -468,6 +528,219 @@ function assignOwnerIfNeeded(room) {
     const first = room.clients.keys().next();
     room.ownerClientId = first.done ? null : first.value;
     return true;
+}
+
+function teamOf(room, teamId) {
+    let team = room.teams.get(teamId);
+    if (!team) {
+        team = { id: teamId, ownerClientId: null, game: null, prevKeys: [], conflictKey: "", sig: "" };
+        room.teams.set(teamId, team);
+    }
+    return team;
+}
+
+function teamMembers(room, team) {
+    return [...room.clients.values()].filter((c) => c.teamId === team.id);
+}
+
+function describeTeam(team) {
+    return team.id === "" ? "<no team>" : team.id;
+}
+
+// ok: in game on the team game. unverified: the same probe key, not confirmed by the member.
+// pending: not in game, or no team game yet. mismatch: in game on another game.
+function memberSync(team, c) {
+    if (!c.game.inGame || team.game === null) return "pending";
+    if (c.game.key !== team.game.key) return "mismatch";
+    if (c.game.key.startsWith(UNVERIFIED_KEY_PREFIX) && !c.game.allowUnverified) return "unverified";
+    return "ok";
+}
+
+function syncOk(room, c) {
+    const team = room.teams.get(c.teamId);
+    return team !== undefined && memberSync(team, c) === "ok";
+}
+
+function teamGameKey(room, client) {
+    const team = room.teams.get(client.teamId);
+    return team && team.game ? team.game.key : "";
+}
+
+// Only while the team has no owner online: the room owner, then members in game on the team
+// game, then join order. Ownership does not follow the room owner around.
+function electTeamOwner(room, team) {
+    if (team.ownerClientId !== null && room.clients.has(team.ownerClientId)) return;
+    const members = teamMembers(room, team);
+    const pick = members.find((c) => c.clientId === room.ownerClientId) ??
+        members.find((c) => team.game !== null && c.game.inGame && c.game.key === team.game.key) ??
+        members[0];
+    team.ownerClientId = pick ? pick.clientId : null;
+    team.conflictKey = "";
+    if (pick) log(`[team ${describeTeam(team)}] owner is now ${pick.name} (id=${pick.clientId})`);
+}
+
+// The previous game's caches are kept, so an owner who loaded the wrong save and switches back resumes.
+function setTeamGame(room, team, client) {
+    const g = client.game;
+    const oldKey = team.game ? team.game.key : null;
+    if (oldKey !== null && oldKey !== g.key) {
+        team.prevKeys = [oldKey];
+        const keep = new Set([g.key, oldKey]);
+        for (const map of [room.teamStates, room.teamQueues, room.teamQueueSeqs, room.teamStoryMoves]) {
+            for (const k of [...map.keys()]) {
+                const [teamId, key] = JSON.parse(k);
+                if (teamId === team.id && !keep.has(key)) map.delete(k);
+            }
+        }
+    }
+    team.game = { kind: g.kind, key: g.key, display: { ...g.display }, share: g.share ? { ...g.share } : null };
+    team.conflictKey = "";
+    if (oldKey !== g.key) log(`[team ${describeTeam(team)}] team game is now ${g.key} (from ${client.name})`);
+}
+
+function publicGame(game, own) {
+    if (game === null) return null;
+    const out = { kind: game.kind, display: { ...game.display } };
+    if (own) {
+        out.key = game.key;
+        if (game.share) out.share = { ...game.share };
+    }
+    return out;
+}
+
+// G1: the first member in game sets an unset team game. G2: the owner switches it while no
+// teammate plays it. G3: otherwise the owner is asked (TEAM_GAME_CONFLICT, answered by
+// CLAIM_TEAM_GAME). G4: other members never change it.
+function applyTeamGameRules(room, team, client) {
+    const g = client.game;
+    if (!g.inGame) return;
+    if (team.game === null) {
+        setTeamGame(room, team, client);
+        return;
+    }
+    if (g.key === team.game.key) {
+        if (client.clientId === team.ownerClientId) {
+            team.game.display = { ...g.display };
+            team.conflictKey = "";
+        }
+        // A member who has the seed's permalink fills in a team game announced without it.
+        if (g.share !== null && (team.game.share === null || client.clientId === team.ownerClientId)) {
+            team.game.share = { ...g.share };
+        }
+        return;
+    }
+    if (client.clientId !== team.ownerClientId) return;
+    const playing = teamMembers(room, team).filter((c) =>
+        c !== client && c.game.inGame && c.game.key === team.game.key);
+    if (playing.length === 0) {
+        setTeamGame(room, team, client);
+        return;
+    }
+    if (team.conflictKey !== g.key) {
+        team.conflictKey = g.key;
+        log(`[team ${describeTeam(team)}] owner ${client.name} plays ${g.key}; ${playing.length} teammate(s) still on ${team.game.key}`);
+        send(client, { type: "TEAM_GAME_CONFLICT", teamId: team.id, game: publicGame(team.game, true),
+                       teammatesInGame: playing.length, yourKey: g.key });
+    }
+}
+
+// A member that turns ok, or a new team game, needs a fresh catch-up before it may answer others.
+function updateTeam(room, team, change) {
+    const before = new Map(teamMembers(room, team).map((c) => [c.clientId, memberSync(team, c)]));
+    const oldKey = team.game ? team.game.key : null;
+    change();
+    const keyChanged = (team.game ? team.game.key : null) !== oldKey;
+    for (const c of teamMembers(room, team)) {
+        if (keyChanged || (memberSync(team, c) === "ok" && before.get(c.clientId) !== "ok")) {
+            c.caughtUp = false;
+        }
+    }
+}
+
+// The team's own members get the game key, the member keys and the permalink; other teams see
+// the game's mode and seed name only.
+function teamStatePacket(room, team, recipient) {
+    const own = recipient.teamId === team.id;
+    const packet = {
+        type: "TEAM_STATE",
+        teamId: team.id,
+        ownerClientId: team.ownerClientId ?? 0,
+        game: publicGame(team.game, own),
+        members: teamMembers(room, team).map((c) => {
+            const m = { clientId: c.clientId, sync: memberSync(team, c), inGame: c.game.inGame, kind: c.game.kind,
+                        name: c.game.display.name, mode: c.game.display.mode };
+            if (own) m.key = c.game.key;
+            return m;
+        }),
+    };
+    const mine = room.teams.get(recipient.teamId);
+    if (!own && team.game && mine && mine.game && mine.game.key === team.game.key) packet.sameGameAsYours = true;
+    return packet;
+}
+
+// On any change of a team's owner, game or member states; a new team game re-sends every team
+// (sameGameAsYours depends on the recipient's team).
+function broadcastTeams(room, skipClientId = -1) {
+    const gameKeys = JSON.stringify([...room.teams.values()].map((t) => [t.id, t.game ? t.game.key : ""]));
+    const gamesChanged = gameKeys !== room.teamGameKeys;
+    room.teamGameKeys = gameKeys;
+    for (const team of room.teams.values()) {
+        const sig = JSON.stringify(teamStatePacket(room, team, { teamId: team.id }));
+        if (sig === team.sig && !gamesChanged) continue;
+        team.sig = sig;
+        for (const c of room.clients.values()) {
+            if (c.clientId !== skipClientId) send(c, teamStatePacket(room, team, c));
+        }
+    }
+}
+
+function sendAllTeams(room, client) {
+    for (const team of room.teams.values()) {
+        if (teamMembers(room, team).length > 0) send(client, teamStatePacket(room, team, client));
+    }
+}
+
+// Logged once per member, state and game.
+function dropUnsynced(room, client, type) {
+    const team = room.teams.get(client.teamId);
+    const state = team ? memberSync(team, client) : "pending";
+    const key = `${state}:${client.game.key}`;
+    if (!client.gateLogged.has(key)) {
+        client.gateLogged.add(key);
+        log(`[${client.name}] team traffic dropped (${type}): sync ${state}, game ${client.game.key || "none"}`);
+    }
+}
+
+function handleGameIdentity(room, client, packet) {
+    const team = teamOf(room, client.teamId);
+    updateTeam(room, team, () => {
+        client.game = asGameIdentity(packet);
+        applyTeamGameRules(room, team, client);
+    });
+    broadcastTeams(room);
+}
+
+function handleClaimTeamGame(room, client) {
+    const team = teamOf(room, client.teamId);
+    if (team.ownerClientId !== client.clientId || !client.game.inGame) {
+        log(`[${client.name}] rejected CLAIM_TEAM_GAME (${team.ownerClientId !== client.clientId ? "not the team owner" : "not in game"})`);
+        return;
+    }
+    updateTeam(room, team, () => setTeamGame(room, team, client));
+    broadcastTeams(room);
+}
+
+// Refused across teams when either plays something other than vanilla, unless the room allows
+// it, and never between two different team games.
+function crossTeamTeleportRefusal(room, a, b) {
+    if (a.teamId === b.teamId) return null;
+    const ga = room.teams.get(a.teamId)?.game ?? null;
+    const gb = room.teams.get(b.teamId)?.game ?? null;
+    const special = (g) => g !== null && g.kind !== "vanilla";
+    if (!special(ga) && !special(gb)) return null;
+    if (!room.state.teleportAcrossTeams) return "other-team";
+    if (ga === null || gb === null || ga.key !== gb.key) return "other-game";
+    return null;
 }
 
 // Why a HANDSHAKE may not join, or null. Newer protocols join.
@@ -523,24 +796,33 @@ function handleHandshake(conn, packet) {
         lastTeleportRequestAt: 0,
         lastDamageAt: new Map(), // victim clientId -> Date.now() of the last forwarded hit
         awaitingResults: new Map(), // "attackerId:hitId" of hits forwarded to this victim -> Date.now()
+        game: asGameIdentity(packet.game),
+        gateLogged: new Set(),
     };
     room.clients.set(clientId, client);
     clientsById.set(clientId, client);
     // Set early so the close handler removes the client even if the rest throws.
     conn.client = client;
     const ownerChanged = assignOwnerIfNeeded(room);
+    const team = teamOf(room, client.teamId);
+    updateTeam(room, team, () => {
+        electTeamOwner(room, team);
+        applyTeamGameRules(room, team, client);
+    });
 
     send(client, {
         type: "ALL_CLIENT_STATE",
         clients: [...room.clients.values()].map((c) => clientStateOf(c, clientId)),
         roomState: roomStatePacket(room).state,
     });
+    sendAllTeams(room, client);
 
     broadcastRoom(room, clientId, { type: "UPDATE_CLIENT_STATE", ...clientStateOf(client, -1) });
     if (ownerChanged) {
         // The joiner already has the room state from ALL_CLIENT_STATE.
         broadcastRoom(room, clientId, roomStatePacket(room));
     }
+    broadcastTeams(room, clientId);
 
     log(`[+] ${client.name} (id=${clientId}, team="${client.teamId}", session=${client.sessionKey || "none"}, v=${client.modVersion}/p${client.protocolVersion}, layout=${client.layout || "none"}, ${client.transport}) joined room ${describeRoom(room)}. Room size: ${room.clients.size}${room.ownerClientId === clientId ? " (owner)" : ""}`);
 }
@@ -556,6 +838,10 @@ function handleDisconnect(client) {
         broadcastRoom(room, -1, roomStatePacket(room));
         log(`[room ${describeRoom(room)}] owner is now id=${room.ownerClientId}`);
     }
+    // The team keeps its game; only a new owner is elected.
+    const team = room.teams.get(client.teamId);
+    if (team) updateTeam(room, team, () => electTeamOwner(room, team));
+    broadcastTeams(room);
     log(`[-] ${client.name} (id=${client.clientId}) left room ${describeRoom(room)}. Room size: ${room.clients.size}`);
     if (room.clients.size === 0) {
         scheduleRoomExpiry(room);
@@ -578,6 +864,8 @@ function handleRequestTeleport(room, client, packet) {
     const target = room.clients.get(targetId);
     if (!target || target.clientId === client.clientId || !target.online) return refuse("offline");
     if (!target.isSaveLoaded || !client.isSaveLoaded) return refuse("not-in-game");
+    const crossTeam = crossTeamTeleportRefusal(room, client, target);
+    if (crossTeam !== null) return refuse(crossTeam);
     send(target, { type: "REQUEST_TELEPORT", clientId: client.clientId, targetClientId: targetId, requestId });
 }
 
@@ -711,6 +999,16 @@ function handlePacket(client, packet) {
         return;
     }
 
+    // Client-to-server only: they carry the permalink, which only the team may see.
+    if (packet.type === "GAME_IDENTITY") {
+        handleGameIdentity(room, client, packet);
+        return;
+    }
+    if (packet.type === "CLAIM_TEAM_GAME") {
+        handleClaimTeamGame(room, client);
+        return;
+    }
+
     // Tag all relayed packets with the sender's identity.
     const relayed = { ...packet, clientId: client.clientId };
     // Only the server numbers queued packets.
@@ -750,6 +1048,13 @@ function handlePacket(client, packet) {
         return;
     }
 
+    const teamTraffic = TEAM_PRESENCE_PACKET_TYPES.has(packet.type) || TEAM_STORY_PACKET_TYPES.has(packet.type) ||
+        TEAM_PACKET_TYPES.has(packet.type);
+    if (teamTraffic && !syncOk(room, client)) {
+        dropUnsynced(room, client, packet.type);
+        return;
+    }
+
     if (TEAM_PRESENCE_PACKET_TYPES.has(packet.type)) {
         relayed.teamId = client.teamId;
         relayed.senderSessionKey = client.sessionKey;
@@ -766,7 +1071,7 @@ function handlePacket(client, packet) {
         // Relayed first, so a packet that cannot be serialized throws before it is cached.
         broadcastTeam(room, client, relayed);
         if (packet.ph === "arrive") {
-            room.teamStoryMoves.set(client.teamId, relayed);
+            room.teamStoryMoves.set(storyKey(room, client), relayed);
         }
         return;
     }
@@ -783,16 +1088,16 @@ function handlePacket(client, packet) {
             if (packet.targetClientId) {
                 // An answer to one REQUEST_WORLD_STATE; never cached, as cache and queue change together.
                 const target = room.clients.get(packet.targetClientId);
-                if (target && target.teamId === client.teamId && target.layout === client.layout) {
+                if (target && target.teamId === client.teamId && target.layout === client.layout && syncOk(room, target)) {
                     send(target, relayed);
                     target.caughtUp = true;
                 }
                 return;
             }
             broadcastWorld(room, client, relayed);
-            // Fresh full state supersedes everything queued for this team and layout.
-            room.teamStates.set(worldKey(client), relayed);
-            room.teamQueues.set(worldKey(client), []);
+            // Fresh full state supersedes everything queued for this team, game and layout.
+            room.teamStates.set(worldKey(room, client), relayed);
+            room.teamQueues.set(worldKey(room, client), []);
             return;
         }
 
@@ -801,7 +1106,7 @@ function handlePacket(client, packet) {
             const live = [...room.clients.values()].filter((c) =>
                 c.clientId !== client.clientId && c.teamId === client.teamId && c.isSaveLoaded &&
                 c.caughtUp && c.protocolVersion === client.protocolVersion &&
-                c.layout === client.layout && !sameSession(client, c.sessionKey));
+                c.layout === client.layout && !sameSession(client, c.sessionKey) && syncOk(room, c));
             // The cache stands in only for absent teammates: it may predate flags cleared since.
             sendTeamCatchUp(room, client, live.length === 0, packet.catchUp === true);
             if (packet.catchUp === true) {
@@ -819,14 +1124,14 @@ function handlePacket(client, packet) {
 
         if (packet.addToQueue) {
             // Numbered so a reconnecting client can skip replayed packets it already applied.
-            const seq = (room.teamQueueSeqs.get(worldKey(client)) ?? 0) + 1;
-            room.teamQueueSeqs.set(worldKey(client), seq);
-            relayed.queueEpoch = `${room.queueEpoch}:${client.layout}:${client.teamId}`;
+            const seq = (room.teamQueueSeqs.get(worldKey(room, client)) ?? 0) + 1;
+            room.teamQueueSeqs.set(worldKey(room, client), seq);
+            relayed.queueEpoch = `${room.queueEpoch}:${client.layout}:${client.teamId}:${teamGameKey(room, client)}`;
             relayed.queueSeq = seq;
         }
         broadcastWorld(room, client, relayed);
         if (packet.addToQueue) {
-            queueTeamPacket(room, worldKey(client), relayed);
+            queueTeamPacket(room, worldKey(room, client), relayed);
         }
         return;
     }
