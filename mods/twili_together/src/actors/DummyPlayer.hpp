@@ -116,6 +116,8 @@ struct DummyPlayerDebugInfo {
     // Held items (updateRemoteHeldItemMatrix)
     bool hookChain = false;
     float hookTipDist = 0.0f;
+    uint32_t hookShots = 0;  // chains drawn, counted when one appears
+    float hookPeak = 0.0f;   // the longest tip distance of the latest chain
     uint8_t ironBallMode = 0;
     float ironBallDist = 0.0f;
     bool lanternFlame = false;
@@ -292,6 +294,9 @@ private:
     // Autotest (getDebugInfo)
     bool mDummyHookChain = false;
     float mDummyHookTipDist = 0.0f;
+    bool mDummyHookWasChain = false;
+    uint32_t mDummyHookShots = 0;
+    float mDummyHookPeak = 0.0f;
     uint8_t mDummyHookSub = 0;  // RemoteHookshot::sub shown (for the mode log)
     uint8_t mDummyIronBallMode = 0;
     float mDummyIronBallDist = 0.0f;

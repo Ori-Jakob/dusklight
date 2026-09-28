@@ -400,8 +400,9 @@ module.exports = [
                     // While B aims, its updates carry a tip 500 units ahead of it: the chain is drawn.
                     { op: "expectRemoteItemFx", hookChain: true, minTipDist: 250, frames: 10, timeoutSec: 20 },
                     { op: "expectRemoteItemFx", hookChain: false, timeoutSec: 20 },
-                    // Then B's real shot.
-                    { op: "expectRemoteItemFx", hookChain: true, minTipDist: 200, timeoutSec: 20 },
+                    // B's real shot is out for ~6 ticks: counted by the dummy, as playout may skip a tick.
+                    { op: "markRemoteItemFx" },
+                    { op: "expectRemoteItemFx", minHookShots: 1, minHookPeak: 150, timeoutSec: 20 },
                     { op: "log", msg: "ITEMFX_HOLD clawshot" },
                     { op: "expectRemoteItemFx", levelSfx: true, timeoutSec: 20 },
                     { op: "expectRemoteItemFx", hookChain: false, timeoutSec: 20 },

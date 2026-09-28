@@ -25,7 +25,8 @@
 // expectRemoteItemFx  minDrawn / maxDrawn ({kind: n}), minSeen ({kind: n} since the mark),
 //                     explosions, hitMarks, sounds, splashes, particles (since the mark),
 //                     maxExplosions, tornado, boomCharge, minLights, maxLights, minEmitters,
-//                     maxHeapUsed, hookChain, minTipDist, minIronBallMode,
+//                     maxHeapUsed, hookChain, minTipDist, minHookShots (since the mark),
+//                     minHookPeak (the latest chain's longest tip distance), minIronBallMode,
 //                     maxIronBallMode, minIronBallDist, lanternFlame, minLanternGlow,
 //                     maxLanternGlow, levelSfx; frames (0), timeoutSec (20)
 //     Until the first peer's dummy shows every field given, then for `frames` more ticks.
@@ -347,6 +348,7 @@ std::string perKindMismatch(const json& want, const char* key,
 }
 
 DummyItemFxDebug sMark;
+uint32_t sMarkHookShots = 0;
 int sItemFxMatchedAt = -1;
 
 std::string remoteMismatch(const json& step, const DummyPlayerDebugInfo& info) {
@@ -378,12 +380,14 @@ std::string remoteMismatch(const json& step, const DummyPlayerDebugInfo& info) {
     atLeast("minLights", fx.lights);
     atLeast("minEmitters", fx.emitters);
     atLeast("minIronBallMode", info.ironBallMode);
+    atLeast("minHookShots", info.hookShots - sMarkHookShots);
     auto atLeastF = [&](const char* key, float have) {
         if (why.empty() && step.contains(key) && have < step[key].get<float>()) {
             why = fmt::format("{} is {:.1f}", key, have);
         }
     };
     atLeastF("minTipDist", info.hookTipDist);
+    atLeastF("minHookPeak", info.hookPeak);
     atLeastF("minIronBallDist", info.ironBallDist);
     atLeastF("minLanternGlow", info.lanternGlow);
     if (why.empty() && step.contains("levelSfx")) {
@@ -438,13 +442,14 @@ bool expectRemoteItemFx(StepContext& ctx) {
         TwiliLog.info("[autotest] remote item fx: drawn {}/{}/{}/{}/{} seen {}/{}/{}/{}/{} "
                       "explosions {} hit marks {} sounds {} splashes {} particles {} skipped {} "
                       "emitters {} lights {} tornado {} charge {} hook {} ({:.0f}) ball {} "
-                      "({:.0f}) lantern {} ({:.2f}) level sfx {} heap 0x{:X}",
+                      "({:.0f}) lantern {} ({:.2f}) level sfx {} hook shots {} (peak {:.0f}) "
+                      "heap 0x{:X}",
                       fx.drawn[1], fx.drawn[2], fx.drawn[3], fx.drawn[4], fx.drawn[5], fx.seen[1],
                       fx.seen[2], fx.seen[3], fx.seen[4], fx.seen[5], fx.explosions, fx.hitMarks,
                       fx.sounds, fx.splashes, fx.particles, fx.eventsSkipped, fx.emitters,
                       fx.lights, fx.tornado, fx.boomCharge, info.hookChain, info.hookTipDist,
                       info.ironBallMode, info.ironBallDist, info.lanternFlame, info.lanternGlow,
-                      fx.levelSfxTicks, info.heapUsed);
+                      fx.levelSfxTicks, info.hookShots, info.hookPeak, info.heapUsed);
         return true;
     }
     if (sItemFxMatchedAt >= 0) {
@@ -453,7 +458,12 @@ bool expectRemoteItemFx(StepContext& ctx) {
         return false;
     }
     if (ctx.seconds > ctx.timeout(20.0)) {
-        ctx.fail("expectRemoteItemFx: " + why);
+        std::string reason = "expectRemoteItemFx: " + why;
+        if (found) {
+            reason += fmt::format(" (hook shots {} since the mark, peak {:.0f})",
+                info.hookShots - sMarkHookShots, info.hookPeak);
+        }
+        ctx.fail(reason);
     }
     return false;
 }
@@ -561,6 +571,7 @@ std::optional<bool> itemFxSteps(const std::string& op, StepContext& ctx) {
             return false;
         }
         sMark = info.itemFx;
+        sMarkHookShots = info.hookShots;
         return true;
     }
 

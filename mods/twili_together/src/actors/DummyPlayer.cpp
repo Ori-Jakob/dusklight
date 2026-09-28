@@ -2356,6 +2356,14 @@ void daDummyPlayer_c::updateRemoteHeldItemMatrix(const LinkPuppetState& state) {
     const bool hook = checkHookshotItem(mEquipItem) && mHeldItemModel != nullptr;
     mDummyHookTipDist = hook ? mHeldItemRootPos.abs(mHookshotTopPos) : 0.0f;
     mDummyHookChain = hook && (mDummyHookTipDist > 1.0f || field_0x3810.abs(mIronBallBgChkPos) > 1.0f);
+    if (mDummyHookChain && !mDummyHookWasChain) {
+        mDummyHookShots++;
+        mDummyHookPeak = 0.0f;
+    }
+    if (mDummyHookChain) {
+        mDummyHookPeak = (std::max)(mDummyHookPeak, mDummyHookTipDist);
+    }
+    mDummyHookWasChain = mDummyHookChain;
 
     updateRemoteLantern(state);
     updateRemoteLoadedAmmo(state);
@@ -3153,6 +3161,8 @@ void daDummyPlayer_c::getDebugInfo(twili::DummyPlayerDebugInfo& out) const {
     const bool hook = checkHookshotItem(mEquipItem) && mHeldItemModel != nullptr && !checkWolf();
     out.hookChain = hook && mDummyHookChain;
     out.hookTipDist = hook ? mDummyHookTipDist : 0.0f;
+    out.hookShots = mDummyHookShots;
+    out.hookPeak = mDummyHookPeak;
     const bool ironBall = mEquipItem == dItemNo_IRONBALL_e && mHeldItemModel != nullptr;
     out.ironBallMode = ironBall ? mDummyIronBallMode : 0;
     out.ironBallDist = ironBall ? mDummyIronBallDist : 0.0f;
