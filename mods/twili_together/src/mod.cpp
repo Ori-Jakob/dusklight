@@ -4,6 +4,7 @@
 #include "mods/svc/hook.h"
 #include "mods/svc/host.h"
 #include "mods/svc/interp.h"
+#include "mods/svc/item.h"
 #include "mods/svc/log.h"
 #include "mods/svc/net.h"
 #include "mods/svc/ui.h"
@@ -16,6 +17,7 @@
 #include "core/Log.hpp"
 #include "core/Session.hpp"
 #include "hooks/Hooks.hpp"
+#include "sync/WorldSync.hpp"
 #include "ui/TwiliWindow.hpp"
 
 #if TWILI_ENABLE_AUTOTEST
@@ -33,6 +35,8 @@ IMPORT_SERVICE_VERSION(ConfigService, svc_config, 0);
 IMPORT_SERVICE(ActorService, svc_actor);
 IMPORT_SERVICE(UiService, svc_ui);
 IMPORT_OPTIONAL_SERVICE(InterpService, svc_interp);
+// Without it items are not shared; the rest of world sync still works.
+IMPORT_OPTIONAL_SERVICE(ItemService, svc_item);
 // Either transport may be missing on a platform; the URL scheme picks one.
 IMPORT_OPTIONAL_SERVICE(WebSocketService, svc_websocket);
 IMPORT_OPTIONAL_SERVICE(NetService, svc_net);
@@ -68,6 +72,7 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     }
 
     Session::init();
+    sync::installItemObserver();
 
     std::string hookError;
     result = hooks::install(hooks::Group::Core, hookError);
@@ -99,6 +104,7 @@ MOD_EXPORT ModResult mod_update(ModError*) {
 #if TWILI_ENABLE_AUTOTEST
     twili::autotest::tick();
 #endif
+    twili::sync::endOfUpdate();
     return MOD_OK;
 }
 
@@ -108,6 +114,7 @@ MOD_EXPORT ModResult mod_shutdown(ModError*) {
     autotest::removeNetDriver();
 #endif
     ui::shutdown();
+    sync::shutdown();
     Session::shutdown();
     // Our actors are gone by now; make sure the local Link owns the audio again.
     restoreLocalLinkAudioPtr();

@@ -79,6 +79,12 @@ public:
         return isConnected() && mSelfClientId != 0 && mRoomState.ownerClientId == mSelfClientId;
     }
     bool isTeammate(const Client& client) const;
+    const std::string& sessionKey() const { return mSessionKey; }
+    // Gate for world sync with a member (ourselves included); the randomizer game key goes here.
+    bool memberMaySync(uint32_t clientId) const {
+        (void)clientId;
+        return true;
+    }
 
     // Once per simulation tick.
     void update();

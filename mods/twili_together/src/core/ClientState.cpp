@@ -2,6 +2,7 @@
 #include "core/Log.hpp"
 #include "core/SaveGate.hpp"
 #include "core/Session.hpp"
+#include "sync/WorldSync.hpp"
 
 #include "d/d_com_inf_game.h"
 #include "d/d_save.h"
@@ -110,11 +111,13 @@ static void forgetRemotePositions(std::map<uint32_t, Client>& clients) {
 void Session::onStageSaveTableLoaded(int saveTblNo) {
     mCurrentSaveTblNo =
         (saveTblNo >= 0 && saveTblNo < dSv_save_c::STAGE_MAX) ? saveTblNo : -1;
+    sync::onStageSaveTableLoaded();
 }
 
 // A reload of the same stage and layer (a void-out) drops the old positions here.
 void Session::onStageSaveTableUnloaded() {
     mCurrentSaveTblNo = -1;
+    sync::onStageSaveTableUnloaded();
     forgetRemotePositions(mClients);
 }
 

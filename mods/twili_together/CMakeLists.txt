@@ -51,6 +51,7 @@ set(TWILI_SOURCES
     src/hooks/hooks_actor.cpp
     src/hooks/hooks_player.cpp
     src/hooks/hooks_save.cpp
+    src/hooks/hooks_sync.cpp
     src/horse/HorsePuppetStub.cpp
     src/horse/HorseSync.cpp
     src/net/Link.cpp
@@ -61,6 +62,11 @@ set(TWILI_SOURCES
     src/presence/PlayerUpdate.cpp
     src/presence/RemotePose.cpp
     src/pvp/PvpStub.cpp
+    src/sync/DungeonItems.cpp
+    src/sync/Flags.cpp
+    src/sync/GiveItem.cpp
+    src/sync/WorldState.cpp
+    src/sync/WorldSync.cpp
     src/ui/TwiliWindow.cpp
 )
 
@@ -72,6 +78,7 @@ if (TWILI_ENABLE_AUTOTEST)
         src/autotest/PadOverride.cpp
         src/autotest/Platform.cpp
         src/autotest/StepsMotion.cpp
+        src/autotest/StepsWorld.cpp
         src/hooks/hooks_autotest.cpp
     )
 endif ()

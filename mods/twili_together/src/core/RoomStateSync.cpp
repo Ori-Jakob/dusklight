@@ -3,6 +3,7 @@
 #include "core/Config.hpp"
 #include "core/Log.hpp"
 #include "core/Session.hpp"
+#include "sync/WorldSync.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -67,10 +68,14 @@ void Session::handleUpdateRoomState(const nlohmann::json& packet) {
     const nlohmann::json& j = (state != packet.end() && state->is_object()) ? *state : packet;
 
     const uint32_t previousOwner = mRoomState.ownerClientId;
+    const bool wasSyncingWorld = mRoomState.syncWorldState;
     mRoomState.applyJson(j);
     if (mRoomState.ownerClientId != previousOwner) {
         TwiliLog.info("[session] room owner is now client {}{}", mRoomState.ownerClientId,
                      mRoomState.ownerClientId == mSelfClientId ? " (you)" : "");
+    }
+    if (!wasSyncingWorld && mRoomState.syncWorldState) {
+        sync::requestExchange();
     }
 }
 

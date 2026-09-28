@@ -1,9 +1,9 @@
 #include "core/Session.hpp"
 
 #include "core/Config.hpp"
-#include "core/Layout.hpp"
 #include "core/Log.hpp"
 #include "core/SaveGate.hpp"
+#include "sync/WorldSync.hpp"
 
 #if TWILI_ENABLE_AUTOTEST
 #include "autotest/AutoTest.hpp"
@@ -78,6 +78,7 @@ void Session::resetSessionState() {
     mLastSaveLoaded = false;
     mRoomState = RoomState{};
     mVersionMismatchLogged.clear();
+    sync::resetSession();
 }
 
 void Session::connect() {
@@ -203,6 +204,7 @@ void Session::update() {
     if (isConnected()) {
         tickStageTracking();
         tickSelfColor();
+        sync::tick();
         tickRoomOwnerSettings();
         manageDummyActors();
     }
@@ -263,6 +265,7 @@ void Session::onMessage(const nlohmann::json& packet) {
         handlePlayerSfx(packet);
     } else if (type == "UPDATE_ROOM_STATE") {
         handleUpdateRoomState(packet);
+    } else if (sync::handlePacket(type, packet)) {
     } else if (type == "AUTOTEST_SIGNAL") {
 #if TWILI_ENABLE_AUTOTEST
         autotest::onSignal(packet.value("instance", std::string{}),
@@ -287,7 +290,7 @@ void Session::sendHandshake() {
         {"app", net::kApp},
         {"protocolVersion", kProtocolVersion},
         {"modVersion", std::string(svc_host->mod_version(mod_ctx))},
-        {"layout", layout::saveLayoutHex()},
+        {"layout", sync::localLayout()},
         {"transport", std::string(mLink.transportName())},
         {"name", mParams.name},
         {"teamId", mParams.team},
@@ -304,6 +307,7 @@ void Session::sendAutotestSignal(const std::string& instance, const std::string&
 void Session::onSelfStateKnown() {
     if (mSelfClientId != 0) {
         mLink.markJoined();
+        sync::requestExchange();
     }
 }
 

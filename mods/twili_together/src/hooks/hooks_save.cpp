@@ -2,6 +2,7 @@
 
 #include "core/SaveGate.hpp"
 #include "core/Session.hpp"
+#include "sync/RemoteApplyGuard.hpp"
 
 #include "SSystem/SComponent/c_phase.h"  // d_s_name.h is not self-contained
 #include "d/d_com_inf_game.h"
@@ -34,9 +35,9 @@ void onCardToMemoryPost(ModContext*, void*, void* retval, void*) {
     }
 }
 
-// The stage's save table is live from here (dStage_stagInfoInit).
+// The stage's save table is live from here (dStage_stagInfoInit); a merge's own call is not.
 void onGetSavePost(ModContext*, void* args, void*, void*) {
-    if (Session::active()) {
+    if (Session::active() && !sync::RemoteApplyGuard::active()) {
         Session::instance().onStageSaveTableLoaded(mods::arg<int>(args, 1));
     }
 }

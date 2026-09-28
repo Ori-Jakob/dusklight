@@ -10,6 +10,7 @@ namespace twili::hooks {
 ModResult installSave(std::string& error);
 ModResult installPlayer(std::string& error);
 ModResult installActor(std::string& error);
+ModResult installSync(std::string& error);
 #if TWILI_ENABLE_AUTOTEST
 ModResult installAutotest(std::string& error);
 #endif
@@ -25,6 +26,9 @@ ModResult installCore(std::string& error) {
     }
     if (result == MOD_OK) {
         result = installActor(error);
+    }
+    if (result == MOD_OK) {
+        result = installSync(error);
     }
     return result;
 }
