@@ -11,6 +11,8 @@ ModResult installSave(std::string& error);
 ModResult installPlayer(std::string& error);
 ModResult installActor(std::string& error);
 ModResult installSync(std::string& error);
+ModResult installClothes(std::string& error);
+ModResult installFx(std::string& error);
 #if TWILI_ENABLE_AUTOTEST
 ModResult installAutotest(std::string& error);
 #endif
@@ -30,6 +32,9 @@ ModResult installCore(std::string& error) {
     if (result == MOD_OK) {
         result = installSync(error);
     }
+    if (result == MOD_OK) {
+        result = installClothes(error);
+    }
     return result;
 }
 
@@ -40,7 +45,7 @@ struct GroupInfo {
 
 constexpr std::array<GroupInfo, static_cast<size_t>(Group::Count)> kGroups{{
     {"core", installCore},
-    {"fx", nullptr},
+    {"fx", installFx},
     {"pvp", nullptr},
     {"enemy", nullptr},
     {"story", nullptr},

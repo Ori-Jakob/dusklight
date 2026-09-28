@@ -79,6 +79,9 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     if (result != MOD_OK) {
         return mods::set_error(error, result, ("core hooks: " + hookError).c_str());
     }
+    // Optional: without it peers' item impacts are not shown.
+    std::string fxError;
+    hooks::install(hooks::Group::Fx, fxError);
 
     if (ui::registerMenu() != MOD_OK) {
         TwiliLog.warn("[ui] could not add the menu tab");

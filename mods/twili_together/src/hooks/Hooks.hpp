@@ -59,6 +59,7 @@ enum class ScopeKind : uint8_t {
     JumpLand,
     Hookshot,
     IronBall,
+    BombArrow,
     PlantedHit,
     EnemyDamage,
     DmapDraw,

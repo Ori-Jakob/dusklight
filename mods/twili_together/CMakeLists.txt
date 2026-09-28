@@ -49,6 +49,7 @@ set(TWILI_SOURCES
     src/fx/WolfFx.cpp
     src/hooks/Hooks.cpp
     src/hooks/hooks_actor.cpp
+    src/hooks/hooks_fx.cpp
     src/hooks/hooks_player.cpp
     src/hooks/hooks_save.cpp
     src/hooks/hooks_sync.cpp

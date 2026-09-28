@@ -1,4 +1,5 @@
 #include "hooks/Hooks.hpp"
+#include "hooks/Perf.hpp"
 
 #include "core/GameAccess.hpp"
 
@@ -13,6 +14,7 @@ namespace {
 
 // A dummy is never suspended: one spawned inside a suspend region would stay frozen there.
 HookAction onSuspendCheckPre(ModContext*, void* args, void*, void*) {
+    perf::count(perf::Target::SuspendCheck);
     auto* actor = mods::arg<fopAc_ac_c*>(args, 0);
     if (!isDummyPlayer(actor)) {
         return HOOK_CONTINUE;

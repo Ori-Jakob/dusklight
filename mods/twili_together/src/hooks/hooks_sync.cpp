@@ -1,4 +1,5 @@
 #include "hooks/Hooks.hpp"
+#include "hooks/Perf.hpp"
 
 #include "core/SaveGate.hpp"
 #include "core/Session.hpp"
@@ -297,6 +298,7 @@ void onExecItemGetPost(ModContext*, void* args, void*, void*) {
 }
 
 HookAction onProcManagementPre(ModContext*, void*, void*, void*) {
+    perf::count(perf::Target::Management);
     sync::closeGrantWindow();
     return HOOK_CONTINUE;
 }

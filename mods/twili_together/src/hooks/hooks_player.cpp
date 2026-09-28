@@ -1,4 +1,5 @@
 #include "hooks/Hooks.hpp"
+#include "hooks/Perf.hpp"
 
 #include "core/GameAccess.hpp"
 #include "core/Session.hpp"
@@ -25,6 +26,7 @@ constexpr f32 kRemoteSfxMaxDistance = 3500.0f;
 
 // Dummies run daAlink_c's sound code too; only the near ones are heard.
 HookAction onLinkSfxPre(ModContext*, void* args, void*, void*) {
+    perf::count(perf::Target::LinkSfx);
     auto* link = mods::arg<daAlink_c*>(args, 0);
     if (isDummyPlayer(link) &&
         fopAcM_searchPlayerDistanceXZ2(link) > kRemoteSfxMaxDistance * kRemoteSfxMaxDistance)
@@ -61,6 +63,7 @@ void onLinkLevelSfxPost(ModContext*, void* args, void*, void*) {
 }
 
 void onLinkExecutePost(ModContext*, void* args, void*, void*) {
+    perf::count(perf::Target::LinkExecute);
     auto* link = mods::arg<daAlink_c*>(args, 0);
     if (isLocalSender(link)) {
         presence::captureAndSend(link);
