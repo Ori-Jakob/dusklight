@@ -107,7 +107,6 @@ static constexpr f32 kDummyHalfAtnRootTransZ = -7.0f;
 static const cXyz kDummyHorseBaseAnime(-1.24279f, 225.7f, 1.81f - 5.0f);
 static constexpr f32 kDummyWolfRootTransX = 1.0f;  // l_wolfBaseAnime (d_a_alink.cpp)
 static constexpr f32 kDummyWolfRootTransZ = -28.497932f;
-static constexpr u8 kDummyLegacyFxTicks = 30;
 // The fur that grows on Link's head while he transforms (setMetamorphoseModel).
 static constexpr u16 kMetamorphoseItem = 0x106;
 // A blade of the grass that calls a hawk or the horse (setGrassWhistleModel).
@@ -115,7 +114,6 @@ static constexpr u16 kGrassWhistleItem = 0x104;
 static constexpr u8 kDummyBaseHoldTicks = 20;
 // Chance per tick that the idle face blinks (setFaceBtp's rate for FMABA01).
 static constexpr f32 kDummyBlinkChance = 0.012f;
-static constexpr int kDummyProjectileMaxLife = 120;
 static constexpr u16 kNoItemBck = 0xFFFF;
 
 enum DummyProjectileType : uint8_t {
@@ -958,9 +956,7 @@ void daDummyPlayer_c::clearPrivateModelPointers() {
     }
     mpDummyHylianShieldModel = mpDummyOrdonShieldModel = mpDummyWoodShieldModel = nullptr;
     mpDummyArrowAmmoModel = mpDummyBombArrowAmmoModel = mpDummySlingAmmoModel = nullptr;
-    mpDummyArrowProjectileModel = mpDummyBombArrowProjectileModel = nullptr;
-    mpDummySlingProjectileModel = nullptr;
-    mpDummyLoadedAmmoModel = mpDummyProjectileModel = nullptr;
+    mpDummyLoadedAmmoModel = nullptr;
     mpDummyWolfModel = nullptr;
     for (J3DModel*& chain : mpDummyWolfChainModels) {
         chain = nullptr;
@@ -1099,11 +1095,6 @@ int daDummyPlayer_c::createHeapImpl() {
     mpDummyArrowAmmoModel = makeModel(mpDummyAlinkArchive, dRes_ID_ALINK_BMD_AL_ARROW_e);
     mpDummyBombArrowAmmoModel = makeModel(mpDummyAlinkArchive, dRes_ID_ALINK_BMD_AL_ARROWB_e);
     mpDummySlingAmmoModel = makeModel(mpDummyAlinkArchive, dRes_ID_ALINK_BMD_AL_PACHI_NUT_e);
-    mpDummyArrowProjectileModel = makeModel(mpDummyAlinkArchive, dRes_ID_ALINK_BMD_AL_ARROW_e);
-    mpDummyBombArrowProjectileModel =
-        makeModel(mpDummyAlinkArchive, dRes_ID_ALINK_BMD_AL_ARROWB_e);
-    mpDummySlingProjectileModel =
-        makeModel(mpDummyAlinkArchive, dRes_ID_ALINK_BMD_AL_PACHI_NUT_e);
     // The boomerang in hand.
     mpDummyBoomerangModel = makeModel(mpDummyAlinkArchive, dRes_ID_ALINK_BMD_AL_BOOM_e);
     {
@@ -2248,14 +2239,14 @@ void daDummyPlayer_c::applyRemoteItemPresentation(const LinkPuppetState& state) 
                                              mpLinkHandModel);
 }
 
-J3DModel* daDummyPlayer_c::remoteAmmoModelForType(uint8_t type, bool projectile) const {
+J3DModel* daDummyPlayer_c::remoteAmmoModelForType(uint8_t type) const {
     switch (type) {
     case DUMMY_PROJECTILE_ARROW:
-        return projectile ? mpDummyArrowProjectileModel : mpDummyArrowAmmoModel;
+        return mpDummyArrowAmmoModel;
     case DUMMY_PROJECTILE_BOMB_ARROW:
-        return projectile ? mpDummyBombArrowProjectileModel : mpDummyBombArrowAmmoModel;
+        return mpDummyBombArrowAmmoModel;
     case DUMMY_PROJECTILE_SLING:
-        return projectile ? mpDummySlingProjectileModel : mpDummySlingAmmoModel;
+        return mpDummySlingAmmoModel;
     default:
         return nullptr;
     }
@@ -2272,7 +2263,7 @@ void daDummyPlayer_c::updateRemoteLoadedAmmo(const LinkPuppetState& state) {
             state.itemProjectileType :
             (mEquipItem == dItemNo_PACHINKO_e ? DUMMY_PROJECTILE_SLING :
                                                 DUMMY_PROJECTILE_ARROW);
-    J3DModel* model = remoteAmmoModelForType(type, false);
+    J3DModel* model = remoteAmmoModelForType(type);
     if (!model) {
         return;
     }
@@ -2290,50 +2281,6 @@ void daDummyPlayer_c::updateRemoteLoadedAmmo(const LinkPuppetState& state) {
     model->setBaseTRMtx(mDoMtx_stack_c::get());
     modelCalc(model);
     mpDummyLoadedAmmoModel = model;
-}
-
-void daDummyPlayer_c::updateRemoteProjectile(const LinkPuppetState& state) {
-    const uint8_t type = state.itemProjectileType;
-    if (type != DUMMY_PROJECTILE_NONE && state.itemProjectileSeq != 0 &&
-        state.itemProjectileSeq != mDummyProjectileSeq)
-    {
-        J3DModel* model = remoteAmmoModelForType(type, true);
-        if (model) {
-            mDummyProjectileSeq = state.itemProjectileSeq;
-            mDummyProjectileType = type;
-            mpDummyProjectileModel = model;
-            mDummyProjectileLife = kDummyProjectileMaxLife;
-            mDummyProjectilePos = mHeldItemRootPos;
-            mDummyProjectileAngle.set(mBodyAngle.x, shape_angle.y + mBodyAngle.y, 0);
-
-            f32 distance = 0.0f;
-            f32 speed = 0.0f;
-            getArrowFlyData(&distance, &speed, type == DUMMY_PROJECTILE_BOMB_ARROW);
-            if (speed <= 0.0f || !std::isfinite(speed)) {
-                speed = type == DUMMY_PROJECTILE_SLING ? 110.0f : 160.0f;
-            }
-
-            const f32 cosPitch = cM_scos(mDummyProjectileAngle.x);
-            mDummyProjectileVelocity.x = speed * cosPitch * cM_ssin(mDummyProjectileAngle.y);
-            mDummyProjectileVelocity.y = -speed * cM_ssin(mDummyProjectileAngle.x);
-            mDummyProjectileVelocity.z = speed * cosPitch * cM_scos(mDummyProjectileAngle.y);
-        }
-    }
-
-    if (mDummyProjectileLife <= 0 || !mpDummyProjectileModel) {
-        mDummyProjectileLife = 0;
-        mpDummyProjectileModel = nullptr;
-        return;
-    }
-
-    mDummyProjectilePos += mDummyProjectileVelocity;
-    mDummyProjectileLife--;
-
-    mDoMtx_stack_c::transS(mDummyProjectilePos);
-    mDoMtx_stack_c::ZXYrotM(mDummyProjectileAngle.x, mDummyProjectileAngle.y,
-                            mDummyProjectileAngle.z);
-    mpDummyProjectileModel->setBaseTRMtx(mDoMtx_stack_c::get());
-    modelCalc(mpDummyProjectileModel);
 }
 
 void daDummyPlayer_c::updateRemoteHeldItemMatrix(const LinkPuppetState& state) {
@@ -3202,7 +3149,6 @@ void daDummyPlayer_c::getDebugInfo(twili::DummyPlayerDebugInfo& out) const {
     out.midnaHairAim = mDummyMidna.hairAimApplied();
     out.midnaHairAimAngle = mDummyMidna.hairAimAngle();
     out.itemFx = mDummyItemFx.debug();
-    out.legacyProjectile = mpDummyProjectileModel != nullptr && mDummyProjectileLife > 0;
     out.heapUsed = mDummyHeapUsed;
     const bool hook = checkHookshotItem(mEquipItem) && mHeldItemModel != nullptr && !checkWolf();
     out.hookChain = hook && mDummyHookChain;
@@ -3287,8 +3233,6 @@ void daDummyPlayer_c::applyRemoteForm(bool wolf, uint8_t clothesItem) {
     clearRemoteHeldItemModel();
     offKandelaarModel();
     mpDummyLoadedAmmoModel = nullptr;
-    mpDummyProjectileModel = nullptr;
-    mDummyProjectileLife = 0;
     if (mDummyCutTurnEffectWasActive) {
         clearCutTurnEffectID();
         mDummyCutTurnEffectWasActive = false;
@@ -3351,11 +3295,9 @@ void daDummyPlayer_c::updateRemoteTransformFx(const twili::Client& client,
     if (!client.sendsTransformFx) {
         mDummyTf = RemoteTransformFx{};
         mDummyTfPlan = TransformFxPlan{};
-        updateLegacyTransformBurst();
         traceRemoteTransformFx(state, 0, shownSeq, wasActive);
         return;
     }
-    mDummyLegacyFxTimer = 0;
     const bool bodyWolf = checkWolf() != 0;
     mDummyTf = state.tf;
     mDummyTfPlan = planTransformFx(state.tf, bodyWolf, state.modelSwap);
@@ -3365,7 +3307,6 @@ void daDummyPlayer_c::updateRemoteTransformFx(const twili::Client& client,
         mDummyTfAnchorValid = false;
         DummyTransformFxTrace fresh;
         fresh.count = mDummyTfTrace.count + 1;
-        fresh.legacyBursts = mDummyTfTrace.legacyBursts;
         mDummyTfTrace = fresh;
     }
     if (!plan.active || isHidden()) {
@@ -3424,25 +3365,6 @@ void daDummyPlayer_c::updateRemoteTransformFx(const twili::Client& client,
         mDummyTfSilhouette = true;
     }
     traceRemoteTransformFx(state, emitted, shownSeq, wasActive);
-}
-
-// A remote that does not send "tf" (an older build)
-void daDummyPlayer_c::updateLegacyTransformBurst() {
-    if (mDummyLegacyFxTimer == 0) {
-        return;
-    }
-    if (isHidden()) {
-        mDummyLegacyFxTimer = 0;
-        return;
-    }
-    mDummyLegacyFxTimer--;
-    mDoMtx_multVecZero(mpLinkModel->getAnmMtx(2), &mDummyTfAnchor);
-    if (checkWolf()) {
-        setEmitter(&mDummyTfEmitter[0], ID_ZI_J_ATOW_A, &mDummyTfAnchor, NULL);
-        setEmitter(&mDummyTfEmitter[1], ID_ZI_J_ATOW_B, &mDummyTfAnchor, NULL);
-    } else {
-        setEmitter(&mDummyTfEmitter[0], ID_ZI_J_WTOA_A, &mDummyTfAnchor, NULL);
-    }
 }
 
 void daDummyPlayer_c::traceRemoteTransformFx(const LinkPuppetState& state, uint8_t emitted,
@@ -3839,14 +3761,6 @@ bool daDummyPlayer_c::applyRemoteState(const LinkPuppetState& state) {
     } else {
         mDummyMidna.deactivate();
         updateRemoteItemMatrices(state);
-        if (!state.sendsItemFx) {
-            updateRemoteProjectile(state);
-        } else {
-            // Its real projectiles come as item slots (DummyItemFx).
-            mpDummyProjectileModel = nullptr;
-            mDummyProjectileLife = 0;
-            mDummyProjectileSeq = state.itemProjectileSeq;
-        }
     }
     traceInitialApply(mDummyClientId, trace, "applyRemoteState setAttentionPos");
     setAttentionPos();
@@ -4036,11 +3950,6 @@ int daDummyPlayer_c::execute() {
     if (ev.snapped || wolf != mDummyWasWolf) {
         resetRemoteContinuity();
     }
-    if (wolf != mDummyWasWolf && !client.sendsTransformFx) {
-        // An older build's transformation, which only its form change tells.
-        mDummyLegacyFxTimer = kDummyLegacyFxTicks;
-        mDummyTfTrace.legacyBursts++;
-    }
     mDummyWasWolf = wolf;
     // Its horse first, as daHorse_c executes before daAlink_c
     horse::applyPuppetPose(mDummyClientId, state.horse, state.frameAlpha, ev.snapped);
@@ -4145,18 +4054,14 @@ int daDummyPlayer_c::draw() {
         // daMidna_c::draw takes Link's colour while he is frozen or chilled.
         mDummyMidna.draw(tevStr, checkFreezeDamage() || mIceDamageWaitTimer != 0);
     }
-    drawRemoteAmmoAndProjectiles();
+    drawRemoteLoadedAmmo();
     drawRemoteShadow();
     return result;
 }
 
-void daDummyPlayer_c::drawRemoteAmmoAndProjectiles() {
+void daDummyPlayer_c::drawRemoteLoadedAmmo() {
     if (mpDummyLoadedAmmoModel) {
         modelDraw(mpDummyLoadedAmmoModel, 0);
-    }
-
-    if (mpDummyProjectileModel && mDummyProjectileLife > 0) {
-        modelDraw(mpDummyProjectileModel, 0);
     }
 }
 

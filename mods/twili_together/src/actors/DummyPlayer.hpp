@@ -31,8 +31,7 @@ struct DummyTransformFxTrace {
     bool furA = false, furC = false;  // the fur (item 0x106) was on the body before / after
     float anchorErr = -1.0f;
     uint8_t anchorSource = 0;
-    uint16_t count = 0;         // transformations replayed
-    uint16_t legacyBursts = 0;  // bursts for a sender without "tf"
+    uint16_t count = 0;  // transformations replayed
 };
 
 // What the autotest checks about a dummy (GetDummyPlayerDebugInfo).
@@ -113,8 +112,7 @@ struct DummyPlayerDebugInfo {
     int16_t midnaHairAimAngle = 0;
     // The remote's weapons and items out in the world (DummyItemFx).
     DummyItemFxDebug itemFx;
-    bool legacyProjectile = false;  // the straight-line projectile of an older build's "pr" shot
-    uint32_t heapUsed = 0;          // of the solid heap, at the end of createHeap
+    uint32_t heapUsed = 0;  // of the solid heap, at the end of createHeap
     // Held items (updateRemoteHeldItemMatrix)
     bool hookChain = false;
     float hookTipDist = 0.0f;
@@ -154,7 +152,6 @@ private:
     void applyRemoteForm(bool wolf, uint8_t clothesItem);
     void updateRemoteTransformFx(const twili::Client& client,
                                  const twili::LinkPuppetState& state, double shownSeq);
-    void updateLegacyTransformBurst();
     void traceRemoteTransformFx(const twili::LinkPuppetState& state, uint8_t emitted,
                                 double shownSeq, bool wasActive);
     bool setRemoteMetamorphoseModel(uint16_t bckId);
@@ -195,8 +192,7 @@ private:
     void drawRemoteShadow();
     void applyRemoteItemPresentation(const twili::LinkPuppetState& state);
     void updateRemoteLoadedAmmo(const twili::LinkPuppetState& state);
-    void updateRemoteProjectile(const twili::LinkPuppetState& state);
-    J3DModel* remoteAmmoModelForType(uint8_t type, bool projectile) const;
+    J3DModel* remoteAmmoModelForType(uint8_t type) const;
     void updateRemoteItemMatrices(const twili::LinkPuppetState& state);
     void clearRemoteHeldItemModel();
     void syncRemoteHeldItemModel(uint16_t equipItem, uint16_t itemBckId);
@@ -212,7 +208,7 @@ private:
     void updateRemoteWolfLockBlur(bool active);
     void clearRemoteWolfFx();
     void updateRemoteAudio(const twili::LinkPuppetState& state);
-    void drawRemoteAmmoAndProjectiles();
+    void drawRemoteLoadedAmmo();
 
     JKRArchive* mpDummyKmdlArchive = nullptr;
     JKRArchive* mpDummyMmdlArchive = nullptr;
@@ -257,9 +253,6 @@ private:
     J3DModel* mpDummyArrowAmmoModel = nullptr;
     J3DModel* mpDummyBombArrowAmmoModel = nullptr;
     J3DModel* mpDummySlingAmmoModel = nullptr;
-    J3DModel* mpDummyArrowProjectileModel = nullptr;
-    J3DModel* mpDummyBombArrowProjectileModel = nullptr;
-    J3DModel* mpDummySlingProjectileModel = nullptr;
     J3DModel* mpDummyWolfModel = nullptr;
     J3DModel* mpDummyWolfChainModels[4] = {};
     twili::DummyMidna mDummyMidna;
@@ -308,14 +301,7 @@ private:
     bool mDummyFaceBckReady = false;  // mFaceBck holds the idle face pose (initializeShell)
     // Height of the ground under the dummy, -G_CM3D_F_INF when there is none here.
     f32 mDummyGroundY = -G_CM3D_F_INF;
-    uint16_t mDummyProjectileSeq = 0;
-    uint8_t mDummyProjectileType = 0;
-    int mDummyProjectileLife = 0;
-    cXyz mDummyProjectilePos = cXyz::Zero;
-    cXyz mDummyProjectileVelocity = cXyz::Zero;
-    csXyz mDummyProjectileAngle = csXyz::Zero;
     J3DModel* mpDummyLoadedAmmoModel = nullptr;
-    J3DModel* mpDummyProjectileModel = nullptr;
     twili::RemoteHorseRider mDummyRider;
     uint8_t mDummyColorR = 255;
     uint8_t mDummyColorG = 255;
@@ -336,7 +322,6 @@ private:
     Mtx mDummyTfJointMtx;              // joint 2 on the last tick the old body moved
     bool mDummyTfAnchorValid = false;
     bool mDummyTfSilhouette = false;   // wl_change.bmd is placed for this tick's draw
-    uint8_t mDummyLegacyFxTimer = 0;   // the burst for a sender without "tf"
     uint16_t mDummyTfClipAnm = 0xFFFF; // base clip the last trace tick saw
     twili::DummyTransformFxTrace mDummyTfTrace;
     // The remote's status effects (updateRemoteStatus).

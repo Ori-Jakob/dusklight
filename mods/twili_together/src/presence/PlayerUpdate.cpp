@@ -771,14 +771,9 @@ static void traceTransformFx(Client& c, const RemoteTransformFx& prevTf,
     // The old body's clip (setSingleAnimeBase / setSingleAnimeWolfBase in procCoMetamorphoseInit).
     const uint16_t clip = c.lowerANMs[0];
     if ((clip == dRes_ID_ALANM_BCK_CHANGEATOW_e || clip == dRes_ID_ALANM_BCK_WL_CHANGEWTOA_e) &&
-        clip != prevClip)
+        clip != prevClip && t.clipSeq == 0)
     {
-        if (!c.sendsTransformFx) {
-            begin(clip == dRes_ID_ALANM_BCK_CHANGEATOW_e);
-        }
-        if (t.clipSeq == 0) {
-            t.clipSeq = seq;
-        }
+        t.clipSeq = seq;
     }
     if (t.count == 0) {
         return;

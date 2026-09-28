@@ -25,7 +25,7 @@
 // expectRemoteItemFx  minDrawn / maxDrawn ({kind: n}), minSeen ({kind: n} since the mark),
 //                     explosions, hitMarks, sounds, splashes, particles (since the mark),
 //                     maxExplosions, tornado, boomCharge, minLights, maxLights, minEmitters,
-//                     legacyProjectile, maxHeapUsed, hookChain, minTipDist, minIronBallMode,
+//                     maxHeapUsed, hookChain, minTipDist, minIronBallMode,
 //                     maxIronBallMode, minIronBallDist, lanternFlame, minLanternGlow,
 //                     maxLanternGlow, levelSfx; frames (0), timeoutSec (20)
 //     Until the first peer's dummy shows every field given, then for `frames` more ticks.
@@ -414,7 +414,6 @@ std::string remoteMismatch(const json& step, const DummyPlayerDebugInfo& info) {
     };
     same("tornado", fx.tornado);
     same("boomCharge", fx.boomCharge);
-    same("legacyProjectile", info.legacyProjectile);
     same("hookChain", info.hookChain);
     same("lanternFlame", info.lanternFlame);
     return why;

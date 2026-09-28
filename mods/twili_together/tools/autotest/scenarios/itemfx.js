@@ -41,7 +41,7 @@ module.exports = [
                     ...connect,
                     ...meetIn(STAGES.southFaron, "B"),
                     { op: "markRemoteItemFx" },
-                    { op: "expectRemoteItemFx", maxDrawn: { arrow: 0, boomerang: 0, bomb: 0 }, legacyProjectile: false, maxHeapUsed: HEAP_LIMIT },
+                    { op: "expectRemoteItemFx", maxDrawn: { arrow: 0, boomerang: 0, bomb: 0 }, maxHeapUsed: HEAP_LIMIT },
                     ...barrier("marked", "B"),
                     // The explosion's light lasts about half a second.
                     { op: "expectRemoteItemFx", explosions: 1, minLights: 1, timeoutSec: 10 },
@@ -113,7 +113,7 @@ module.exports = [
                     { op: "log", msg: "ITEMFX_HOLD arrows" },
                     ...barrier("arrows-seen", "B"),
                     { op: "expectRemoteItemFx", minSeen: { arrow: 6 }, explosions: 1, minLights: 1, timeoutSec: 20 },
-                    { op: "expectRemoteItemFx", legacyProjectile: false, maxHeapUsed: HEAP_LIMIT },
+                    { op: "expectRemoteItemFx", maxHeapUsed: HEAP_LIMIT },
                     ...barrier("done", "B"),
                     { op: "quit" },
                 ],

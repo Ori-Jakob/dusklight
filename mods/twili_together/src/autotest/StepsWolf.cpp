@@ -513,19 +513,19 @@ bool expectRemoteTransformFx(StepContext& ctx) {
     const int lagSwap = stageLag(d.swapShown, t.swapSeq);
     const int lagPost = stageLag(d.postShown, t.postSeq);
     const int lagEnd = stageLag(d.endShown, t.endSeq);
-    const int legacyLag = static_cast<int>(t.flipSeq) - static_cast<int>(t.clipSeq);
+    const int flipLag = static_cast<int>(t.flipSeq) - static_cast<int>(t.clipSeq);
     const int wireA = static_cast<int>(t.swapSeq) - static_cast<int>(t.startSeq);
     const int wireSwap = static_cast<int>(t.postSeq) - static_cast<int>(t.swapSeq);
     const int wireC = static_cast<int>(t.endSeq) - static_cast<int>(t.postSeq);
     TwiliLog.info("[autotest] transform fx form={} lag start/swap/post/end={}/{}/{}/{} "
                   "shown start/clip={:.2f}/{:.2f} masks={:02X}/{:02X}/{:02X} silhouette={} "
                   "fur={}/{} tevA={} tevC={}..{} anchorErr={:.1f} src={} hidden={} wire "
-                  "A/swap/C={}/{}/{} dummy A/C={}/{} endFrame={:.1f} legacyLag={} seqs "
+                  "A/swap/C={}/{}/{} dummy A/C={}/{} endFrame={:.1f} flipLag={} seqs "
                   "start/clip/swap/post/flip/end={}/{}/{}/{}/{}/{}",
         wolf ? "wolf" : "human", lagStart, lagSwap, lagPost, lagEnd, d.startShown, d.clipShown,
         d.maskA, d.maskSwap, d.maskC, d.silhouetteTicks, d.furA, d.furC, d.tevMinA, d.tevMinC,
         d.tevMaxC, d.anchorErr, d.anchorSource, d.hiddenTicks, wireA, wireSwap, wireC, d.ticksA,
-        d.ticksC, t.endFrame, legacyLag, t.startSeq, t.clipSeq, t.swapSeq, t.postSeq, t.flipSeq,
+        d.ticksC, t.endFrame, flipLag, t.startSeq, t.clipSeq, t.swapSeq, t.postSeq, t.flipSeq,
         t.endSeq);
 
     std::string why;
@@ -600,9 +600,8 @@ bool expectRemoteTransformFx(StepContext& ctx) {
     return true;
 }
 
-// Transformations and bursts the first peer's dummy had replayed when expectNoTransformFx began.
+// Transformations the first peer's dummy had replayed when expectNoTransformFx began.
 uint16_t sNoTfCount = 0;
-uint16_t sNoTfLegacy = 0;
 uint32_t sNoTfClient = 0;
 
 bool expectNoTransformFx(StepContext& ctx) {
@@ -616,15 +615,13 @@ bool expectNoTransformFx(StepContext& ctx) {
     if (!ctx.begun) {
         sNoTfClient = id;
         sNoTfCount = d.count;
-        sNoTfLegacy = d.legacyBursts;
     }
-    if (id != sNoTfClient || d.count != sNoTfCount || d.legacyBursts != sNoTfLegacy ||
-        d.emitted != 0 || d.silhouette || d.bodyTev != 0 || (ctx.ticks > 3 && info.tfAlive != 0))
+    if (id != sNoTfClient || d.count != sNoTfCount || d.emitted != 0 || d.silhouette ||
+        d.bodyTev != 0 || (ctx.ticks > 3 && info.tfAlive != 0))
     {
-        ctx.fail(fmt::format("expectNoTransformFx: after {} ticks: replays {} (from {}), bursts "
-                             "{} (from {}), emitted {:02X}, alive {:X}, silhouette {}, tev {}",
-            ctx.ticks, d.count, sNoTfCount, d.legacyBursts, sNoTfLegacy, d.emitted, info.tfAlive,
-            d.silhouette, d.bodyTev));
+        ctx.fail(fmt::format("expectNoTransformFx: after {} ticks: replays {} (from {}), "
+                             "emitted {:02X}, alive {:X}, silhouette {}, tev {}",
+            ctx.ticks, d.count, sNoTfCount, d.emitted, info.tfAlive, d.silhouette, d.bodyTev));
         return false;
     }
     if (ctx.ticks < ctx.step.value("frames", 120)) {
