@@ -211,7 +211,44 @@ Life and enemies (`StepsPvp.cpp`, `StepsEnemy.cpp`):
 | `expectLife` / `expectLifeDelta` | `value`, `min`, `max` / `delta`, `frames`, `timeoutSec` | our life (saved plus the meter's pending change) |
 | `approachDummy` | `dist` (110) | our Link in front of the first peer's dummy, facing it |
 | `spawnEnemy` | `name`, `param`, `dx`, `dy`, `dz`, `tag`, `anchor` (`player`, `playerHome`), `setId` | an actor in the current room's layer |
-| `expectEnemyHealth` | `tag`, `health`, `max`, `timeoutSec` | the tagged actor's health |
+| `expectEnemyHealth` | `tag`, `health`, `max`, `tracked`, `timeoutSec` | until the tagged actor runs with that health, max and scaling |
+| `setEnemyHealthPercent` | `value`, `timeoutSec` | once we own the room: its enemy health percent |
+| `expectEnemyHealthPercent` | `value`, `timeoutSec` | the percent we apply (the room's while joined, else 100) |
+| `setEnemyHealth` / `deleteEnemy` | `tag`, `health` / `tag` | writes health directly (a bite, a get-up) / deletes the actor |
+| `expectEnemyGone` / `expectEnemiesGone` | `tag` / `tags`, `maxSpreadTicks`, `timeoutSec` | no longer running (and not scaled) / all gone within that many ticks of each other |
+| `killEnemy` | `tag`, `how` (`disappear`, `real`, `fall`), `size`, `type`, `onActor` | a puff and delete (with the zone actor bit after it), or a Bokoblin's own death or void fall |
+| `expectZoneActor` | `setId`, `room`, `set`, `timeoutSec` | the zone actor bit |
+| `expectEnemySync` | `sent`, `received`, `applied`, `echoes`, `expired`, `timeoutSec` | the enemy-death sync counters given |
+| `forceGroupFail` | `tags` | tagged Shadow Beasts into their downed wait, so the group is condemned |
+| `dumpEnemies` | | logs the current room's enemies and their scaling |
+
+Teleport (`StepsTeleport.cpp`):
+
+| op | fields | does |
+| --- | --- | --- |
+| `teleportTo` | `target`, `expect` (`arrived`, `local`, `stage`, `refused`, `timeout`, `failed`, or a list), `reason`, `timeoutSec` | asks to teleport to that peer and waits for the result |
+| `expectNear` | `target`, `maxDist` (250), `timeoutSec` | our Link within `maxDist` of the peer's reported position |
+
+Story (`StepsStory.cpp`):
+
+| op | fields | does |
+| --- | --- | --- |
+| `storySelfTest` | | classification, curated moves, segments, spawn form, entrances, STORY_MOVE round trip |
+| `dumpStory` | | logs the story state and the room's map events, exits, PLYR points and event tags |
+| `expectLayer` | `layer` or `natural` | our layer, or the one our flags pick here |
+| `triggerStory` | `via` (`requester`, `walk`, `arrival`), `mapToolId`, `point`, `layer` | starts a story event from its natural trigger |
+| `expectStoryMove` | `role` (`sent`, `received`, `none`, `notReceived`), `curated`, `qualHas`, `cached`, `sec`, `timeoutSec` | our sent / received moves |
+| `expectPrompt` / `expectNoPrompt` | `kind` (`move`, `inconsistent`) / `sec` | that pop-up shows / none is offered for `sec` |
+| `answerPrompt` | `answer` (`follow`, `decline`, `catchup`) | presses the pop-up's button |
+| `catchUp` | `expectKind` (`entrance`, `teleport`, `none`), `start` (true) | the Players tab's Catch up to story, confirmed |
+| `expectStoryLoad` | `state` (`idle`, `waiting`, `loading`, `arrived`, `failed`), `reason`, `timeoutSec` | the follow / catch-up load |
+| `expectConsistent` | `value`, `segment`, `timeoutSec` | whether our position fits our story |
+| `expectJoin` | `state` (or a list), `reason`, `holdSec`, `timeoutSec` | the pull-in state; with `holdSec` it must hold |
+| `waitStorySettled` | `timeoutSec` | our relocation chain played out and nothing ran for 60 ticks |
+| `forcePullInBlocker` | `code` (null: the real checks) | forces the pull-in safety check |
+| `setTransformLevel` / `setDarkClear` / `expectTransformLevel` | `level`, `set` | level bits of our save |
+| `dismissSaveRequest` | `optional`, `timeoutSec` | answers the capture's save prompt with no |
+| `storyPrompts` | `value` | the per-player pop-up setting |
 
 Colouring (`StepsRecolor.cpp`):
 

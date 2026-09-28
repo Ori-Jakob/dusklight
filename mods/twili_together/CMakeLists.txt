@@ -114,6 +114,8 @@ if (TWILI_ENABLE_AUTOTEST)
         src/autotest/StepsPvp.cpp
         src/autotest/StepsRecolor.cpp
         src/autotest/StepsStatusFx.cpp
+        src/autotest/StepsStory.cpp
+        src/autotest/StepsTeleport.cpp
         src/autotest/StepsWolfFx.cpp
         src/autotest/StepsWolf.cpp
         src/autotest/StepsWorld.cpp
