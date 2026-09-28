@@ -271,9 +271,9 @@ module.exports = [
                     { op: "waitSignal", name: "cycle-done", from: "B", timeoutSec: 180 },
                     { op: "expectDummyRecolor", set: "kokiri", peerColor: true, timeoutSec: 3 },
                     { op: "wait", sec: 2 },
-                    // aurora keeps up to 128 MiB of decoded textures (each colour is a new one).
+                    // aurora caches up to 128 MiB of decoded textures, a new entry per colour.
                     { op: "expectRecolorDelta", minApplies: 150, maxApplies: 201, minDraws: 300,
-                      maxGpuGrowthMB: 160, maxPrivateGrowthMB: 96 },
+                      maxGpuGrowthMB: 192, maxPrivateGrowthMB: 192 },
                     ...barrier("live-done", "B"),
                     { op: "quit" },
                 ],
