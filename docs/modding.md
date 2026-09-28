@@ -547,6 +547,11 @@ if (svc_host->data_dir(mod_ctx, &dataDir) == MOD_OK) {
 
 // Report an error and disable the mod
 svc_host->fail(mod_ctx, MOD_ERROR, "something unrecoverable happened");
+
+// Quit the game after this frame (HostService 2.3); the process exits with the given code
+if (SERVICE_HAS(svc_host, HostService, request_quit)) {
+    svc_host->request_quit(mod_ctx, 0);
+}
 ```
 
 **Luau**
@@ -564,6 +569,9 @@ host.fail("something unrecoverable happened")
 ```
 
 `get_service`/`publish_service` provide dynamic service lookup; see [Exporting Services](#exporting-services).
+
+`request_quit` exits through the normal shutdown path, so every mod's `mod_shutdown` still runs. Only the first request
+sets the exit code; this is meant for automation (scripted test runs) and a mod's own "quit to desktop".
 
 **Lifecycle watches.** If your mod provides a service that hands out per-caller state (registrations, callbacks,
 handles), watch other mods' lifecycle and drop what you hold for a mod when it detaches.

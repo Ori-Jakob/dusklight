@@ -109,6 +109,19 @@ ModResult host_data_dir(ModContext* context, const char** outPath) {
     return MOD_OK;
 }
 
+bool s_quitRequested = false;
+
+void host_request_quit(ModContext* context, const int exitCode) {
+    const auto* mod = mod_from_context(context);
+    if (mod == nullptr || s_quitRequested) {
+        return;
+    }
+    s_quitRequested = true;
+    log::write(mod->metadata.id, LOG_LEVEL_INFO, "requested quit (exit code {})", exitCode);
+    dusk::ExitCode = exitCode;
+    dusk::IsRunning = false;
+}
+
 struct LifecycleWatcher {
     ModLifecycleFn fn = nullptr;
     void* userData = nullptr;
@@ -190,6 +203,7 @@ constinit HostService s_hostService{
     .unwatch_mod_lifecycle = host_unwatch_mod_lifecycle,
     .native_dir = host_native_dir,
     .data_dir = host_data_dir,
+    .request_quit = host_request_quit,
 };
 
 }  // namespace

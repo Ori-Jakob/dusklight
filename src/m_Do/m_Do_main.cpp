@@ -985,7 +985,7 @@ int game_main(int argc, char* argv[]) {
     dusk::config::shutdown();
     aurora_shutdown();
 
-    return 0;
+    return dusk::ExitCode;
 }
 
 

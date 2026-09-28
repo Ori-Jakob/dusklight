@@ -8,6 +8,7 @@ bool dusk::IsRunning = true;
 bool dusk::IsShuttingDown = false;
 bool dusk::IsGameLaunched = false;
 bool dusk::RestartRequested = false;
+int dusk::ExitCode = 0;
 uint8_t dusk::SaveRequested = 0;
 dusk::StageRequest dusk::StageRequested{"", false};
 std::filesystem::path dusk::ConfigPath;

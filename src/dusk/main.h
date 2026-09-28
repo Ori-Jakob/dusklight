@@ -7,6 +7,7 @@ extern bool IsRunning;
 extern bool IsShuttingDown;
 extern bool IsGameLaunched;
 extern bool RestartRequested;
+extern int ExitCode;
 extern std::filesystem::path ConfigPath;
 extern std::filesystem::path CachePath;
 

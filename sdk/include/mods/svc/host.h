@@ -13,7 +13,7 @@
 
 #define HOST_SERVICE_ID DUSKLIGHT_SERVICE_ID_PREFIX "host"
 #define HOST_SERVICE_MAJOR 2u
-#define HOST_SERVICE_MINOR 2u
+#define HOST_SERVICE_MINOR 3u
 
 /*
  * Ignore unknown values: later service minors may add events.
@@ -114,6 +114,11 @@ typedef struct HostService {
      * The returned path remains valid until mod_shutdown returns. *out_path is null on failure.
      */
     ModResult (*data_dir)(ModContext* ctx, const char** out_path);
+
+    /* Minor version 3 */
+
+    /* Quit after the current frame with this process exit code; the first request wins. */
+    void (*request_quit)(ModContext* ctx, int exit_code);
 } HostService;
 
 MOD_DECLARE_SERVICE(HostService, svc_host, HOST_SERVICE_ID, HOST_SERVICE_MAJOR, HOST_SERVICE_MINOR);
