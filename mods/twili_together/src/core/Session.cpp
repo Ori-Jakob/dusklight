@@ -85,6 +85,7 @@ void Session::resetSessionState() {
     sync::resetSession();
     enemy_sync::resetSession();
     story::resetSession();
+    pvp::resetSession();
 }
 
 void Session::connect() {
@@ -215,6 +216,7 @@ void Session::update() {
         sync::tick();
         tickRoomOwnerSettings();
         manageDummyActors();
+        pvp::tick();
     }
     // Connected or not: a stage change already under way is seen through.
     enemy_sync::tick();
@@ -282,6 +284,7 @@ void Session::onMessage(const nlohmann::json& packet) {
     } else if (teleport::handlePacket(type, packet)) {
     } else if (enemy_sync::handlePacket(type, packet)) {
     } else if (story::handlePacket(type, packet)) {
+    } else if (pvp::handlePacket(type, packet)) {
     } else if (type == "AUTOTEST_SIGNAL") {
 #if TWILI_ENABLE_AUTOTEST
         autotest::onSignal(packet.value("instance", std::string{}),
@@ -327,7 +330,9 @@ void Session::onSelfStateKnown() {
     }
 }
 
-void Session::queuePvpHit(uint32_t, const pvp::HitReport&) {}
+void Session::queuePvpHit(uint32_t victimId, const pvp::HitReport& hit) {
+    pvp::queueHit(victimId, hit);
+}
 
 bool Session::storySharedEventWith(uint32_t clientId) const {
     return story::sharedEventWith(clientId);

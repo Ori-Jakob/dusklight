@@ -20,6 +20,8 @@ enum class Target : uint8_t {
     LoadModel,
     BombArrow,
     FastCreate,
+    DamageCheck,
+    TgHitGObj,
     Count,
 };
 

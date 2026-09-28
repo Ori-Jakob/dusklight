@@ -132,7 +132,7 @@ public:
     // Autotest barrier; the server relays it to the room.
     void sendAutotestSignal(const std::string& instance, const std::string& name);
 
-    // PvP (P5): a hit our collision pass registered on a dummy.
+    // PvP: a hit our collision pass registered on a dummy.
     void queuePvpHit(uint32_t victimId, const pvp::HitReport& hit);
     // Story sync: we share a cutscene with this client, so its dummy hides.
     bool storySharedEventWith(uint32_t clientId) const;

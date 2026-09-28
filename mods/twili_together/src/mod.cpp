@@ -93,6 +93,9 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     hooks::install(hooks::Group::Enemy, enemyError);
     std::string storyError;
     hooks::install(hooks::Group::Story, storyError);
+    // Optional: without it PvP hits are not taken.
+    std::string pvpError;
+    hooks::install(hooks::Group::Pvp, pvpError);
 
     ui::init();
 

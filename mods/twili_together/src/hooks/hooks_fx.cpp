@@ -242,7 +242,8 @@ const char* perf::targetName(Target target) {
     static constexpr const char* kNames[] = {"daSus_c::check", "daAlink_c::execute", "Link SFX",
         "fpcM_Management", "dComIfGp_particle_set", "dComIfGp_particle_setPolyColor",
         "dComIfGp_setHitMark", "startHitItemSE", "fopKyM_createWpillar", "effect scopes",
-        "loadModelDVD", "arrow execute", "fopAcM_fastCreate"};
+        "loadModelDVD", "arrow execute", "fopAcM_fastCreate", "checkDamageAction",
+        "dCcD_GObjInf::GetTgHitGObj"};
     static_assert(std::size(kNames) == static_cast<size_t>(Target::Count));
     return kNames[static_cast<size_t>(target)];
 }
