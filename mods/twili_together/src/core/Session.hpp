@@ -68,6 +68,8 @@ public:
 
     const std::map<uint32_t, Client>& clients() const { return mClients; }
     fopAc_ac_c* dummyActorForClient(uint32_t clientId) const;
+    // Its Epona's puppet, null while none executes.
+    fopAc_ac_c* horseActorForClient(uint32_t clientId) const;
 
     uint32_t selfClientId() const { return mSelfClientId; }
     const Client* selfClient() const;
@@ -153,6 +155,8 @@ private:
     void sendHandshake();
     void tickStageTracking();
     void tickSelfColor();
+    // Our horse's name and parking spot in client state.
+    void tickHorseState();
     void rememberSentColor(const std::array<int, 3>& color);
     // The server relays our client state to everyone but us: our own row takes what we sent.
     void syncSelfRow();
@@ -169,6 +173,9 @@ private:
 
     void manageDummyActors();
     void destroyDummies();
+    // One puppet per client whose horse is shown in our stage and layer, live or parked.
+    void manageHorsePuppets(bool stageReady);
+    void destroyHorsePuppets();
     bool clientHasPlayerInCurrentLayer(const Client& client) const;
     bool hasRemoteClientInCurrentLayer() const;
 
@@ -184,6 +191,17 @@ private:
         std::chrono::steady_clock::time_point retryAt{};
     };
     std::map<uint32_t, DummyCreateFailure> mDummyCreateFailures;
+    std::map<uint32_t, fpc_ProcID> mHorseActors;
+    std::set<uint32_t> mHorseSeenExecuting;
+    std::map<uint32_t, DummyCreateFailure> mHorseCreateFailures;
+    // Live horses shown here since the last scene change: their puppet waits hidden while they
+    // wait to be called instead of loading Horse.arc again.
+    std::set<uint32_t> mHorseShownHere;
+    std::map<uint32_t, std::chrono::steady_clock::time_point> mHorseWantedAt;
+    bool mHorseStateSent = false;
+    std::string mSentHorseName;
+    HorsePlace mSentHorsePlace;
+    std::chrono::steady_clock::time_point mHorseStateSentAt{};
     std::chrono::steady_clock::time_point mSceneChangedAt{};
     std::string mConnectionFailureMessage;
     std::string mLastCloseReason;

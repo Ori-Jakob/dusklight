@@ -7,7 +7,7 @@
 struct cXyz;
 class daAlink_c;
 
-// The remote horse puppet as the dummy player sees it; P5 adds the puppet itself.
+// The remote horse puppet (actors/DummyHorse) as the dummy player and the name tags see it.
 namespace twili::horse {
 
 // Poses `clientId`'s puppet from the sample the dummy shows (the horse moves first).

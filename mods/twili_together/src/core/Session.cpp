@@ -82,6 +82,8 @@ void Session::resetSessionState() {
     mLastSaveLoaded = false;
     mRoomState = RoomState{};
     mVersionMismatchLogged.clear();
+    // The server knows nothing of our horse in a new session.
+    mHorseStateSent = false;
     sync::resetSession();
     enemy_sync::resetSession();
     story::resetSession();
@@ -213,6 +215,7 @@ void Session::update() {
     if (isConnected()) {
         tickStageTracking();
         tickSelfColor();
+        tickHorseState();
         sync::tick();
         tickRoomOwnerSettings();
         manageDummyActors();
@@ -261,6 +264,7 @@ void Session::destroyDummies() {
     mDummyActors.clear();
     mDummySeenExecuting.clear();
     mDummyCreateFailures.clear();
+    destroyHorsePuppets();
 }
 
 void Session::onMessage(const nlohmann::json& packet) {

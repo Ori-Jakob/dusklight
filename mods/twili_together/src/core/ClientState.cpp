@@ -2,6 +2,7 @@
 #include "core/Log.hpp"
 #include "core/SaveGate.hpp"
 #include "core/Session.hpp"
+#include "horse/HorseSync.hpp"
 #include "story/Story.hpp"
 #include "sync/WorldSync.hpp"
 
@@ -23,6 +24,10 @@ namespace twili {
 
 // At most 4 colour updates a second while the picker is dragged.
 static constexpr auto kColorPushInterval = std::chrono::milliseconds(250);
+// Our horse's parking spot is read once a horse that came along has saved her new position,
+// and pushed at most this often.
+static constexpr auto kHorsePlaceSettle = std::chrono::seconds(2);
+static constexpr auto kHorseStatePushInterval = std::chrono::seconds(1);
 // The server keeps at most 32 code points of a horse name.
 static constexpr size_t kMaxHorseNameBytes = 128;
 
@@ -97,6 +102,18 @@ static void applyClientState(Client& client, const nlohmann::json& state) {
             }
         }
     }
+}
+
+static bool samePlace(const HorsePlace& a, const HorsePlace& b) {
+    if (a.valid != b.valid) {
+        return false;
+    }
+    if (!a.valid) {
+        return true;
+    }
+    const float dx = a.pos[0] - b.pos[0], dy = a.pos[1] - b.pos[1], dz = a.pos[2] - b.pos[2];
+    return std::strncmp(a.stage, b.stage, sizeof(a.stage)) == 0 && a.room == b.room &&
+           a.angleY == b.angleY && dx * dx + dy * dy + dz * dz < 1.0f;
 }
 
 // Positions describe the scene they came from; a dummy waits for fresh ones.
@@ -246,6 +263,60 @@ void Session::syncSelfRow() {
         self.colorG = static_cast<uint8_t>(mSentColor[1]);
         self.colorB = static_cast<uint8_t>(mSentColor[2]);
     }
+    if (mHorseStateSent) {
+        self.horseName = mSentHorseName;
+        self.horsePlace = mSentHorsePlace;
+    }
+}
+
+// Our horse's name and, while we are in another stage than hers, where she waits: peers there
+// show her parked. The server caches both for late joiners.
+void Session::tickHorseState() {
+    if (mSelfClientId == 0 || mLastLayerNo == -127) {
+        return;
+    }
+    const auto now = std::chrono::steady_clock::now();
+    const bool saveLoaded = isSaveLoaded();
+    std::string name = saveLoaded ? horse::localNameUtf8() : std::string{};
+    HorsePlace place = mSentHorsePlace;
+    if (!saveLoaded) {
+        place = HorsePlace{};
+    } else if (now - mSceneChangedAt >= kHorsePlaceSettle && dComIfGp_getPlayer(0) != nullptr &&
+               !dComIfGp_isEnableNextStage())
+    {
+        horse::localPlace(place);
+        if (place.valid && std::strncmp(place.stage, mLastStageName, sizeof(place.stage)) == 0) {
+            place = HorsePlace{};
+        }
+    } else if (mSentHorsePlace.valid &&
+               std::strncmp(mSentHorsePlace.stage, mLastStageName, sizeof(mLastStageName)) == 0)
+    {
+        // Back in her stage: our stream shows her from now on.
+        place = HorsePlace{};
+    }
+    if (mHorseStateSent && name == mSentHorseName && samePlace(place, mSentHorsePlace)) {
+        return;
+    }
+    if (mHorseStateSent && now - mHorseStateSentAt < kHorseStatePushInterval) {
+        return;
+    }
+    nlohmann::json packet = {{"type", "UPDATE_CLIENT_STATE"}, {"horseName", name}};
+    if (place.valid) {
+        packet["horsePlace"] = {{"stage", std::string(place.stage)},
+            {"room", static_cast<int>(place.room)}, {"x", place.pos[0]}, {"y", place.pos[1]},
+            {"z", place.pos[2]}, {"angleY", static_cast<int>(place.angleY)}};
+        TwiliLog.info("[horse] \"{}\" parked in {} room {} at ({:.0f}, {:.0f}, {:.0f})", name,
+            place.stage, place.room, place.pos[0], place.pos[1], place.pos[2]);
+    } else {
+        packet["horsePlace"] = nullptr;
+        TwiliLog.info("[horse] \"{}\" not parked elsewhere", name);
+    }
+    send(packet);
+    mSentHorseName = std::move(name);
+    mSentHorsePlace = place;
+    mHorseStateSent = true;
+    mHorseStateSentAt = now;
+    syncSelfRow();
 }
 
 void Session::handleAllClientState(const nlohmann::json& packet) {

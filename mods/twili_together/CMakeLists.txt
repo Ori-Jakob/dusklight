@@ -28,6 +28,7 @@ endif ()
 set(TWILI_SOURCES
     src/mod.cpp
     src/actors/DummyActors.cpp
+    src/actors/DummyHorse.cpp
     src/actors/DummyItemFx.cpp
     src/actors/DummyMidna.cpp
     src/actors/DummyPlayer.cpp
@@ -62,7 +63,7 @@ set(TWILI_SOURCES
     src/hooks/hooks_save.cpp
     src/hooks/hooks_story.cpp
     src/hooks/hooks_sync.cpp
-    src/horse/HorsePuppetStub.cpp
+    src/horse/HorsePuppet.cpp
     src/horse/HorseSync.cpp
     src/net/Link.cpp
     src/net/TcpTransport.cpp
