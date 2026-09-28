@@ -145,6 +145,91 @@ World sync (`StepsWorld.cpp`):
 | `expectNoItem` | `item`, `forSec` (5) | fails if the item's first-get bit gets set within `forSec` |
 | `expectMerges` | `min`, `max`, `timeoutSec` | world-state merges applied so far: waits for `min`, fails above `max` |
 
+Fidelity (`StepsFidelity.cpp`):
+
+| op | fields | does |
+| --- | --- | --- |
+| `setClothes` | `item` (0x2E Ordon, 0x2F Kokiri, 0x30 Magic Armor, 0x31 Zora), `timeoutSec` | changes our clothes like the collection screen; done once the new body is bound |
+| `setBoots` | `on` | iron boots on (assigned to X) or off; done once that held for 10 ticks |
+| `patchPlayerUpdate` | `patch`, `packets` (60) | merges `patch` into our next PLAYER_UPDATEs, each a keyframe |
+| `assignItemX` | `item` | an owned item on X (press it with a walk's `buttons`: X = 0x400) |
+| `expectDummyLook` | `clothes`, `casualHead`, `heavyBoots`, `zoraMask`, `lantern`, `heldItem`, `basePack`, `basePackAnm`, `standIn`, `ground`, `hidden`, `armorDrained`, `armorSettled`, `maxMissing`, `frames`, `timeoutSec` | the first peer's dummy shows every field given, then for `frames` more ticks |
+
+Wolf, Midna and transformations (`StepsWolfRemote.cpp`):
+
+| op | fields | does |
+| --- | --- | --- |
+| `setForm` | `form` (`wolf`, `human`) | the form Link spawns in on the next stage load (follow with a warp) |
+| `transform` | `form`, `trace`, `timeoutSec` | transforms our player; with `trace` every stage and every expected emitter must show |
+| `expectLocalForm` | `form` | |
+| `expectRemoteForm` | `form`, `body` (form or `hidden`), `count`, `timeoutSec` | peers send `form` and their dummies show `body` |
+| `expectCleanAnims` | `frames` (120), `maxRefused` (0) | no dummy refuses more clips than that |
+| `setMidna` | `ride`, `visible`, `timeoutSec` | Midna on our wolf's back (visible in the light world: transform level 3) |
+| `expectRemoteMidna` | `mode` (`drawn`, `shadow`, `none`), `upper`, `hairHand`, `leftHand`, `rightHand`, `tired`, `maxRefused`, `count`, `frames`, `timeoutSec` | peers' dummies pose their Midna so |
+| `transformFxSelfTest` | | replay planner and codec; needs no peer |
+| `expectRemoteTransformFx` | `form`, `maxLag`, `minSilhouette`, `fur`, `maxAnchorErr`, `skip`, `hidden`, `anchorSource`, `timeoutSec` | the first peer's next transformation as sent and as its dummy replayed it |
+| `expectNoTransformFx` | `frames` | the dummy replays no transformation |
+| `expectDummyTransformFx` | `emitters`, `tev`, `silhouette`, `anchorSource`, `frames`, `timeoutSec` | exactly these emitters this tick, and the other fields |
+| `waitRemoteTransformPhase` | `phase` (`A`, `swap`, `C`), `timeoutSec` | until the first peer sends that stage |
+
+Wolf attacks (`StepsWolfFx.cpp`):
+
+| op | fields | does |
+| --- | --- | --- |
+| `wolfSpin` | `dir` (`right`, `left`), `trail`, `timeoutSec` | spin attack on our wolf |
+| `wolfDome` | `force`, `radius`, `minLocks`, `timeoutSec` | Midna's lock-on dome (B held by an async walk before it) |
+| `expectLocalWolfFx` | `spin`, `charge`, `dome`, `minRadius`, `lockBlur`, `timeoutSec` | what our capture sends |
+| `expectPeerWolfFx` | `spin`, `dome`, `minRadius`, `lockBlur`, `lockDashSeq`, `hairAim`, `timeoutSec` | what the first peer last sent |
+| `expectRemoteWolfFx` | `spin`, `lastSpin`, `minSpinTicks`, `maxSpinTicks`, `spinEmitters`, `dome`, `domeShown`, `minRadius`, `maxRadius`, `lockBlur`, `minLockDashes`, `maxLockDashes`, `hairAim`, `count`, `frames`, `timeoutSec` | what the peers' dummies show |
+| `viewDummy` | `back`, `side`, `up` | our camera behind our Link, looking at the first peer's dummy |
+
+Status effects (`StepsStatusFx.cpp`):
+
+| op | fields | does |
+| --- | --- | --- |
+| `forceStatus` | `kind` (`freeze`, `burn`, `shieldBurn`, `douse`, `elec`, `hurt`, `chill`, `extinguish`), `value`, `frames`, `timeoutSec` | puts the status on our player the way the game does |
+| `expectLocalStatus` | `frozen`, `iceBlock`, `elec`, `armorDrained`, `firePoints`, `shieldBurnMin`/`Max`, `shield`, `shieldInHand`, `damageTimerMin`, `sinkMin`/`Max`, `timeoutSec` | our capture and player |
+| `expectDummyStatus` | `frozen`, `iceBlock`, `thaws`, `fireMin`/`Max`, `fireEmittersMin`/`Max`, `fireReceived`, `shieldBurnMin`/`Max`, `shieldBurnFx`, `shieldBurnOuts`, `shieldItem`, `elec`, `elecFx`, `damageTimerMin`/`Max`, `flashesMin`, `iceWait`, `sinkMin`/`Max`, `statusFlags`, `frames`, `timeoutSec` | the first peer's dummy |
+| `statusFxPack` | `iceBlock`, `elec` | logs whether this stage's particle pack has these effects |
+
+Items and projectiles (`StepsItemFx.cpp`):
+
+| op | fields | does |
+| --- | --- | --- |
+| `spawnLocalItem` | `kind` (`arrow`, `bombArrow`, `seed`, `bomb`, `waterBomb`, `bombling`), `count`, `forward`, `up`, `pitch`, `aimAtDummy`, `atDummy`, `timeoutSec` | our real item actors, without the aim |
+| `explodeAtDummy` | | a bomb arrow's explosion beside the first peer's dummy |
+| `injectItemFx` | `slots`, `events`, `hook`, `ball`, `packets` | our next updates show these |
+| `setOil` | `value` (21600) | lantern oil |
+| `expectLocalItemFx` | `objects`, `events`, `hookOutTicks`, `ironBallTicks`, `levelSfxTicks`, `minHookDist`, `timeoutSec` | our capture's totals |
+| `markRemoteItemFx` / `expectRemoteItemFx` | many (see the file) | the first peer's dummy's item copies and events since the mark |
+
+Life and enemies (`StepsPvp.cpp`, `StepsEnemy.cpp`):
+
+| op | fields | does |
+| --- | --- | --- |
+| `setLife` / `markLife` | `value` (12, quarter hearts) | sets / remembers our life |
+| `expectLife` / `expectLifeDelta` | `value`, `min`, `max` / `delta`, `frames`, `timeoutSec` | our life (saved plus the meter's pending change) |
+| `approachDummy` | `dist` (110) | our Link in front of the first peer's dummy, facing it |
+| `spawnEnemy` | `name`, `param`, `dx`, `dy`, `dz`, `tag`, `anchor` (`player`, `playerHome`), `setId` | an actor in the current room's layer |
+| `expectEnemyHealth` | `tag`, `health`, `max`, `timeoutSec` | the tagged actor's health |
+
+Colouring (`StepsRecolor.cpp`):
+
+| op | fields | does |
+| --- | --- | --- |
+| `recolorSelfTest` | | the recolour maths |
+| `expectDummyRecolor` | `set`, `rgb` or `peerColor` or `vanilla`, `name`, `hueTol`, `minSat`, `c1Max`, `c1Min`, `maxBytes`, `frames`, `timeoutSec` | the dummy wears `set` in that colour, only in the tunic-coloured blocks |
+| `markRecolor` / `expectRecolorDelta` | `name`; `minApplies`, `maxApplies`, `minDraws`, `maxGpuGrowthMB`, `maxPrivateGrowthMB` | recolours, draws and process memory since the mark |
+| `colorCycle` | `count` (200), `everyTicks` (8), `s`, `v` | changes our colour like the picker |
+| `setRupees` | `value`, `timeoutSec` | in Magic Armor, done once its BRK follows |
+| `recolorCamera` | `target` (`dummy`, `self`), `dist`, `height`, `up`, `side` | our camera close on the dummy, for captures |
+
+Hook cost (`StepsPerf.cpp`):
+
+| op | fields | does |
+| --- | --- | --- |
+| `measureHookCost` | `frames` (300), `maxMs` (0.1) | calls of our every-tick hook targets x one host dispatch, per tick |
+
 UI: colour and window (`StepsColor.cpp`). The picker is the host's colour control, driven by key
 presses posted to the game's own window (so it needs no focus) and checked through the setting:
 
