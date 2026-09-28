@@ -1,0 +1,1658 @@
+// Protocol tests for the Twili-Together relay server. Each test spawns a fresh server on
+// ephemeral ports and drives it with fake WebSocket and TCP clients, so no game is needed.
+//
+//   cd mods/twili_together/tools/server && npm test
+
+const { test } = require("node:test");
+const assert = require("node:assert/strict");
+const { spawn } = require("node:child_process");
+const crypto = require("node:crypto");
+const fs = require("node:fs");
+const http = require("node:http");
+const net = require("node:net");
+const os = require("node:os");
+const path = require("node:path");
+const WebSocket = require("ws");
+
+const SERVER = path.join(__dirname, "..", "server.js");
+
+const HANDSHAKE = { type: "HANDSHAKE", app: "twili-together", protocolVersion: 5, modVersion: "test",
+                    layout: "0123456789abcdef", name: "P", teamId: "", roomId: "" };
+
+// Resolves once both the WebSocket and the TCP listener are up.
+async function startServer(env = {}, args = ["0"]) {
+    const logPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "twili-test-")), "server.log");
+    const proc = spawn(process.execPath, [SERVER, ...args], {
+        env: { ...process.env, TT_LOG_PATH: logPath, ...env },
+        stdio: ["ignore", "pipe", "pipe"],
+    });
+    let out = "";
+    let err = "";
+    proc.stderr.on("data", (d) => { err += d.toString(); });
+    const ports = await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error(`server did not start:\n${out}${err}`)), 5000);
+        proc.stdout.on("data", (d) => {
+            out += d.toString();
+            const ws = out.match(/listening on port (\d+)/);
+            const tcp = out.match(/tcp relay on port (\d+)/);
+            if (ws && tcp) {
+                clearTimeout(timer);
+                resolve({ port: parseInt(ws[1], 10), tcpPort: parseInt(tcp[1], 10) });
+            }
+        });
+        proc.on("exit", (code) => reject(new Error(`server exited early (${code}):\n${out}${err}`)));
+    });
+    return {
+        ...ports,
+        logPath,
+        output: () => out,
+        stop: () => new Promise((resolve) => {
+            if (proc.exitCode !== null) return resolve();
+            proc.once("exit", resolve);
+            proc.kill();
+        }),
+    };
+}
+
+// A fake game client that records every packet it receives.
+class FakeClient {
+    constructor(server, wsOptions, protocols) {
+        this.server = server;
+        this.wsOptions = wsOptions;
+        this.protocols = protocols;
+        this.transport = "ws";
+        this.opened = false;
+        this.inbox = [];
+        this.waiters = [];
+    }
+
+    open() {
+        return new Promise((resolve, reject) => {
+            const url = `ws://127.0.0.1:${this.server.port}`;
+            this.ws = this.protocols ? new WebSocket(url, this.protocols, this.wsOptions) : new WebSocket(url, this.wsOptions);
+            this.whenClosed = new Promise((r) => this.ws.once("close", (code) => r(code)));
+            this.ws.on("open", () => {
+                this.opened = true;
+                resolve();
+            });
+            this.ws.on("error", reject);
+            this.ws.on("message", (data) => this.receive(JSON.parse(data.toString())));
+        });
+    }
+
+    receive(packet) {
+        const w = this.waiters.find((x) => x.pred(packet));
+        if (w) {
+            // Consumed by a waiter: keep it out of the inbox so expectNone ignores it.
+            this.waiters.splice(this.waiters.indexOf(w), 1);
+            clearTimeout(w.timer);
+            w.resolve(packet);
+        } else {
+            this.inbox.push(packet);
+        }
+    }
+
+    send(packet) {
+        this.ws.send(typeof packet === "string" ? packet : JSON.stringify(packet));
+    }
+
+    // Resolves with the first packet (already received or future) matching pred.
+    waitFor(pred, what = "packet", timeoutMs = 2000) {
+        const seen = this.inbox.find(pred);
+        if (seen) {
+            this.inbox.splice(this.inbox.indexOf(seen), 1);
+            return Promise.resolve(seen);
+        }
+        return new Promise((resolve, reject) => {
+            const w = { pred, resolve };
+            w.timer = setTimeout(() => {
+                this.waiters.splice(this.waiters.indexOf(w), 1);
+                reject(new Error(`timed out waiting for ${what}; inbox: ${JSON.stringify(this.inbox.map((p) => p.type))}`));
+            }, timeoutMs);
+            this.waiters.push(w);
+        });
+    }
+
+    waitType(type, extra = () => true, timeoutMs) {
+        return this.waitFor((p) => p.type === type && extra(p), type, timeoutMs);
+    }
+
+    // Asserts nothing matching pred arrives within ms.
+    async expectNone(pred, what, ms = 300) {
+        await new Promise((r) => setTimeout(r, ms));
+        const hit = this.inbox.find(pred);
+        assert.equal(hit, undefined, `unexpected ${what}: ${JSON.stringify(hit)}`);
+    }
+
+    async join(fields = {}) {
+        if (!this.opened) await this.open();
+        this.send({ ...HANDSHAKE, transport: this.transport, ...fields });
+        const all = await this.waitType("ALL_CLIENT_STATE");
+        this.self = all.clients.find((c) => c.self);
+        this.id = this.self.clientId;
+        return all;
+    }
+
+    enterStage(stageName, layerNo = 0, extra = {}) {
+        this.send({ type: "UPDATE_CLIENT_STATE", online: true, isSaveLoaded: true, stageName, layerNo, roomNo: 0, saveTblNo: 1, ...extra });
+    }
+
+    close() {
+        return new Promise((resolve) => {
+            if (this.ws.readyState === WebSocket.CLOSED) return resolve();
+            this.ws.once("close", resolve);
+            this.ws.close();
+        });
+    }
+}
+
+// One length-prefixed TCP frame: 4-byte little-endian length, then UTF-8 JSON.
+function frame(packet) {
+    const body = Buffer.from(typeof packet === "string" ? packet : JSON.stringify(packet));
+    const head = Buffer.alloc(4);
+    head.writeUInt32LE(body.length);
+    return Buffer.concat([head, body]);
+}
+
+// The same fake client over the TCP transport.
+class TcpFakeClient extends FakeClient {
+    constructor(server) {
+        super(server);
+        this.transport = "tcp";
+    }
+
+    open() {
+        return new Promise((resolve, reject) => {
+            this.sock = net.connect(this.server.tcpPort, "127.0.0.1", () => {
+                this.opened = true;
+                resolve();
+            });
+            this.sock.setNoDelay(true);
+            this.whenClosed = new Promise((r) => this.sock.once("close", () => r()));
+            this.sock.on("error", reject);
+            let pending = Buffer.alloc(0);
+            this.sock.on("data", (chunk) => {
+                pending = Buffer.concat([pending, chunk]);
+                while (pending.length >= 4 && pending.length >= 4 + pending.readUInt32LE(0)) {
+                    const n = pending.readUInt32LE(0);
+                    this.receive(JSON.parse(pending.subarray(4, 4 + n).toString()));
+                    pending = pending.subarray(4 + n);
+                }
+            });
+        });
+    }
+
+    send(packet) {
+        this.write(frame(packet));
+    }
+
+    write(bytes) {
+        this.sock.write(bytes);
+    }
+
+    close() {
+        if (!this.sock.destroyed) this.sock.end();
+        return this.whenClosed;
+    }
+}
+
+async function withServer(fn, env, args) {
+    const server = await startServer(env, args);
+    const clients = [];
+    const track = (c) => {
+        clients.push(c);
+        return c;
+    };
+    const mk = (wsOptions, protocols) => track(new FakeClient(server, wsOptions, protocols));
+    const mkTcp = () => track(new TcpFakeClient(server));
+    try {
+        await fn(mk, server, mkTcp);
+    } finally {
+        await Promise.all(clients.map((c) => (c.ws || c.sock ? c.close() : null)));
+        await server.stop();
+    }
+}
+
+const settle = (ms = 100) => new Promise((r) => setTimeout(r, ms));
+
+// The log is written asynchronously, so a line may land after the packet that caused it.
+async function waitForLog(server, pattern, timeoutMs = 2000) {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+        const text = fs.existsSync(server.logPath) ? fs.readFileSync(server.logPath, "utf8") : "";
+        if (pattern.test(text)) return text;
+        if (Date.now() > deadline) assert.fail(`server log never matched ${pattern}:
+${text}`);
+        await settle(20);
+    }
+}
+
+// A bare WebSocket upgrade request, to see which subprotocol the server picks.
+function rawUpgrade(port, protocols) {
+    return new Promise((resolve, reject) => {
+        const req = http.request({
+            host: "127.0.0.1",
+            port,
+            headers: {
+                Connection: "Upgrade",
+                Upgrade: "websocket",
+                "Sec-WebSocket-Version": "13",
+                "Sec-WebSocket-Key": crypto.randomBytes(16).toString("base64"),
+                "Sec-WebSocket-Protocol": protocols,
+            },
+        });
+        req.on("upgrade", (res, socket) => {
+            socket.destroy();
+            resolve(res);
+        });
+        req.on("response", resolve);
+        req.on("error", reject);
+        req.end();
+    });
+}
+
+test("handshake returns room roster and makes the first client owner", () => withServer(async (mk) => {
+    const a = mk();
+    const all = await a.join({ name: "Alice" });
+    assert.equal(all.clients.length, 1);
+    assert.equal(all.clients[0].name, "Alice");
+    assert.equal(all.clients[0].self, true);
+    assert.equal(all.roomState.ownerClientId, a.id);
+    assert.equal(all.roomState.syncWorldState, true);
+    assert.equal(all.clients[0].modVersion, "test");
+    assert.equal(all.clients[0].layout, "0123456789abcdef");
+    assert.equal(all.clients[0].protocolVersion, 5);
+    assert.equal("clientVersion" in all.clients[0], false);
+}));
+
+test("second client sees the first and the first is told about the second", () => withServer(async (mk) => {
+    const a = mk();
+    const b = mk();
+    await a.join({ name: "A" });
+    const all = await b.join({ name: "B" });
+    assert.deepEqual(all.clients.map((c) => c.name).sort(), ["A", "B"]);
+    assert.equal(all.clients.find((c) => c.name === "B").self, true);
+    assert.equal(all.roomState.ownerClientId, a.id);
+    const joined = await a.waitType("UPDATE_CLIENT_STATE", (p) => p.clientId === b.id);
+    assert.equal(joined.name, "B");
+    assert.equal(joined.self, false);
+}));
+
+test("rooms are isolated", () => withServer(async (mk) => {
+    const a = mk();
+    const b = mk();
+    await a.join({ roomId: "one" });
+    const all = await b.join({ roomId: "two" });
+    assert.equal(all.clients.length, 1);
+    assert.equal(all.roomState.ownerClientId, b.id);
+    a.enterStage("F_SP103");
+    b.enterStage("F_SP103");
+    await settle();
+    a.send({ type: "PLAYER_UPDATE", quiet: true, pos: { x: 1, y: 2, z: 3 } });
+    a.send({ type: "AUTOTEST_SIGNAL", name: "x" });
+    await b.expectNone((p) => p.type === "PLAYER_UPDATE" || p.type === "AUTOTEST_SIGNAL" ||
+        (p.type === "UPDATE_CLIENT_STATE" && p.clientId === a.id), "cross-room packet");
+}));
+
+test("presence packets only reach clients in the same stage and layer", () => withServer(async (mk) => {
+    const a = mk();
+    const b = mk();
+    const c = mk();
+    await a.join();
+    await b.join();
+    await c.join();
+    a.enterStage("F_SP103", 0);
+    b.enterStage("F_SP103", 0);
+    c.enterStage("F_SP103", 1);
+    await settle();
+    a.send({ type: "PLAYER_UPDATE", quiet: true, pos: { x: 1, y: 2, z: 3 } });
+    const got = await b.waitType("PLAYER_UPDATE");
+    assert.equal(got.clientId, a.id, "relayed packets are stamped with the sender id");
+    assert.deepEqual(got.pos, { x: 1, y: 2, z: 3 });
+    await c.expectNone((p) => p.type === "PLAYER_UPDATE", "PLAYER_UPDATE in another layer");
+    await a.expectNone((p) => p.type === "PLAYER_UPDATE", "PLAYER_UPDATE echoed to sender");
+}));
+
+test("presence packets are not relayed before a save is loaded", () => withServer(async (mk) => {
+    const a = mk();
+    const b = mk();
+    await a.join();
+    await b.join();
+    b.enterStage("F_SP103", 0);
+    a.send({ type: "UPDATE_CLIENT_STATE", online: true, isSaveLoaded: false, stageName: "F_SP103", layerNo: 0 });
+    await settle();
+    a.send({ type: "PLAYER_UPDATE", quiet: true });
+    await b.expectNone((p) => p.type === "PLAYER_UPDATE", "PLAYER_UPDATE from a client with no save");
+}));
+
+test("team packets are scoped to the sender's team and stamped", () => withServer(async (mk) => {
+    const a = mk();
+    const b = mk();
+    const c = mk();
+    await a.join({ teamId: "red" });
+    await b.join({ teamId: "red" });
+    await c.join({ teamId: "blue" });
+    a.send({ type: "SET_FLAG", category: "SWITCH", flagNo: 12, roomNo: 2, stageName: "D_MN05", teamId: "blue" });
+    const got = await b.waitType("SET_FLAG");
+    assert.equal(got.clientId, a.id);
+    assert.equal(got.teamId, "red", "server overrides a spoofed teamId with the sender's real team");
+    await c.expectNone((p) => p.type === "SET_FLAG", "SET_FLAG to another team");
+}));
+
+test("ENEMY_DEFEATED reaches only teammates in the sender's stage and layer, stamped", () => withServer(async (mk) => {
+    const a = mk();
+    const b = mk();
+    const otherTeam = mk();
+    const otherLayer = mk();
+    const noSave = mk();
+    const otherProtocol = mk();
+    await a.join({ teamId: "red", sessionKey: "ka" });
+    await b.join({ teamId: "red" });
+    await otherTeam.join({ teamId: "blue" });
+    await otherLayer.join({ teamId: "red" });
+    await noSave.join({ teamId: "red" });
+    await otherProtocol.join({ teamId: "red", protocolVersion: 6 });
+    a.enterStage("F_SP108", 0);
+    b.enterStage("F_SP108", 0);
+    otherTeam.enterStage("F_SP108", 0);
+    otherLayer.enterStage("F_SP108", 1);
+    noSave.enterStage("F_SP108", 0, { isSaveLoaded: false });
+    otherProtocol.enterStage("F_SP108", 0);
+    await settle();
+    const kills = [{ roomNo: 0, procName: 485, params: 0xffffff00, setId: 0xffff, home: { x: 1, y: 2, z: 3 } }];
+    a.send({ type: "ENEMY_DEFEATED", v: 1, teamId: "blue", addToQueue: true, stageName: "F_SP108", layerNo: 0, kills });
+    const got = await b.waitType("ENEMY_DEFEATED");
+    assert.equal(got.clientId, a.id);
+    assert.equal(got.teamId, "red", "server overrides a spoofed teamId with the sender's real team");
+    assert.equal(got.senderSessionKey, "ka");
+    assert.equal(got.addToQueue, false);
+    assert.deepEqual(got.kills, kills);
+    for (const [c, what] of [[otherTeam, "another team"], [otherLayer, "another layer"], [noSave, "a client with no save"],
+        [otherProtocol, "another protocol version"], [a, "the sender"]]) {
+        await c.expectNone((p) => p.type === "ENEMY_DEFEATED", `ENEMY_DEFEATED to ${what}`);
+    }
+}));
+
+test("queued team packets are numbered by the server, live and in the replay", () => withServer(async (mk) => {
+    const a = mk();
+    const b = mk();
+    await a.join({ teamId: "t", sessionKey: "ka" });
+    await b.join({ teamId: "t", sessionKey: "kb" });
+    // A forged number is replaced; a packet that is not queued carries none.
+    a.send({ type: "SET_FLAG", flagNo: 1, addToQueue: true, queueSeq: 999999, queueEpoch: "evil" });
+    a.send({ type: "SET_FLAG", flagNo: 2, addToQueue: true });
+    a.send({ type: "SET_FLAG", flagNo: 9, addToQueue: false, queueSeq: 5, queueEpoch: "evil" });
+    const f1 = await b.waitType("SET_FLAG", (p) => p.flagNo === 1);
+    const f2 = await b.waitType("SET_FLAG", (p) => p.flagNo === 2);
+    const f9 = await b.waitType("SET_FLAG", (p) => p.flagNo === 9);
+    assert.equal(typeof f1.queueEpoch, "string");
+    assert.notEqual(f1.queueEpoch, "evil");
+    assert.equal(f2.queueEpoch, f1.queueEpoch);
+    assert.equal(f2.queueSeq, f1.queueSeq + 1);
+    assert.ok(f1.queueSeq < 1000);
+    assert.equal(f9.queueSeq, undefined);
+    assert.equal(f9.queueEpoch, undefined);
+    // b's next session (a reconnect) gets the same numbers in the replay.
+    b.close();
+    const b2 = mk();
+    await b2.join({ teamId: "t", sessionKey: "kb" });
+    b2.send({ type: "REQUEST_WORLD_STATE", catchUp: true });
+    const r1 = await b2.waitType("SET_FLAG", (p) => p.flagNo === 1 && p.fromQueue === true);
+    const r2 = await b2.waitType("SET_FLAG", (p) => p.flagNo === 2 && p.fromQueue === true);
+    assert.deepEqual([r1.queueEpoch, r1.queueSeq, r2.queueSeq], [f1.queueEpoch, f1.queueSeq, f2.queueSeq]);
+    // Another team numbers separately (its own epoch).
+    const c = mk();
+    await c.join({ teamId: "u" });
+    const d = mk();
+    await d.join({ teamId: "u" });
+    c.send({ type: "SET_FLAG", flagNo: 4, addToQueue: true });
+    const g = await d.waitType("SET_FLAG", (p) => p.flagNo === 4);
+    assert.notEqual(g.queueEpoch, f1.queueEpoch);
+    assert.equal(g.queueSeq, 1);
+}));
+
+test("ENEMY_DEFEATED is never queued for a teammate who joins later", () => withServer(async (mk) => {
+    const a = mk();
+    await a.join({ teamId: "t" });
+    a.enterStage("F_SP108", 0);
+    await settle();
+    a.send({ type: "ENEMY_DEFEATED", v: 1, addToQueue: true, stageName: "F_SP108", layerNo: 0, kills: [] });
+    a.send({ type: "SET_FLAG", flagNo: 3, addToQueue: true });
+    await settle();
+    const b = mk();
+    await b.join({ teamId: "t" });
+    b.enterStage("F_SP108", 0);
+    b.send({ type: "REQUEST_WORLD_STATE", catchUp: true });
+    await b.waitType("SET_FLAG", (p) => p.flagNo === 3 && p.fromQueue === true);
+    await b.expectNone((p) => p.type === "ENEMY_DEFEATED", "replayed ENEMY_DEFEATED");
+}));
+
+test("STORY_EVENT reaches only teammates in the sender's stage and layer, stamped and never queued", () => withServer(async (mk) => {
+    const a = mk();
+    const b = mk();
+    const otherTeam = mk();
+    const otherLayer = mk();
+    await a.join({ teamId: "red", sessionKey: "ka" });
+    await b.join({ teamId: "red" });
+    await otherTeam.join({ teamId: "blue" });
+    await otherLayer.join({ teamId: "red" });
+    a.enterStage("F_SP108", 8);
+    b.enterStage("F_SP108", 8);
+    otherTeam.enterStage("F_SP108", 8);
+    otherLayer.enterStage("F_SP108", 14);
+    await settle();
+    a.send({ type: "STORY_EVENT", sv: 1, ph: "start", id: 7, stage: "F_SP108", room: 0, layer: 8, m: 0,
+             teamId: "blue", addToQueue: true });
+    const got = await b.waitType("STORY_EVENT");
+    assert.equal(got.clientId, a.id);
+    assert.equal(got.teamId, "red", "server overrides a spoofed teamId with the sender's real team");
+    assert.equal(got.senderSessionKey, "ka");
+    assert.equal(got.addToQueue, false);
+    for (const [c, what] of [[otherTeam, "another team"], [otherLayer, "another layer"], [a, "the sender"]]) {
+        await c.expectNone((p) => p.type === "STORY_EVENT", `STORY_EVENT to ${what}`);
+    }
+    const late = mk();
+    await late.join({ teamId: "red" });
+    late.enterStage("F_SP108", 8);
+    late.send({ type: "REQUEST_WORLD_STATE", catchUp: true });
+    await late.expectNone((p) => p.type === "STORY_EVENT", "replayed STORY_EVENT");
+}));
+
+test("STORY_MOVE reaches teammates in any stage, not other teams, and is never queued", () => withServer(async (mk) => {
+    const a = mk();
+    const b = mk();
+    const otherTeam = mk();
+    await a.join({ teamId: "red", sessionKey: "ka" });
+    await b.join({ teamId: "red" });
+    await otherTeam.join({ teamId: "blue" });
+    a.enterStage("R_SP107", 14);
+    b.enterStage("R_SP01", 0);
+    otherTeam.enterStage("R_SP01", 0);
+    await settle();
+    const before = Date.now();
+    a.send({ type: "STORY_MOVE", sv: 1, ph: "arrive", mid: "m1", name: "Kira", addToQueue: true,
+             from: { stage: "F_SP108", room: 0 }, to: { stage: "R_SP107", room: 0, point: 0 } });
+    const got = await b.waitType("STORY_MOVE");
+    assert.equal(got.clientId, a.id);
+    assert.equal(got.teamId, "red");
+    assert.equal(got.senderSessionKey, "ka");
+    assert.equal(got.addToQueue, false);
+    assert.ok(got.serverTime >= before, "stamped with the server's time");
+    assert.equal(got.fromCache, undefined);
+    await otherTeam.expectNone((p) => p.type === "STORY_MOVE", "STORY_MOVE to another team");
+    await a.expectNone((p) => p.type === "STORY_MOVE", "STORY_MOVE to the sender");
+}));
+
+test("the latest STORY_MOVE arrive is replayed on catch-up, with its age, except to its own session", () => withServer(async (mk) => {
+    const a = mk();
+    await a.join({ teamId: "t", sessionKey: "KA" });
+    a.enterStage("R_SP107", 14);
+    await settle();
+    a.send({ type: "STORY_MOVE", sv: 1, ph: "arrive", mid: "old", name: "Kira" });
+    a.send({ type: "STORY_MOVE", sv: 1, ph: "arrive", mid: "new", name: "Kira" });
+    a.send({ type: "STORY_MOVE", sv: 1, ph: "depart", mid: "later", name: "Kira" });
+    await settle(150);
+
+    const b = mk();
+    await b.join({ teamId: "t" });
+    b.enterStage("R_SP01", 0);
+    b.send({ type: "REQUEST_WORLD_STATE" });
+    await b.expectNone((p) => p.type === "STORY_MOVE", "a cached story move without catchUp");
+    b.send({ type: "REQUEST_WORLD_STATE", catchUp: true });
+    const cached = await b.waitType("STORY_MOVE");
+    assert.equal(cached.mid, "new", "only the latest arrive is cached; a depart is not");
+    assert.equal(cached.fromCache, true);
+    assert.ok(cached.ageMs >= 100, `ageMs ${cached.ageMs}`);
+    await b.expectNone((p) => p.type === "STORY_MOVE", "a second cached story move");
+
+    const other = mk();
+    await other.join({ teamId: "u" });
+    other.send({ type: "REQUEST_WORLD_STATE", catchUp: true });
+    await other.expectNone((p) => p.type === "STORY_MOVE", "another team's story move");
+
+    await a.close();
+    const a2 = mk();
+    await a2.join({ teamId: "t", sessionKey: "KA" });
+    a2.send({ type: "REQUEST_WORLD_STATE", catchUp: true });
+    await a2.expectNone((p) => p.type === "STORY_MOVE", "our own session's story move");
+}));
+
+test("queued team packets are replayed to a teammate who joins later", () => withServer(async (mk) => {
+    const a = mk();
+    await a.join({ teamId: "t" });
+    a.send({ type: "SET_FLAG", flagNo: 1, addToQueue: true });
+    a.send({ type: "SET_EVENT_BIT", no: 0x1234, addToQueue: true });
+    a.send({ type: "SET_FLAG", flagNo: 2, addToQueue: false });
+    await settle();
+    const b = mk();
+    await b.join({ teamId: "t" });
+    b.send({ type: "REQUEST_WORLD_STATE", catchUp: true });
+    const f1 = await b.waitType("SET_FLAG");
+    assert.equal(f1.flagNo, 1);
+    assert.equal(f1.fromQueue, true);
+    const ev = await b.waitType("SET_EVENT_BIT");
+    assert.equal(ev.no, 0x1234);
+    await b.expectNone((p) => p.type === "SET_FLAG", "non-queued flag replay");
+
+    const c = mk();
+    await c.join({ teamId: "other" });
+    c.send({ type: "REQUEST_WORLD_STATE", catchUp: true });
+    await c.expectNone((p) => p.type === "SET_FLAG" || p.type === "SET_EVENT_BIT", "replay to another team");
+}));
+
+test("team packets carry the sender's name and colour, also when replayed after it left", () => withServer(async (mk) => {
+    const a = mk();
+    const b = mk();
+    await a.join({ teamId: "t", name: "Dad", color: { r: 30, g: 60, b: 200 } });
+    await b.join({ teamId: "t", name: "Mom" });
+    a.send({ type: "UPDATE_WORLD_STATE", save: "S", senderName: "Forged" });
+    a.send({ type: "GIVE_ITEM", itemNo: 0x44, addToQueue: true, senderName: "Forged", senderColor: { r: 1, g: 2, b: 3 } });
+    const live = await b.waitType("GIVE_ITEM");
+    assert.equal(live.senderName, "Dad", "the server's name, not the packet's");
+    assert.deepEqual(live.senderColor, { r: 30, g: 60, b: 200 });
+    await settle();
+    await a.close();
+
+    const c = mk();
+    await c.join({ teamId: "t" });
+    c.send({ type: "REQUEST_WORLD_STATE", catchUp: true });
+    // Mom has not caught up (no request of her own), so the cache stands in for the team.
+    const ws = await c.waitType("UPDATE_WORLD_STATE");
+    assert.equal(ws.fromCache, true);
+    assert.equal(ws.senderName, "Dad");
+    const replay = await c.waitType("GIVE_ITEM");
+    assert.equal(replay.fromQueue, true);
+    assert.equal(replay.senderName, "Dad");
+    assert.deepEqual(replay.senderColor, { r: 30, g: 60, b: 200 });
+}));
+
+test("world state is cached for joiners and supersedes the queue", () => withServer(async (mk) => {
+    const a = mk();
+    await a.join({ teamId: "t" });
+    a.send({ type: "SET_FLAG", flagNo: 1, addToQueue: true });
+    a.send({ type: "UPDATE_WORLD_STATE", save: "AAAA", saveTblNo: 3 });
+    a.send({ type: "SET_FLAG", flagNo: 2, addToQueue: true });
+    await settle();
+    const b = mk();
+    await b.join({ teamId: "t" });
+    b.send({ type: "REQUEST_WORLD_STATE", catchUp: true });
+    const ws = await b.waitType("UPDATE_WORLD_STATE");
+    assert.equal(ws.fromCache, true);
+    assert.equal(ws.save, "AAAA");
+    assert.equal(ws.clientId, a.id);
+    const f = await b.waitType("SET_FLAG");
+    assert.equal(f.flagNo, 2, "flag queued before the world state was dropped");
+    await b.expectNone((p) => p.type === "SET_FLAG", "stale queued flag");
+}));
+
+test("REQUEST_WORLD_STATE is forwarded to caught-up teammates, who answer the requester only", () => withServer(async (mk) => {
+    const a = mk();
+    const b = mk();
+    const c = mk();
+    await a.join({ teamId: "t" });
+    await b.join({ teamId: "t" });
+    await c.join({ teamId: "t" });
+    a.enterStage("F_SP103");
+    a.send({ type: "REQUEST_WORLD_STATE", catchUp: true });
+    a.send({ type: "UPDATE_WORLD_STATE", save: "S1" });
+    await b.waitType("UPDATE_WORLD_STATE");
+    await c.waitType("UPDATE_WORLD_STATE");
+    b.send({ type: "REQUEST_WORLD_STATE" });
+    const fwd = await a.waitType("REQUEST_WORLD_STATE");
+    assert.equal(fwd.clientId, b.id);
+    await b.expectNone((p) => p.type === "UPDATE_WORLD_STATE", "cached state while a loaded teammate can answer");
+    await c.expectNone((p) => p.type === "REQUEST_WORLD_STATE", "request forwarded to a teammate without a save");
+
+    // A targeted answer goes to the requester only.
+    a.send({ type: "UPDATE_WORLD_STATE", save: "S2", targetClientId: b.id });
+    const answer = await b.waitType("UPDATE_WORLD_STATE", (p) => p.save === "S2");
+    assert.equal(answer.targetClientId, b.id);
+    await c.expectNone((p) => p.type === "UPDATE_WORLD_STATE" && p.save === "S2", "targeted state to a bystander");
+}));
+
+test("catch-up is sent on a catchUp request, not at handshake", () => withServer(async (mk) => {
+    const a = mk();
+    await a.join({ teamId: "t" });
+    a.send({ type: "UPDATE_WORLD_STATE", save: "S1" });
+    a.send({ type: "SET_FLAG", flagNo: 1, addToQueue: true });
+    await settle();
+    const b = mk();
+    await b.join({ teamId: "t" });
+    await b.expectNone((p) => p.type === "UPDATE_WORLD_STATE" || p.type === "SET_FLAG", "catch-up at handshake");
+
+    b.send({ type: "REQUEST_WORLD_STATE" });
+    const cached = await b.waitType("UPDATE_WORLD_STATE");
+    assert.equal(cached.fromCache, true);
+    await b.expectNone((p) => p.type === "SET_FLAG", "queue replay without catchUp");
+
+    b.send({ type: "REQUEST_WORLD_STATE", catchUp: true });
+    await b.waitType("UPDATE_WORLD_STATE", (p) => p.fromCache);
+    const f = await b.waitType("SET_FLAG");
+    assert.equal(f.flagNo, 1);
+    assert.equal(f.fromQueue, true);
+}));
+
+test("the cached state is sent only when no caught-up teammate can answer", () => withServer(async (mk) => {
+    const a = mk();
+    const b = mk();
+    await a.join({ teamId: "t" });
+    a.enterStage("F_SP103");
+    a.send({ type: "REQUEST_WORLD_STATE", catchUp: true });
+    a.send({ type: "UPDATE_WORLD_STATE", save: "S1" });
+    a.send({ type: "SET_FLAG", flagNo: 1, addToQueue: true });
+    await settle();
+    await b.join({ teamId: "t" });
+    b.send({ type: "REQUEST_WORLD_STATE", catchUp: true });
+    const fwd = await a.waitType("REQUEST_WORLD_STATE");
+    assert.equal(fwd.clientId, b.id);
+    const f = await b.waitType("SET_FLAG");
+    assert.equal(f.fromQueue, true, "the queue is replayed even when a teammate will answer");
+    await b.expectNone((p) => p.type === "UPDATE_WORLD_STATE", "cached state while a loaded teammate can answer");
+
+    // Back on the title screen, the teammate can no longer answer.
+    a.send({ type: "UPDATE_CLIENT_STATE", isSaveLoaded: false });
+    await settle();
+    b.send({ type: "REQUEST_WORLD_STATE" });
+    const cached = await b.waitType("UPDATE_WORLD_STATE");
+    assert.equal(cached.fromCache, true);
+    assert.equal(cached.save, "S1");
+    await a.expectNone((p) => p.type === "REQUEST_WORLD_STATE", "request forwarded to a teammate without a save");
+
+    // The save it loads next has not caught up yet either.
+    a.enterStage("F_SP103");
+    await settle();
+    b.send({ type: "REQUEST_WORLD_STATE" });
+    await b.waitType("UPDATE_WORLD_STATE", (p) => p.fromCache);
+    await a.expectNone((p) => p.type === "REQUEST_WORLD_STATE", "request forwarded to a freshly loaded save");
+}));
+
+test("two teammates loading together do not hold back an absent teammate's cache", () => withServer(async (mk) => {
+    const c = mk();
+    await c.join({ teamId: "t", sessionKey: "KC" });
+    c.enterStage("F_SP103");
+    c.send({ type: "REQUEST_WORLD_STATE", catchUp: true });
+    c.send({ type: "UPDATE_WORLD_STATE", save: "SC" });
+    await settle();
+    await c.close();
+
+    // Both report a loaded save before either has requested the team state.
+    const a = mk();
+    const b = mk();
+    await a.join({ teamId: "t", sessionKey: "KA" });
+    await b.join({ teamId: "t", sessionKey: "KB" });
+    a.enterStage("F_SP103");
+    b.enterStage("F_SP103");
+    await settle();
+    a.send({ type: "REQUEST_WORLD_STATE", catchUp: true });
+    const cached = await a.waitType("UPDATE_WORLD_STATE");
+    assert.equal(cached.fromCache, true);
+    assert.equal(cached.save, "SC");
+    await b.expectNone((p) => p.type === "REQUEST_WORLD_STATE", "request forwarded to a teammate that has not caught up");
+
+    // A merged the cache first, so it answers B in its place.
+    b.send({ type: "REQUEST_WORLD_STATE", catchUp: true });
+    const fwd = await a.waitType("REQUEST_WORLD_STATE");
+    assert.equal(fwd.clientId, b.id);
+    await b.expectNone((p) => p.type === "UPDATE_WORLD_STATE", "cached state while a caught-up teammate can answer");
+    a.send({ type: "UPDATE_WORLD_STATE", save: "SA", targetClientId: b.id });
+    await b.waitType("UPDATE_WORLD_STATE", (p) => p.save === "SA");
+
+    // Once answered, B is asked by the next requester too.
+    const d = mk();
+    await d.join({ teamId: "t" });
+    d.enterStage("F_SP103");
+    d.send({ type: "REQUEST_WORLD_STATE", catchUp: true });
+    await a.waitType("REQUEST_WORLD_STATE", (p) => p.clientId === d.id);
+    await b.waitType("REQUEST_WORLD_STATE", (p) => p.clientId === d.id);
+    await d.expectNone((p) => p.type === "UPDATE_WORLD_STATE", "cached state while caught-up teammates can answer");
+}));
+
+test("targeted world states reach only the target and are not cached", () => withServer(async (mk) => {
+    const a = mk();
+    const b = mk();
+    const c = mk();
+    await a.join({ teamId: "t" });
+    await b.join({ teamId: "t" });
+    await c.join({ teamId: "u" });
+    a.send({ type: "UPDATE_WORLD_STATE", save: "S1" });
+    await b.waitType("UPDATE_WORLD_STATE");
+    a.send({ type: "SET_FLAG", flagNo: 1, addToQueue: true });
+    await b.waitType("SET_FLAG");
+
+    a.send({ type: "UPDATE_WORLD_STATE", save: "S2", targetClientId: b.id });
+    const answer = await b.waitType("UPDATE_WORLD_STATE", (p) => p.save === "S2");
+    assert.equal(answer.targetClientId, b.id);
+    a.send({ type: "UPDATE_WORLD_STATE", save: "S3", targetClientId: c.id });
+    await c.expectNone((p) => p.type === "UPDATE_WORLD_STATE", "targeted state to another team");
+
+    const d = mk();
+    await d.join({ teamId: "t" });
+    d.send({ type: "REQUEST_WORLD_STATE", catchUp: true });
+    const cached = await d.waitType("UPDATE_WORLD_STATE");
+    assert.equal(cached.save, "S1", "a targeted answer does not replace the cache");
+    const f = await d.waitType("SET_FLAG");
+    assert.equal(f.flagNo, 1, "a targeted answer does not clear the queue");
+}));
+
+test("a reconnecting client is not sent its own session's packets", () => withServer(async (mk) => {
+    const a = mk();
+    const b = mk();
+    const c = mk();
+    await a.join({ teamId: "t", sessionKey: "KA" });
+    await b.join({ teamId: "t", sessionKey: "KB" });
+    await c.join({ teamId: "t" });
+    a.send({ type: "UPDATE_WORLD_STATE", save: "SA" });
+    a.send({ type: "GIVE_ITEM", itemNo: 0x21, addToQueue: true, senderSessionKey: "KB" });
+    const live = await b.waitType("GIVE_ITEM");
+    assert.equal(live.senderSessionKey, "KA", "the server stamps the sender's real session key");
+    b.send({ type: "SET_FLAG", flagNo: 2, addToQueue: true });
+    c.send({ type: "SET_FLAG", flagNo: 3, addToQueue: true });
+    await settle();
+    await a.close();
+
+    const a2 = mk();
+    await a2.join({ teamId: "t", sessionKey: "KA" });
+    assert.notEqual(a2.id, a.id);
+    a2.send({ type: "REQUEST_WORLD_STATE", catchUp: true });
+    await a2.waitType("SET_FLAG", (p) => p.flagNo === 2);
+    const f3 = await a2.waitType("SET_FLAG", (p) => p.flagNo === 3);
+    assert.equal(f3.senderSessionKey, "");
+    await a2.expectNone((p) => p.type === "GIVE_ITEM" || p.type === "UPDATE_WORLD_STATE",
+        "packets from the previous connection of the same session");
+
+    // Without a session key, only the requester's own clientId is skipped.
+    const d = mk();
+    await d.join({ teamId: "t" });
+    d.send({ type: "REQUEST_WORLD_STATE", catchUp: true });
+    await d.waitType("UPDATE_WORLD_STATE", (p) => p.save === "SA");
+    await d.waitType("GIVE_ITEM");
+    await d.waitType("SET_FLAG", (p) => p.flagNo === 2);
+    await d.waitType("SET_FLAG", (p) => p.flagNo === 3);
+}));
+
+test("the requester's own stale connection is not asked for world state", () => withServer(async (mk) => {
+    const a = mk();
+    const b = mk();
+    await b.join({ teamId: "t" });
+    b.send({ type: "UPDATE_WORLD_STATE", save: "SB" });
+    await a.join({ teamId: "t", sessionKey: "K" });
+    a.enterStage("F_SP103");
+    a.send({ type: "REQUEST_WORLD_STATE", catchUp: true });
+    await a.waitType("UPDATE_WORLD_STATE");
+    // The same game process reconnects before the server noticed its old connection drop.
+    const a2 = mk();
+    await a2.join({ teamId: "t", sessionKey: "K" });
+    a2.send({ type: "REQUEST_WORLD_STATE", catchUp: true });
+    const cached = await a2.waitType("UPDATE_WORLD_STATE");
+    assert.equal(cached.save, "SB");
+    await a.expectNone((p) => p.type === "REQUEST_WORLD_STATE", "request forwarded to the requester's old connection");
+}));
+
+test("a teammate on another protocol version is not asked for world state", () => withServer(async (mk) => {
+    const a = mk();
+    const b = mk();
+    await a.join({ teamId: "t", protocolVersion: 6 });
+    a.enterStage("F_SP103");
+    a.send({ type: "REQUEST_WORLD_STATE", catchUp: true });
+    a.send({ type: "UPDATE_WORLD_STATE", save: "S1" });
+    await settle();
+    await b.join({ teamId: "t" });
+    b.send({ type: "REQUEST_WORLD_STATE", catchUp: true });
+    const cached = await b.waitType("UPDATE_WORLD_STATE");
+    assert.equal(cached.fromCache, true, "the cache stands in for a teammate that would drop the request");
+    await a.expectNone((p) => p.type === "REQUEST_WORLD_STATE", "request forwarded across protocol versions");
+}));
+
+test("UNSET_EVENT_BIT is team-scoped and queued", () => withServer(async (mk, server) => {
+    const a = mk();
+    const b = mk();
+    const c = mk();
+    await a.join({ teamId: "red" });
+    await b.join({ teamId: "red" });
+    await c.join({ teamId: "blue" });
+    a.send({ type: "UNSET_EVENT_BIT", no: 0x0a40, teamId: "blue", addToQueue: true });
+    const got = await b.waitType("UNSET_EVENT_BIT");
+    assert.equal(got.no, 0x0a40);
+    assert.equal(got.clientId, a.id);
+    assert.equal(got.teamId, "red");
+    await c.expectNone((p) => p.type === "UNSET_EVENT_BIT", "UNSET_EVENT_BIT to another team");
+    await waitForLog(server, /UNSET_EVENT_BIT no=0x0a40/);
+
+    const d = mk();
+    await d.join({ teamId: "red" });
+    d.send({ type: "REQUEST_WORLD_STATE", catchUp: true });
+    const replay = await d.waitType("UNSET_EVENT_BIT");
+    assert.equal(replay.no, 0x0a40);
+    assert.equal(replay.fromQueue, true);
+}));
+
+test("only the owner may change room state", () => withServer(async (mk) => {
+    const a = mk();
+    const b = mk();
+    await a.join();
+    await b.join();
+    b.send({ type: "UPDATE_ROOM_STATE", state: { pvpMode: true } });
+    await a.expectNone((p) => p.type === "UPDATE_ROOM_STATE", "room state from a non-owner");
+
+    a.send({ type: "UPDATE_ROOM_STATE", state: { pvpMode: true, enemyHealthMultiplier: 250, bogus: 1 } });
+    const got = await b.waitType("UPDATE_ROOM_STATE");
+    assert.equal(got.state.pvpMode, true);
+    assert.equal(got.state.enemyHealthMultiplier, 250);
+    assert.equal(got.state.ownerClientId, a.id);
+    assert.equal("bogus" in got.state, false);
+}));
+
+test("room state values are type-checked", () => withServer(async (mk) => {
+    const a = mk();
+    const b = mk();
+    await a.join();
+    await b.join();
+    a.send({ type: "UPDATE_ROOM_STATE", state: { pvpMode: "yes", syncWorldState: null, enemyCountMultiplier: "9", enemyHealthMultiplier: 1e9 } });
+    const got = await b.waitType("UPDATE_ROOM_STATE");
+    assert.equal(typeof got.state.pvpMode, "boolean");
+    assert.equal(got.state.syncWorldState, true, "invalid value keeps the previous setting");
+    assert.equal(got.state.enemyCountMultiplier, 100);
+    assert.equal(got.state.enemyHealthMultiplier, 500, "multiplier is clamped to the UI range");
+}));
+
+test("ownership passes to the next client when the owner leaves", () => withServer(async (mk) => {
+    const a = mk();
+    const b = mk();
+    await a.join();
+    await b.join();
+    await a.close();
+    const left = await b.waitType("UPDATE_CLIENT_STATE", (p) => p.clientId === a.id && p.online === false);
+    assert.ok(left);
+    const rs = await b.waitType("UPDATE_ROOM_STATE");
+    assert.equal(rs.state.ownerClientId, b.id);
+}));
+
+test("unknown packet types are relayed to the rest of the room", () => withServer(async (mk, server) => {
+    const a = mk();
+    const b = mk();
+    await a.join({ name: "A", roomId: "r" });
+    await b.join({ roomId: "r" });
+    a.send({ type: "AUTOTEST_SIGNAL", instance: "a1", name: "ready" });
+    const got = await b.waitType("AUTOTEST_SIGNAL");
+    assert.equal(got.name, "ready");
+    assert.equal(got.instance, "a1");
+    assert.equal(got.clientId, a.id);
+    await a.expectNone((p) => p.type === "AUTOTEST_SIGNAL", "echo to sender");
+    await waitForLog(server, /\[A\] AUTOTEST_SIGNAL instance=a1 name=ready/);
+}));
+
+test("server survives malformed input", () => withServer(async (mk) => {
+    const a = mk();
+    await a.open();
+    a.send("not json");
+    a.send("null");
+    a.send("[1,2,3]");
+    a.send({ type: 5 });
+    a.send({ type: "SET_FLAG" }); // before handshake: dropped
+    a.send({ type: "HANDSHAKE", app: "twili-together", protocolVersion: 5, name: 42, teamId: { x: 1 }, roomId: 7,
+             color: "red", modVersion: "v".repeat(40), layout: 123 });
+    const all = await a.waitType("ALL_CLIENT_STATE");
+    a.id = all.clients.find((c) => c.self).clientId;
+    assert.equal(typeof all.clients[0].name, "string");
+    assert.equal(typeof all.clients[0].teamId, "string");
+    assert.equal(typeof all.clients[0].color.r, "number");
+    assert.equal(all.clients[0].modVersion, "v".repeat(32));
+    assert.equal(all.clients[0].layout, "");
+    a.send({ type: "HANDSHAKE", name: "again" }); // second handshake ignored
+    a.send({ type: "UPDATE_CLIENT_STATE", stageName: { evil: true }, layerNo: "x", isSaveLoaded: "yes" });
+    a.send({ type: "UPDATE_ROOM_STATE", state: "garbage" });
+    await settle();
+
+    const b = mk();
+    const all2 = await b.join();
+    assert.equal(all2.clients.length, 2, "server still accepting clients");
+    const aState = all2.clients.find((c) => c.clientId === a.id);
+    assert.equal(typeof aState.stageName, "string");
+    assert.equal(typeof aState.layerNo, "number");
+    assert.equal(typeof aState.isSaveLoaded, "boolean");
+
+    // Client-state changes are relayed in canonical form, never as the raw packet.
+    a.send({ type: "UPDATE_CLIENT_STATE", stageName: ["x"], roomNo: 1e12, color: { r: "a" } });
+    const relayed = await b.waitType("UPDATE_CLIENT_STATE", (p) => p.clientId === a.id);
+    assert.equal(typeof relayed.stageName, "string");
+    assert.ok(relayed.roomNo >= -128 && relayed.roomNo <= 127);
+    assert.equal(typeof relayed.color.r, "number");
+}));
+
+test("client state updates are relayed to the room", () => withServer(async (mk) => {
+    const a = mk();
+    const b = mk();
+    await a.join({ name: "A" });
+    await b.join({ name: "B" });
+    a.enterStage("D_MN05", 2, { roomNo: 4, saveTblNo: 16 });
+    const got = await b.waitType("UPDATE_CLIENT_STATE", (p) => p.clientId === a.id && p.stageName === "D_MN05");
+    assert.equal(got.layerNo, 2);
+    assert.equal(got.roomNo, 4);
+    assert.equal(got.saveTblNo, 16);
+    assert.equal(got.isSaveLoaded, true);
+    assert.equal(got.name, "A");
+    assert.equal(got.self, false);
+}));
+
+test("player colour is live for the room and for late joiners", () => withServer(async (mk, server) => {
+    const a = mk();
+    const b = mk();
+    await a.join({ name: "A", color: { r: 255, g: 255, b: 255 } });
+    await b.join({ name: "B" });
+    a.enterStage("R_SP01", 0);
+    await b.waitType("UPDATE_CLIENT_STATE", (p) => p.clientId === a.id && p.stageName === "R_SP01");
+
+    // A colour-only update (what the picker sends) keeps the scene, so peers keep their dummy.
+    a.send({ type: "UPDATE_CLIENT_STATE", color: { r: 10, g: 20, b: 30 } });
+    const u = await b.waitType("UPDATE_CLIENT_STATE", (p) => p.clientId === a.id && p.color.r === 10);
+    assert.deepEqual(u.color, { r: 10, g: 20, b: 30 });
+    assert.equal(u.stageName, "R_SP01");
+    assert.equal(u.isSaveLoaded, true);
+    await a.expectNone((p) => p.type === "UPDATE_CLIENT_STATE" && p.clientId === a.id, "echo to the sender");
+    await waitForLog(server, /\[A\] UPDATE_CLIENT_STATE color=10,20,30/);
+
+    const c = mk();
+    const all = await c.join({ name: "C" });
+    assert.deepEqual(all.clients.find((x) => x.clientId === a.id).color, { r: 10, g: 20, b: 30 });
+
+    // Out-of-range or non-integer channels keep their previous value, one by one.
+    a.send({ type: "UPDATE_CLIENT_STATE", color: { r: 300, g: -1, b: 40 } });
+    const v = await b.waitType("UPDATE_CLIENT_STATE", (p) => p.clientId === a.id && p.color.b === 40);
+    assert.deepEqual(v.color, { r: 10, g: 20, b: 40 });
+    a.send({ type: "UPDATE_CLIENT_STATE", color: { r: 1.5, g: "7", b: 50 } });
+    const w = await c.waitType("UPDATE_CLIENT_STATE", (p) => p.clientId === a.id && p.color.b === 50);
+    assert.deepEqual(w.color, { r: 10, g: 20, b: 50 });
+    a.send({ type: "UPDATE_CLIENT_STATE", color: "red" });
+    const x = await b.waitType("UPDATE_CLIENT_STATE", (p) => p.clientId === a.id);
+    assert.deepEqual(x.color, { r: 10, g: 20, b: 50 });
+}));
+
+test("horse name and parking spot are sanitized, relayed and cached for late joiners", () => withServer(async (mk, server) => {
+    const a = mk();
+    const b = mk();
+    await a.join({ name: "A" });
+    await b.join({ name: "B" });
+    a.enterStage("F_SP108", 0);
+    await b.waitType("UPDATE_CLIENT_STATE", (p) => p.clientId === a.id && p.stageName === "F_SP108");
+
+    const place = { stage: "F_SP121", room: 6, x: -43741.5, y: -7425, z: 106889, angleY: -23665 };
+    a.send({ type: "UPDATE_CLIENT_STATE", horseName: "Lilly", horsePlace: place });
+    const u = await b.waitType("UPDATE_CLIENT_STATE", (p) => p.clientId === a.id && p.horseName === "Lilly");
+    assert.deepEqual(u.horsePlace, place);
+    assert.equal(u.stageName, "F_SP108");  // a horse update keeps the scene
+    await a.expectNone((p) => p.type === "UPDATE_CLIENT_STATE" && p.clientId === a.id, "echo to the sender");
+    await waitForLog(server, /\[A\] UPDATE_CLIENT_STATE horse=Lilly parked=F_SP121/);
+
+    const c = mk();
+    const all = await c.join({ name: "C" });
+    const row = all.clients.find((x) => x.clientId === a.id);
+    assert.equal(row.horseName, "Lilly");
+    assert.deepEqual(row.horsePlace, place);
+
+    // A non-string name keeps the old one; 40 code points become 32; a malformed place is null.
+    a.send({ type: "UPDATE_CLIENT_STATE", horseName: 7, horsePlace: { stage: "", x: 1, y: 2, z: 3 } });
+    const v = await b.waitType("UPDATE_CLIENT_STATE", (p) => p.clientId === a.id && p.horsePlace === null);
+    assert.equal(v.horseName, "Lilly");
+    a.send({ type: "UPDATE_CLIENT_STATE", horseName: "x".repeat(40), horsePlace: { stage: "F_SP121", x: Infinity, y: 0, z: 0 } });
+    const w = await b.waitType("UPDATE_CLIENT_STATE", (p) => p.clientId === a.id && p.horseName.startsWith("xx"));
+    assert.equal(w.horseName.length, 32);
+    assert.equal(w.horsePlace, null);
+    a.send({ type: "UPDATE_CLIENT_STATE", horsePlace: { stage: "F_SP121_TOOLONG", room: 999, x: 1, y: 2, z: 3, angleY: 1.5 } });
+    const x = await b.waitType("UPDATE_CLIENT_STATE", (p) => p.clientId === a.id && p.horsePlace !== null);
+    assert.deepEqual(x.horsePlace, { stage: "F_SP121", room: -1, x: 1, y: 2, z: 3, angleY: 0 });
+}));
+
+test("names are cut by code points and never keep a lone surrogate or a control character", () => withServer(async (mk) => {
+    const a = mk();
+    const b = mk();
+    await a.join({ name: "A" });
+    await b.join({ name: "B" });
+    // 31 letters and an emoji (two UTF-16 units): cut at 32 code points it survives whole.
+    const horse = "h".repeat(31) + "\u{1F434}" + "tail";
+    a.send({ type: "UPDATE_CLIENT_STATE", horseName: horse });
+    const u = await b.waitType("UPDATE_CLIENT_STATE", (p) => p.clientId === a.id && p.horseName.startsWith("hh"));
+    assert.equal(u.horseName, "h".repeat(31) + "\u{1F434}");
+    // A lone high surrogate and control characters are dropped: the game's parser rejects them.
+    a.send(`{"type":"UPDATE_CLIENT_STATE","name":"Da\\ud83dd\\u0007!","horseName":"Li\\nlly"}`);
+    const v = await b.waitType("UPDATE_CLIENT_STATE", (p) => p.clientId === a.id && p.horseName === "Lilly");
+    assert.equal(v.name, "Dad!");
+}));
+
+test("hostile field types and unserializable packets do not kill the server", () => withServer(async (mk, server) => {
+    const a = mk();
+    const b = mk();
+    await a.join({ teamId: "t" });
+    await b.join({ teamId: "t" });
+    // Interpolating an object whose toString is not a function throws.
+    const evil = { toString: 1 };
+    for (const type of ["UPDATE_CLIENT_STATE", "SET_FLAG", "UNSET_FLAG", "SET_EVENT_BIT", "UNSET_EVENT_BIT", "GIVE_ITEM",
+        "UPDATE_DUNGEON_ITEMS", "UPDATE_WORLD_STATE", "REQUEST_WORLD_STATE", "UPDATE_ROOM_STATE", "PLAYER_SFX",
+        "ENEMY_DEFEATED", "STORY_EVENT", "STORY_MOVE"]) {
+        a.send({
+            type, no: evil, itemNo: evil, flagNo: evil, roomNo: evil, stageName: evil, saveTblNo: evil, layerNo: evil,
+            isSaveLoaded: evil, category: evil, keyDelta: evil, dungeonItemBits: evil, targetClientId: evil,
+            soundId: evil, kind: evil, kills: evil, state: { pvpMode: evil, nested: [evil] },
+            ph: evil, id: evil, stage: evil, room: evil, layer: evil, m: evil, req: evil, from: evil, to: evil,
+            curated: evil, qual: evil,
+        });
+    }
+    a.send({ type: "AUTOTEST_SIGNAL", instance: evil, name: evil });
+    for (const type of ["DAMAGE_PLAYER", "DAMAGE_RESULT"]) {
+        a.send({ type, targetClientId: evil, hitId: evil, kind: evil, damage: evil, spl: evil, dirY: evil,
+                 blocked: evil, viewSeq: evil, result: evil, reason: evil });
+    }
+    // Parses, but is nested too deeply for JSON.stringify: relaying it throws.
+    const deep = "[".repeat(100000) + "]".repeat(100000);
+    a.send(`{"type":"GIVE_ITEM","itemNo":1,"addToQueue":true,"junk":${deep}}`);
+    a.send(`{"type":"UPDATE_WORLD_STATE","save":"X","junk":${deep}}`);
+    a.send({ type: "SET_FLAG", flagNo: 7, addToQueue: true });
+    await b.waitType("SET_FLAG", (p) => p.flagNo === 7);
+
+    const log = await waitForLog(server, /SET_FLAG \[\?\] no=7/);
+    const failures = log.split("\n").filter((l) => l.includes(" failed: ")).map((l) => l.match(/\] (\w+) failed: (\w+)/).slice(1));
+    assert.deepEqual(failures, [["GIVE_ITEM", "RangeError"], ["UPDATE_WORLD_STATE", "RangeError"]],
+        "only the unserializable packets fail; log formatting never throws");
+
+    // Neither unserializable packet was stored, so catch-up still works.
+    const c = mk();
+    await c.join({ teamId: "t" });
+    c.send({ type: "REQUEST_WORLD_STATE", catchUp: true });
+    await c.waitType("SET_FLAG", (p) => p.flagNo === 7);
+    await c.expectNone((p) => p.type === "GIVE_ITEM" || p.type === "UPDATE_WORLD_STATE", "stored unserializable packet");
+}));
+
+test("clients cannot relay server-only packets", () => withServer(async (mk, server) => {
+    const a = mk();
+    const b = mk();
+    await a.join({ roomId: "r" });
+    await b.join({ roomId: "r" });
+    for (const type of ["ALL_CLIENT_STATE", "SERVER_MESSAGE", "DISABLE_CLIENT"]) {
+        a.send({ type, clients: [], message: "bye" });
+    }
+    a.send({ type: "HANDSHAKE", name: "again", roomId: "r" });
+    a.send({ type: "AUTOTEST_SIGNAL", name: "after" });
+    await b.waitType("AUTOTEST_SIGNAL");
+    await b.expectNone((p) => ["ALL_CLIENT_STATE", "SERVER_MESSAGE", "DISABLE_CLIENT", "HANDSHAKE"].includes(p.type) ||
+        (p.type === "UPDATE_CLIENT_STATE" && p.name === "again"), "client-originated server packet");
+    const log = await waitForLog(server, /rejected HANDSHAKE/);
+    for (const type of ["ALL_CLIENT_STATE", "SERVER_MESSAGE", "DISABLE_CLIENT"]) {
+        assert.match(log, new RegExp(`rejected ${type}`));
+    }
+}));
+
+test("the heartbeat drops a connection that stops answering pings", () => withServer(async (mk) => {
+    const a = mk({ autoPong: false });
+    const b = mk();
+    await a.join({ roomId: "hb" });
+    const closed = new Promise((resolve) => a.ws.once("close", resolve));
+    const all = await b.join({ roomId: "hb" });
+    assert.equal(all.clients.length, 2);
+    await b.waitType("UPDATE_CLIENT_STATE", (p) => p.clientId === a.id && p.online === false, 3000);
+    const rs = await b.waitType("UPDATE_ROOM_STATE", undefined, 3000);
+    assert.equal(rs.state.ownerClientId, b.id, "a dead connection does not stay room owner");
+    await closed;
+    await settle(800);
+    assert.equal(b.ws.readyState, WebSocket.OPEN, "a client that answers pings stays connected");
+}, { TT_PING_MS: "200" }));
+
+test("a heartbeat interval too long for a Node timer is capped, not run every millisecond", () => withServer(async (mk) => {
+    const a = mk({ autoPong: false });
+    await a.join();
+    let pings = 0;
+    a.ws.on("ping", () => pings++);
+    await settle(300);
+    assert.equal(pings, 0);
+    assert.equal(a.ws.readyState, WebSocket.OPEN);
+}, { TT_PING_MS: String(2 ** 32) }));
+
+test("an empty room is deleted after its TTL", () => withServer(async (mk, server) => {
+    const a = mk();
+    await a.join({ roomId: "gone", teamId: "t" });
+    a.send({ type: "UPDATE_ROOM_STATE", state: { pvpMode: true } });
+    await a.waitType("UPDATE_ROOM_STATE");
+    a.send({ type: "UPDATE_WORLD_STATE", save: "S1" });
+    await settle();
+    await a.close();
+    await waitForLog(server, /\[room gone\] deleted after 0\.3s empty/);
+
+    const b = mk();
+    const all = await b.join({ roomId: "gone", teamId: "t" });
+    assert.equal(all.roomState.pvpMode, false, "the room starts over with default settings");
+    b.send({ type: "REQUEST_WORLD_STATE", catchUp: true });
+    await b.expectNone((p) => p.type === "UPDATE_WORLD_STATE", "cached state of a deleted room");
+}, { TT_ROOM_TTL_SEC: "0.3" }));
+
+test("joining an empty room cancels its expiry", () => withServer(async (mk, server) => {
+    const a = mk();
+    await a.join({ roomId: "kept" });
+    a.send({ type: "UPDATE_ROOM_STATE", state: { pvpMode: true } });
+    await a.waitType("UPDATE_ROOM_STATE");
+    await a.close();
+    await waitForLog(server, /left room kept\. Room size: 0/);
+
+    const b = mk();
+    const all = await b.join({ roomId: "kept" });
+    assert.equal(all.roomState.pvpMode, true);
+    await settle(800);
+    const c = mk();
+    const all2 = await c.join({ roomId: "kept" });
+    assert.equal(all2.roomState.pvpMode, true, "the room outlived its TTL because someone joined");
+    assert.equal(all2.clients.length, 2);
+    assert.doesNotMatch(fs.readFileSync(server.logPath, "utf8"), /\[room kept\] deleted/);
+}, { TT_ROOM_TTL_SEC: "0.3" }));
+
+// Teleport: every client joins the public room in F_SP108; the first joiner owns the room.
+async function teleportRoom(mk, n = 2, enable = true) {
+    const cs = [];
+    for (let i = 0; i < n; i++) {
+        const c = mk();
+        await c.join({ name: `P${i}` });
+        c.enterStage("F_SP108");
+        cs.push(c);
+    }
+    await settle();
+    if (enable) {
+        cs[0].send({ type: "UPDATE_ROOM_STATE", state: { teleportMode: true } });
+        await cs[0].waitType("UPDATE_ROOM_STATE", (p) => p.state.teleportMode === true);
+    }
+    return cs;
+}
+
+test("REQUEST_TELEPORT is refused by the server while teleporting is off", () => withServer(async (mk) => {
+    const [a, b] = await teleportRoom(mk, 2, false);
+    a.send({ type: "REQUEST_TELEPORT", targetClientId: b.id, requestId: 7 });
+    const r = await a.waitType("TELEPORT_TO");
+    assert.deepEqual([r.ok, r.reason, r.requestId, r.clientId, r.targetClientId, r.fromServer],
+        [false, "disabled", 7, b.id, a.id, true]);
+    await b.expectNone((p) => p.type === "REQUEST_TELEPORT", "forwarded request");
+}));
+
+test("teleport request and answer reach only the two clients involved, sanitized", () => withServer(async (mk) => {
+    const [a, b, c] = await teleportRoom(mk, 3);
+    a.send({ type: "REQUEST_TELEPORT", targetClientId: b.id, requestId: 1, junk: { x: 1 } });
+    const req = await b.waitType("REQUEST_TELEPORT");
+    assert.deepEqual(req, { type: "REQUEST_TELEPORT", clientId: a.id, targetClientId: b.id, requestId: 1 });
+    b.send({ type: "TELEPORT_TO", targetClientId: a.id, requestId: 1, ok: true, stageName: "F_SP108", roomNo: 0,
+             layerNo: 0, pos: { x: 1.5, y: 2, z: -3 }, angleY: 16384, ageMs: 40, clientId: 999, extra: true });
+    const ans = await a.waitType("TELEPORT_TO");
+    assert.deepEqual(ans, { type: "TELEPORT_TO", clientId: b.id, targetClientId: a.id, requestId: 1, ok: true,
+                            stageName: "F_SP108", roomNo: 0, layerNo: 0, pos: { x: 1.5, y: 2, z: -3 },
+                            angleY: 16384, ageMs: 40 });
+    b.send({ type: "TELEPORT_TO", targetClientId: a.id, requestId: 2, ok: false, reason: { toString: 1 } });
+    const refusal = await a.waitType("TELEPORT_TO");
+    assert.deepEqual([refusal.ok, refusal.reason, refusal.fromServer], [false, "refused", undefined]);
+    await c.expectNone((p) => p.type === "REQUEST_TELEPORT" || p.type === "TELEPORT_TO", "teleport packet for a bystander");
+}));
+
+test("TELEPORT_TO with an unusable destination becomes a refusal", () => withServer(async (mk) => {
+    const [a, b] = await teleportRoom(mk);
+    b.send({ type: "TELEPORT_TO", targetClientId: a.id, requestId: 3, ok: true, stageName: "F_SP108", roomNo: 0,
+             layerNo: 0, pos: { x: "1", y: 2, z: 1e9 } });
+    const ans = await a.waitType("TELEPORT_TO");
+    assert.deepEqual([ans.ok, ans.reason, ans.pos, ans.stageName], [false, "bad-destination", undefined, undefined]);
+    // Cutting an 8-character name to 7 could name another stage.
+    b.send({ type: "TELEPORT_TO", targetClientId: a.id, requestId: 4, ok: true, stageName: "F_SP1080", roomNo: 0,
+             layerNo: 0, pos: { x: 1, y: 2, z: 3 } });
+    assert.equal((await a.waitType("TELEPORT_TO", (p) => p.requestId === 4)).reason, "bad-destination");
+}));
+
+test("REQUEST_TELEPORT to someone gone or in another room is refused", () => withServer(async (mk) => {
+    const [a] = await teleportRoom(mk);
+    const other = mk();
+    await other.join({ roomId: "elsewhere" });
+    other.enterStage("F_SP108");
+    a.send({ type: "REQUEST_TELEPORT", targetClientId: other.id, requestId: 4 });
+    assert.equal((await a.waitType("TELEPORT_TO")).reason, "offline");
+    await other.expectNone((p) => p.type === "REQUEST_TELEPORT", "cross-room request");
+}));
+
+test("REQUEST_TELEPORT needs a save loaded on both ends", () => withServer(async (mk) => {
+    const [a, b] = await teleportRoom(mk);
+    b.send({ type: "UPDATE_CLIENT_STATE", isSaveLoaded: false });
+    await a.waitType("UPDATE_CLIENT_STATE", (p) => p.clientId === b.id && p.stageName === "F_SP108" && p.isSaveLoaded === false);
+    a.send({ type: "REQUEST_TELEPORT", targetClientId: b.id, requestId: 8 });
+    assert.equal((await a.waitType("TELEPORT_TO")).reason, "not-in-game");
+    await b.expectNone((p) => p.type === "REQUEST_TELEPORT", "request to a client without a save");
+}));
+
+test("REQUEST_TELEPORT is rate limited per requester", () => withServer(async (mk) => {
+    const [a, b] = await teleportRoom(mk);
+    a.send({ type: "REQUEST_TELEPORT", targetClientId: b.id, requestId: 5 });
+    a.send({ type: "REQUEST_TELEPORT", targetClientId: b.id, requestId: 6 });
+    await b.waitType("REQUEST_TELEPORT", (p) => p.requestId === 5);
+    assert.equal((await a.waitType("TELEPORT_TO", (p) => p.requestId === 6)).reason, "rate-limited");
+    await b.expectNone((p) => p.type === "REQUEST_TELEPORT" && p.requestId === 6, "rate-limited request");
+}));
+
+test("presence packets only reach clients on the same protocol version", () => withServer(async (mk) => {
+    const a = mk();
+    const b = mk();
+    const c = mk();
+    await a.join({ protocolVersion: 6 });
+    await b.join({ protocolVersion: 6 });
+    await c.join({ protocolVersion: 5 });
+    for (const x of [a, b, c]) x.enterStage("F_SP103", 0);
+    await settle();
+    a.send({ type: "PLAYER_UPDATE", quiet: true, seq: 7, k: 1, p: [1, 2, 3] });
+    const got = await b.waitType("PLAYER_UPDATE");
+    assert.deepEqual({ ...got, clientId: undefined }, { type: "PLAYER_UPDATE", quiet: true, seq: 7, k: 1, p: [1, 2, 3], clientId: undefined },
+        "compact packets are relayed unchanged apart from clientId");
+    assert.equal(got.clientId, a.id);
+    await c.expectNone((p) => p.type === "PLAYER_UPDATE", "PLAYER_UPDATE across protocol versions");
+}));
+
+test("test jitter delays packets without reordering them", () => withServer(async (mk) => {
+    const a = mk();
+    const b = mk();
+    await a.join();
+    await b.join();
+    a.enterStage("F_SP103", 0);
+    b.enterStage("F_SP103", 0);
+    await settle(200);
+    for (let seq = 1; seq <= 40; seq++) {
+        a.send({ type: "PLAYER_UPDATE", quiet: true, seq });
+    }
+    a.send({ type: "AUTOTEST_SIGNAL", name: "after" });
+    await b.waitType("AUTOTEST_SIGNAL", () => true, 5000);
+    const seqs = b.inbox.filter((p) => p.type === "PLAYER_UPDATE").map((p) => p.seq);
+    assert.deepEqual(seqs, Array.from({ length: 40 }, (_, i) => i + 1), "all updates arrive, in order, before the signal");
+}, { TT_TEST_JITTER_MS: "50" }));
+
+// PvP: every client joins the public room in F_SP108; the first joiner turns PvP on.
+async function pvpRoom(mk, teams = ["", ""], extra = {}, enable = true) {
+    const cs = [];
+    for (let i = 0; i < teams.length; i++) {
+        const c = mk();
+        await c.join({ name: `P${i}`, teamId: teams[i] });
+        c.enterStage("F_SP108");
+        cs.push(c);
+    }
+    await settle();
+    if (enable) {
+        cs[0].send({ type: "UPDATE_ROOM_STATE", state: { pvpMode: true, ...extra } });
+        await cs[0].waitType("UPDATE_ROOM_STATE", (p) => p.state.pvpMode === true);
+    }
+    return cs;
+}
+
+const hit = (target, hitId, extra = {}) => ({ type: "DAMAGE_PLAYER", targetClientId: target.id, hitId, kind: 0,
+                                             damage: 2, spl: 0, dirY: 100, blocked: false, viewSeq: 50, ...extra });
+
+test("DAMAGE_PLAYER is refused by the server while PvP is off", () => withServer(async (mk) => {
+    const [a, b] = await pvpRoom(mk, ["", ""], {}, false);
+    a.send(hit(b, 1));
+    const r = await a.waitType("DAMAGE_RESULT");
+    assert.deepEqual([r.result, r.reason, r.hitId, r.clientId, r.targetClientId, r.fromServer, r.damage],
+        ["refused", "disabled", 1, b.id, a.id, true, 0]);
+    await b.expectNone((p) => p.type === "DAMAGE_PLAYER", "forwarded hit");
+}));
+
+test("DAMAGE_PLAYER reaches only its target, rebuilt, clamped and stamped with the attacker's stage", () => withServer(async (mk) => {
+    const [a, b, c] = await pvpRoom(mk, ["", "", ""]);
+    a.send(hit(b, 7, { kind: 99, damage: 50, spl: 2, dirY: 99999, blocked: "yes", viewSeq: 12.5,
+                       stageName: "X", layerNo: 9, clientId: 999, junk: { x: 1 } }));
+    const got = await b.waitType("DAMAGE_PLAYER");
+    assert.deepEqual(got, { type: "DAMAGE_PLAYER", clientId: a.id, targetClientId: b.id, hitId: 7, kind: 9,
+                            damage: 4, spl: 0, dirY: 32767, blocked: false, viewSeq: 0, stageName: "F_SP108",
+                            layerNo: 0 });
+    await c.expectNone((p) => p.type === "DAMAGE_PLAYER" || p.type === "DAMAGE_RESULT", "PvP packet for a bystander");
+    await a.expectNone((p) => p.type === "DAMAGE_RESULT", "refusal of an allowed hit");
+    await settle(250);
+    a.send(hit(b, 8, { spl: 1 }));
+    assert.equal((await b.waitType("DAMAGE_PLAYER", (p) => p.hitId === 8)).spl, 1, "knockdown passes");
+}));
+
+test("DAMAGE_PLAYER is refused across stage, layer and protocol", () => withServer(async (mk) => {
+    const [a, b] = await pvpRoom(mk);
+    b.enterStage("F_SP108", 1);
+    await a.waitType("UPDATE_CLIENT_STATE", (p) => p.clientId === b.id && p.layerNo === 1);
+    a.send(hit(b, 1));
+    assert.equal((await a.waitType("DAMAGE_RESULT", (p) => p.hitId === 1)).reason, "not-same-stage");
+    b.enterStage("F_SP121", 0);
+    await a.waitType("UPDATE_CLIENT_STATE", (p) => p.clientId === b.id && p.stageName === "F_SP121");
+    a.send(hit(b, 2));
+    assert.equal((await a.waitType("DAMAGE_RESULT", (p) => p.hitId === 2)).reason, "not-same-stage");
+
+    const newer = mk();
+    await newer.join({ name: "newer", protocolVersion: 6 });
+    newer.enterStage("F_SP108");
+    await a.waitType("UPDATE_CLIENT_STATE", (p) => p.clientId === newer.id && p.stageName === "F_SP108");
+    a.send(hit(newer, 3));
+    assert.equal((await a.waitType("DAMAGE_RESULT", (p) => p.hitId === 3)).reason, "protocol");
+    await b.expectNone((p) => p.type === "DAMAGE_PLAYER", "hit across stages");
+    await newer.expectNone((p) => p.type === "DAMAGE_PLAYER", "hit across protocols");
+}));
+
+test("DAMAGE_PLAYER needs a save on both ends and a target in the room", () => withServer(async (mk) => {
+    const [a, b] = await pvpRoom(mk);
+    b.send({ type: "UPDATE_CLIENT_STATE", isSaveLoaded: false });
+    await a.waitType("UPDATE_CLIENT_STATE", (p) => p.clientId === b.id && p.stageName === "F_SP108" && p.isSaveLoaded === false);
+    a.send(hit(b, 1));
+    assert.equal((await a.waitType("DAMAGE_RESULT", (p) => p.hitId === 1)).reason, "not-in-game");
+    b.enterStage("F_SP108");
+    await a.waitType("UPDATE_CLIENT_STATE", (p) => p.clientId === b.id && p.isSaveLoaded === true);
+    a.send({ type: "UPDATE_CLIENT_STATE", isSaveLoaded: false });
+    await b.waitType("UPDATE_CLIENT_STATE", (p) => p.clientId === a.id && p.isSaveLoaded === false);
+    a.send(hit(b, 2));
+    assert.equal((await a.waitType("DAMAGE_RESULT", (p) => p.hitId === 2)).reason, "not-in-game");
+    await b.expectNone((p) => p.type === "DAMAGE_PLAYER", "hit without a save");
+
+    const other = mk();
+    await other.join({ roomId: "elsewhere" });
+    other.enterStage("F_SP108");
+    a.enterStage("F_SP108");
+    await b.waitType("UPDATE_CLIENT_STATE", (p) => p.clientId === a.id && p.isSaveLoaded === true);
+    a.send(hit(other, 3));
+    assert.equal((await a.waitType("DAMAGE_RESULT", (p) => p.hitId === 3)).reason, "offline");
+    a.send(hit(a, 4));
+    assert.equal((await a.waitType("DAMAGE_RESULT", (p) => p.hitId === 4)).reason, "offline", "hitting yourself");
+    await other.expectNone((p) => p.type === "DAMAGE_PLAYER", "cross-room hit");
+}));
+
+test("same named team needs pvpFriendlyFire; players without a team always fight", () => withServer(async (mk) => {
+    const [a, b, c, d] = await pvpRoom(mk, ["red", "red", "blue", ""]);
+    a.send(hit(b, 1));
+    assert.equal((await a.waitType("DAMAGE_RESULT", (p) => p.hitId === 1)).reason, "team");
+    await b.expectNone((p) => p.type === "DAMAGE_PLAYER", "friendly fire while off");
+    a.send(hit(c, 2));
+    await c.waitType("DAMAGE_PLAYER", (p) => p.hitId === 2);
+    d.send(hit(a, 3));
+    await a.waitType("DAMAGE_PLAYER", (p) => p.hitId === 3);
+    a.send(hit(d, 4));
+    await d.waitType("DAMAGE_PLAYER", (p) => p.hitId === 4);
+
+    a.send({ type: "UPDATE_ROOM_STATE", state: { pvpFriendlyFire: true } });
+    await b.waitType("UPDATE_ROOM_STATE", (p) => p.state.pvpFriendlyFire === true);
+    await settle(250);  // clear of the rate limit for a -> b
+    a.send(hit(b, 5));
+    await b.waitType("DAMAGE_PLAYER", (p) => p.hitId === 5);
+}));
+
+test("two players without a team are not teammates for PvP", () => withServer(async (mk) => {
+    const [a, b] = await pvpRoom(mk, ["", ""]);
+    a.send(hit(b, 1));
+    await b.waitType("DAMAGE_PLAYER", (p) => p.hitId === 1);
+}));
+
+test("DAMAGE_PLAYER is rate limited per attacker and target", () => withServer(async (mk) => {
+    const [a, b, c] = await pvpRoom(mk, ["", "", ""]);
+    a.send(hit(b, 1));
+    a.send(hit(b, 2));
+    a.send(hit(c, 3));
+    await b.waitType("DAMAGE_PLAYER", (p) => p.hitId === 1);
+    assert.equal((await a.waitType("DAMAGE_RESULT", (p) => p.hitId === 2)).reason, "rate-limited");
+    await c.waitType("DAMAGE_PLAYER", (p) => p.hitId === 3);
+    c.send(hit(b, 4));
+    await b.waitType("DAMAGE_PLAYER", (p) => p.hitId === 4);
+    await b.expectNone((p) => p.type === "DAMAGE_PLAYER" && p.hitId === 2, "rate-limited hit");
+    await settle(250);
+    a.send(hit(b, 5));
+    await b.waitType("DAMAGE_PLAYER", (p) => p.hitId === 5);
+}));
+
+test("DAMAGE_RESULT reaches the attacker only, sanitized", () => withServer(async (mk) => {
+    const [a, b, c] = await pvpRoom(mk, ["", "", ""]);
+    a.send(hit(b, 9));
+    await b.waitType("DAMAGE_PLAYER", (p) => p.hitId === 9);
+    b.send({ type: "DAMAGE_RESULT", targetClientId: a.id, hitId: 9, result: "applied", reason: "", damage: 4,
+             clientId: 999, fromServer: true, extra: 1 });
+    const got = await a.waitType("DAMAGE_RESULT");
+    assert.deepEqual(got, { type: "DAMAGE_RESULT", clientId: b.id, targetClientId: a.id, hitId: 9, result: "applied",
+                            reason: "", damage: 4 });
+    await settle(250); // past the per-pair hit interval
+    a.send(hit(b, 10));
+    await b.waitType("DAMAGE_PLAYER", (p) => p.hitId === 10);
+    b.send({ type: "DAMAGE_RESULT", targetClientId: a.id, hitId: 10, result: "refused", reason: "x".repeat(100),
+             damage: 1e9 });
+    const bad = await a.waitType("DAMAGE_RESULT", (p) => p.hitId === 10);
+    assert.deepEqual([bad.result, bad.reason.length, bad.damage, bad.fromServer], ["dropped", 32, 4, undefined]);
+    await c.expectNone((p) => p.type === "DAMAGE_RESULT", "result for a bystander");
+}));
+
+test("DAMAGE_RESULT only answers a hit the server forwarded, once", () => withServer(async (mk) => {
+    const [a, b, c] = await pvpRoom(mk, ["", "", ""]);
+    // Never forwarded: made up by b, or a hit c got.
+    b.send({ type: "DAMAGE_RESULT", targetClientId: a.id, hitId: 5, result: "applied", damage: 4 });
+    a.send(hit(c, 6));
+    await c.waitType("DAMAGE_PLAYER", (p) => p.hitId === 6);
+    b.send({ type: "DAMAGE_RESULT", targetClientId: a.id, hitId: 6, result: "applied", damage: 4 });
+    await a.expectNone((p) => p.type === "DAMAGE_RESULT", "result for a hit b never received");
+    // Answered once; a second answer is dropped.
+    c.send({ type: "DAMAGE_RESULT", targetClientId: a.id, hitId: 6, result: "applied", damage: 2 });
+    assert.equal((await a.waitType("DAMAGE_RESULT", (p) => p.hitId === 6)).damage, 2);
+    c.send({ type: "DAMAGE_RESULT", targetClientId: a.id, hitId: 6, result: "applied", damage: 2 });
+    await a.expectNone((p) => p.type === "DAMAGE_RESULT", "second result for one hit");
+}));
+
+test("room state carries shareWoodenShield, on by default and owner-only", () => withServer(async (mk) => {
+    const a = mk();
+    const b = mk();
+    const all = await a.join();
+    assert.equal(all.roomState.shareWoodenShield, true);
+    await b.join();
+    b.send({ type: "UPDATE_ROOM_STATE", state: { shareWoodenShield: false } });
+    await a.expectNone((p) => p.type === "UPDATE_ROOM_STATE", "room state from a non-owner");
+    a.send({ type: "UPDATE_ROOM_STATE", state: { shareWoodenShield: false } });
+    assert.equal((await b.waitType("UPDATE_ROOM_STATE")).state.shareWoodenShield, false);
+    a.send({ type: "UPDATE_ROOM_STATE", state: { shareWoodenShield: "no" } });
+    assert.equal((await b.waitType("UPDATE_ROOM_STATE")).state.shareWoodenShield, false, "non-boolean ignored");
+}));
+
+test("room state carries pvpFriendlyFire and pvpLethal, off by default and owner-only", () => withServer(async (mk) => {
+    const a = mk();
+    const b = mk();
+    const all = await a.join();
+    assert.equal(all.roomState.pvpFriendlyFire, false);
+    assert.equal(all.roomState.pvpLethal, false);
+    await b.join();
+    b.send({ type: "UPDATE_ROOM_STATE", state: { pvpLethal: true } });
+    await a.expectNone((p) => p.type === "UPDATE_ROOM_STATE", "room state from a non-owner");
+    a.send({ type: "UPDATE_ROOM_STATE", state: { pvpFriendlyFire: true, pvpLethal: 1 } });
+    const got = await b.waitType("UPDATE_ROOM_STATE");
+    assert.deepEqual([got.state.pvpFriendlyFire, got.state.pvpLethal], [true, false]);
+}));
+
+test("a HANDSHAKE from an older protocol or another app is refused and never joins", () => withServer(async (mk, server, mkTcp) => {
+    const a = mk();
+    await a.join({ name: "A", roomId: "r" });
+    const cases = [
+        [mk(), { protocolVersion: 4 }, /your client speaks protocol 4\. Update the mod\./],
+        [mk(), { app: undefined }, /not Twili-Together/],
+        [mk(), { app: "other-mod", protocolVersion: 2 }, /not Twili-Together/],
+        [mk(), { protocolVersion: "5" }, /speaks protocol unknown/],
+        [mk(), { protocolVersion: 5.5 }, /speaks protocol 5\.5/],
+        [mkTcp(), { protocolVersion: 4 }, /speaks protocol 4\./],
+    ];
+    for (const [c, fields, pattern] of cases) {
+        await c.open();
+        c.send({ ...HANDSHAKE, name: "Old", roomId: "r", transport: c.transport, ...fields });
+        // A valid retry on the same connection is ignored too.
+        c.send({ ...HANDSHAKE, name: "Retry", roomId: "r", transport: c.transport });
+        const msg = await c.waitType("SERVER_MESSAGE");
+        const off = await c.waitType("DISABLE_CLIENT");
+        assert.match(msg.message, /^This server runs Twili-Together protocol 5; /);
+        assert.match(msg.message, pattern);
+        assert.equal(off.message, msg.message);
+        const code = await c.whenClosed;
+        if (c.transport === "ws") assert.equal(code, 4000);
+        assert.equal(c.inbox.find((p) => p.type === "ALL_CLIENT_STATE"), undefined, "a refused client joined");
+    }
+    await a.expectNone((p) => p.type === "UPDATE_CLIENT_STATE" && p.clientId !== a.id, "a refused client in the roster");
+    const b = mk();
+    const all = await b.join({ name: "B", roomId: "r" });
+    assert.deepEqual(all.clients.map((c) => c.name).sort(), ["A", "B"]);
+    const log = await waitForLog(server, /\[Old\] rejected HANDSHAKE \(incompatible, app=\?, p=5, ws\)/);
+    assert.match(log, /\[Old\] rejected HANDSHAKE \(incompatible, app=twili-together, p=4, tcp\)/);
+    assert.doesNotMatch(log, /Retry/);
+}));
+
+test("a newer protocol joins", () => withServer(async (mk) => {
+    const a = mk();
+    const all = await a.join({ protocolVersion: 6 });
+    assert.equal(all.clients[0].protocolVersion, 6);
+}));
+
+test("the twili-together.5 subprotocol is selected when offered, and is optional", () => withServer(async (mk, server) => {
+    const a = mk(undefined, ["twili-together.5"]);
+    await a.join({ name: "A" });
+    assert.equal(a.ws.protocol, "twili-together.5");
+    const b = mk(undefined, ["something.1", "twili-together.5"]);
+    await b.join({ name: "B" });
+    assert.equal(b.ws.protocol, "twili-together.5");
+    const c = mk();
+    const all = await c.join({ name: "C" });
+    assert.equal(c.ws.protocol, "");
+    assert.deepEqual(all.clients.map((x) => x.name).sort(), ["A", "B", "C"]);
+    // Only unknown ones: accepted without a subprotocol (the ws client library itself would refuse that).
+    const res = await rawUpgrade(server.port, "something.1, other.2");
+    assert.equal(res.statusCode, 101);
+    assert.equal(res.headers["sec-websocket-protocol"], undefined);
+}));
+
+test("TCP and WebSocket clients share a room and presence flows both ways", () => withServer(async (mk, server, mkTcp) => {
+    const w = mk();
+    const t = mkTcp();
+    await w.join({ name: "W", roomId: "mix", teamId: "t" });
+    const all = await t.join({ name: "T", roomId: "mix", teamId: "t" });
+    assert.deepEqual(all.clients.map((c) => c.name).sort(), ["T", "W"]);
+    assert.equal(all.roomState.ownerClientId, w.id);
+    const joined = await w.waitType("UPDATE_CLIENT_STATE", (p) => p.clientId === t.id);
+    assert.deepEqual([joined.name, joined.modVersion, joined.layout], ["T", "test", "0123456789abcdef"]);
+    w.enterStage("F_SP103");
+    t.enterStage("F_SP103");
+    await w.waitType("UPDATE_CLIENT_STATE", (p) => p.clientId === t.id && p.stageName === "F_SP103");
+    await t.waitType("UPDATE_CLIENT_STATE", (p) => p.clientId === w.id && p.stageName === "F_SP103");
+    w.send({ type: "PLAYER_UPDATE", quiet: true, seq: 1 });
+    t.send({ type: "PLAYER_UPDATE", quiet: true, seq: 2 });
+    const fromW = await t.waitType("PLAYER_UPDATE");
+    assert.deepEqual([fromW.clientId, fromW.seq], [w.id, 1]);
+    const fromT = await w.waitType("PLAYER_UPDATE");
+    assert.deepEqual([fromT.clientId, fromT.seq], [t.id, 2]);
+    t.send({ type: "SET_FLAG", flagNo: 5, addToQueue: true });
+    assert.equal((await w.waitType("SET_FLAG")).clientId, t.id);
+    await waitForLog(server, /\[\+\] T \(id=\d+, team="t", session=none, v=test\/p5, layout=0123456789abcdef, tcp\) joined room mix/);
+    await t.close();
+    await w.waitType("UPDATE_CLIENT_STATE", (p) => p.clientId === t.id && p.online === false);
+}));
+
+test("TCP frames split byte by byte or sent back to back both parse", () => withServer(async (mk, server, mkTcp) => {
+    const w = mk();
+    await w.join({ name: "W", roomId: "f" });
+    const t = mkTcp();
+    await t.open();
+    const bytes = frame({ type: "HANDSHAKE", app: "twili-together", protocolVersion: 5, name: "Split", roomId: "f" });
+    for (let i = 0; i < bytes.length; i++) {
+        t.write(bytes.subarray(i, i + 1));
+        await settle(1);
+    }
+    const all = await t.waitType("ALL_CLIENT_STATE");
+    t.id = all.clients.find((c) => c.self).clientId;
+    assert.deepEqual(all.clients.map((c) => c.name).sort(), ["Split", "W"]);
+    // Two frames and the start of a third in one write, the rest of the third later.
+    const signal = (name) => frame({ type: "AUTOTEST_SIGNAL", instance: "t", name });
+    const third = signal("three");
+    t.write(Buffer.concat([signal("one"), signal("two"), third.subarray(0, 7)]));
+    await settle(50);
+    t.write(third.subarray(7));
+    for (const name of ["one", "two", "three"]) {
+        assert.equal((await w.waitType("AUTOTEST_SIGNAL", (p) => p.name === name)).clientId, t.id);
+    }
+}));
+
+test("an out-of-range TCP frame length closes that connection and the server keeps serving", () => withServer(async (mk, server, mkTcp) => {
+    const w = mk();
+    await w.join({ name: "W", roomId: "o" });
+    const t = mkTcp();
+    await t.join({ name: "T", roomId: "o" });
+    const head = Buffer.alloc(4);
+    head.writeUInt32LE(1048577);
+    t.write(head);
+    await t.whenClosed;
+    await w.waitType("UPDATE_CLIENT_STATE", (p) => p.clientId === t.id && p.online === false);
+    await waitForLog(server, /\[T\] bad tcp frame length 1048577, dropping connection/);
+
+    const z = mkTcp();
+    await z.open();
+    z.write(Buffer.alloc(4));
+    await z.whenClosed;
+    await waitForLog(server, /bad tcp frame length 0, dropping connection/);
+
+    // A frame of exactly 1 MiB is accepted.
+    const t2 = mkTcp();
+    const all = await t2.join({ name: "T2", roomId: "o" });
+    assert.equal(all.clients.length, 2);
+    const skeleton = JSON.stringify({ type: "AUTOTEST_SIGNAL", name: "big", pad: "" });
+    const big = frame(JSON.stringify({ type: "AUTOTEST_SIGNAL", name: "big", pad: "x".repeat(1048576 - skeleton.length) }));
+    assert.equal(big.readUInt32LE(0), 1048576);
+    t2.write(big);
+    assert.equal((await w.waitType("AUTOTEST_SIGNAL", (p) => p.name === "big")).clientId, t2.id);
+    w.send({ type: "AUTOTEST_SIGNAL", name: "still" });
+    await t2.waitType("AUTOTEST_SIGNAL", (p) => p.name === "still");
+}));
+
+test("KEEPALIVE is answered on TCP only and never relayed or logged", () => withServer(async (mk, server, mkTcp) => {
+    const w = mk();
+    await w.join({ name: "W", roomId: "k" });
+    const t = mkTcp();
+    await t.open();
+    t.send({ type: "KEEPALIVE" });
+    assert.deepEqual(await t.waitType("KEEPALIVE"), { type: "KEEPALIVE" }, "answered before the handshake");
+    await t.join({ name: "T", roomId: "k" });
+    const u = mkTcp();
+    await u.join({ name: "U", roomId: "k" });
+    t.send({ type: "KEEPALIVE" });
+    await t.waitType("KEEPALIVE");
+    w.send({ type: "KEEPALIVE" });
+    t.send({ type: "AUTOTEST_SIGNAL", instance: "t", name: "after" });
+    await w.waitType("AUTOTEST_SIGNAL");
+    await u.waitType("AUTOTEST_SIGNAL");
+    await w.expectNone((p) => p.type === "KEEPALIVE", "KEEPALIVE to a WebSocket client");
+    await u.expectNone((p) => p.type === "KEEPALIVE", "relayed KEEPALIVE");
+    const log = await waitForLog(server, /\[T\] AUTOTEST_SIGNAL instance=t name=after/);
+    assert.doesNotMatch(log, /KEEPALIVE/);
+}));
+
+test("a silent TCP client is dropped after TT_TCP_TIMEOUT_MS", () => withServer(async (mk, server, mkTcp) => {
+    const w = mk();
+    await w.join({ name: "W", roomId: "s" });
+    const k = mkTcp();
+    await k.join({ name: "K", roomId: "s" });
+    const keepalive = setInterval(() => k.send({ type: "KEEPALIVE" }), 100);
+    try {
+        const t = mkTcp();
+        await t.join({ name: "T", roomId: "s" });
+        await w.waitType("UPDATE_CLIENT_STATE", (p) => p.clientId === t.id && p.online === false, 3000);
+        await t.whenClosed;
+        await waitForLog(server, /\[T\] missed keepalive, dropping connection/);
+        await settle(500);
+        await w.expectNone((p) => p.type === "UPDATE_CLIENT_STATE" && p.clientId === k.id && p.online === false,
+            "a TCP client that sends KEEPALIVE dropped");
+        assert.equal(k.sock.destroyed, false);
+    } finally {
+        clearInterval(keepalive);
+    }
+}, { TT_TCP_TIMEOUT_MS: "300" }));
+
+test("startup prints the WebSocket port, then the TCP port", () => withServer(async (mk, server) => {
+    const out = server.output();
+    const ws = out.match(/^\[[^\]]+\] listening on port (\d+)\r?$/m);
+    const tcp = out.match(/^\[[^\]]+\] tcp relay on port (\d+)\r?$/m);
+    assert.ok(ws && tcp, out);
+    assert.ok(ws.index < tcp.index, out);
+    assert.equal(parseInt(ws[1], 10), server.port);
+    assert.equal(parseInt(tcp[1], 10), server.tcpPort);
+    assert.notEqual(server.tcpPort, server.port);
+    assert.equal(out.match(/listening on port/g).length, 1);
+}));
+
+test("the server restarts on the same explicit ports", async () => {
+    const first = await startServer();
+    const { port, tcpPort } = first;
+    await first.stop();
+    await withServer(async (mk, server, mkTcp) => {
+        assert.deepEqual([server.port, server.tcpPort], [port, tcpPort]);
+        await mk().join({ name: "W" });
+        const all = await mkTcp().join({ name: "T" });
+        assert.deepEqual(all.clients.map((c) => c.name).sort(), ["T", "W"]);
+    }, {}, [String(port), String(tcpPort)]);
+});
