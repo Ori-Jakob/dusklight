@@ -1840,9 +1840,7 @@ test("an owner switching games while a teammate plays is asked; only CLAIM_TEAM_
     await b.expectNone((p) => p.type === "CLAIM_TEAM_GAME" || p.type === "GAME_IDENTITY", "relayed team-game packet");
 }));
 
-test("the owner leaving keeps the team game; a teammate on it is preferred over join order", () => withServer(async (mk) => {
-    // The room owner plays elsewhere, so it takes no part in red's election.
-    await mk().join({ name: "H", teamId: "blue" });
+test("the leader leaving keeps the team game; the earliest-connected teammate leads next", () => withServer(async (mk) => {
     const owner = mk();
     const early = mk();
     const matched = mk();
@@ -1851,14 +1849,99 @@ test("the owner leaving keeps the team game; a teammate on it is preferred over 
     await matched.join({ name: "M", teamId: "red", game: rando("rando/f3/1111111111111111") });
     await owner.close();
     const s = await teamState(early, "red", (p) => !p.members.some((m) => m.clientId === owner.id));
-    assert.equal(s.ownerClientId, matched.id);
-    assert.equal(s.game.key, "rando/f3/1111111111111111");
+    assert.equal(s.ownerClientId, early.id, "connection order, not who plays the team game");
+    assert.equal(s.game.key, "rando/f3/1111111111111111", "the new leader inherits the team game");
     assert.equal(syncOf(s, early.id), "mismatch");
     const late = mk();
     await late.join({ name: "L", teamId: "red", game: AT_TITLE });
     const seen = await teamState(late, "red");
     assert.equal(seen.game.key, "rando/f3/1111111111111111");
-    assert.equal(seen.ownerClientId, matched.id);
+    assert.equal(seen.ownerClientId, early.id);
+}));
+
+test("room ownership and team leadership pass on by connection order", () => withServer(async (mk) => {
+    const a = mk();
+    const b = mk();
+    const c = mk();
+    const d = mk();
+    await a.join({ name: "A", teamId: "red" });
+    await b.join({ name: "B", teamId: "blue" });
+    await c.join({ name: "C", teamId: "red" });
+    await d.join({ name: "D", teamId: "red" });
+    await a.close();
+    const room1 = await d.waitType("UPDATE_ROOM_STATE", (p) => p.state.ownerClientId !== a.id);
+    assert.equal(room1.state.ownerClientId, b.id);
+    assert.equal((await teamState(d, "red", (p) => p.members.length === 2)).ownerClientId, c.id);
+    await c.close();
+    assert.equal((await teamState(d, "red", (p) => p.members.length === 1)).ownerClientId, d.id);
+    await b.close();
+    const room2 = await d.waitType("UPDATE_ROOM_STATE", (p) => p.state.ownerClientId !== b.id);
+    assert.equal(room2.state.ownerClientId, d.id);
+    const e = mk();
+    const all = await e.join({ name: "E", teamId: "red" });
+    assert.equal(all.roomState.ownerClientId, d.id, "a newcomer does not take over");
+    assert.equal((await teamState(e, "red")).ownerClientId, d.id);
+}));
+
+test("the room owner can hand the room to another member; nobody else can", () => withServer(async (mk, server) => {
+    const a = mk();
+    const b = mk();
+    const c = mk();
+    const other = mk();
+    await a.join({ name: "A" });
+    await b.join({ name: "B", teamId: "red" });
+    await c.join({ name: "C" });
+    await other.join({ name: "O", roomId: "elsewhere" });
+    b.send({ type: "SET_ROOM_OWNER", targetClientId: b.id });
+    await waitForLog(server, /\[B\] rejected SET_ROOM_OWNER \(not the owner\)/);
+    a.send({ type: "SET_ROOM_OWNER", targetClientId: other.id });
+    a.send({ type: "SET_ROOM_OWNER", targetClientId: 9999 });
+    a.send({ type: "SET_ROOM_OWNER", targetClientId: a.id });
+    await waitForLog(server, /\[A\] rejected SET_ROOM_OWNER \(no such member\)[\s\S]*\[A\] rejected SET_ROOM_OWNER \(no such member\)[\s\S]*\[A\] rejected SET_ROOM_OWNER \(no such member\)/);
+    await c.expectNone((p) => p.type === "UPDATE_ROOM_STATE", "a refused promotion");
+    a.send({ type: "SET_ROOM_OWNER", targetClientId: b.id });
+    for (const x of [a, b, c]) {
+        assert.equal((await x.waitType("UPDATE_ROOM_STATE")).state.ownerClientId, b.id);
+    }
+    // Only the new owner changes room settings now.
+    a.send({ type: "UPDATE_ROOM_STATE", state: { teleportMode: true } });
+    await waitForLog(server, /\[A\] rejected UPDATE_ROOM_STATE \(not the owner\)/);
+    b.send({ type: "UPDATE_ROOM_STATE", state: { teleportMode: true } });
+    assert.equal((await c.waitType("UPDATE_ROOM_STATE")).state.teleportMode, true);
+    // Team leadership is separate: A still leads the no-team group.
+    assert.equal((await teamState(c, "", (p) => p.members.length === 2)).ownerClientId, a.id);
+    // The promoted owner leaving hands the room back by connection order.
+    await b.close();
+    assert.equal((await c.waitType("UPDATE_ROOM_STATE", (p) => p.state.ownerClientId !== b.id)).state.ownerClientId, a.id);
+}));
+
+test("a team leader can hand the team to a teammate, who then decides the team game", () => withServer(async (mk, server) => {
+    const X = "rando/f3/1111111111111111";
+    const Y = "rando/f3/2222222222222222";
+    const a = mk();
+    const b = mk();
+    const c = mk();
+    const blue = mk();
+    await a.join({ name: "A", teamId: "red", game: rando(X) });
+    await b.join({ name: "B", teamId: "red", game: AT_TITLE });
+    await c.join({ name: "C", teamId: "red", game: AT_TITLE });
+    await blue.join({ name: "U", teamId: "blue" });
+    b.send({ type: "SET_TEAM_OWNER", targetClientId: b.id });
+    await waitForLog(server, /\[B\] rejected SET_TEAM_OWNER \(not the team leader\)/);
+    a.send({ type: "SET_TEAM_OWNER", targetClientId: blue.id });
+    await waitForLog(server, /\[A\] rejected SET_TEAM_OWNER \(no such teammate\)/);
+    // The room owner leads red only; blue's leader is blue's own.
+    a.send({ type: "SET_TEAM_OWNER", targetClientId: b.id });
+    const s = await teamState(c, "red", (p) => p.ownerClientId === b.id);
+    assert.equal(s.game.key, X);
+    const theirs = await teamState(blue, "red", (p) => p.ownerClientId === b.id);
+    assert.equal(theirs.ownerClientId, b.id, "other teams see the new leader");
+    // A no longer switches the team; B does.
+    publish(a, rando(Y));
+    await waitSync(c, "red", { [a.id]: "mismatch" });
+    publish(b, rando(Y));
+    assert.equal((await teamState(c, "red", (p) => p.game.key === Y)).ownerClientId, b.id);
+    await a.expectNone((p) => p.type === "TEAM_GAME_CONFLICT", "a conflict for a former leader");
 }));
 
 test("a team left empty keeps its game; the first one back owns it and switches it by playing another", () => withServer(async (mk) => {
@@ -1880,7 +1963,7 @@ test("a team left empty keeps its game; the first one back owns it and switches 
     assert.equal(s.game.key, "rando/f3/5555555555555555");
 }));
 
-test("the no-team group follows a new room owner when the old one leaves", () => withServer(async (mk) => {
+test("the no-team group's leader passes to its earliest-connected member", () => withServer(async (mk) => {
     const a = mk();
     const b = mk();
     const c = mk();
@@ -1889,7 +1972,7 @@ test("the no-team group follows a new room owner when the old one leaves", () =>
     await c.join({ name: "C" });
     await a.close();
     const s = await teamState(c, "", (p) => p.members.length === 1);
-    assert.equal(s.ownerClientId, c.id, "B (the new room owner) plays in red, so C owns the no-team group");
+    assert.equal(s.ownerClientId, c.id, "B (the new room owner) plays in red, so C leads the no-team group");
     const red = await teamState(c, "red");
     assert.equal(red.ownerClientId, b.id);
 }));
@@ -2136,7 +2219,7 @@ test("teleport across teams: randomizer teams only with teleportAcrossTeams and 
     await c.waitType("REQUEST_TELEPORT", (p) => p.requestId === 4);
 }));
 
-test("vanilla players on different teams still teleport to each other", () => withServer(async (mk) => {
+test("vanilla teams racing: teleport across teams is refused unless the room allows it", () => withServer(async (mk) => {
     const a = mk();
     const b = mk();
     await a.join({ teamId: "red" });
@@ -2146,7 +2229,32 @@ test("vanilla players on different teams still teleport to each other", () => wi
     a.send({ type: "UPDATE_ROOM_STATE", state: { teleportMode: true } });
     await a.waitType("UPDATE_ROOM_STATE", (p) => p.state.teleportMode === true);
     a.send({ type: "REQUEST_TELEPORT", targetClientId: b.id, requestId: 5 });
-    await b.waitType("REQUEST_TELEPORT", (p) => p.requestId === 5);
+    assert.equal((await a.waitType("TELEPORT_TO", (p) => p.requestId === 5)).reason, "other-team");
+    await b.expectNone((p) => p.type === "REQUEST_TELEPORT", "a request across teams");
+    a.send({ type: "UPDATE_ROOM_STATE", state: { teleportAcrossTeams: true } });
+    await a.waitType("UPDATE_ROOM_STATE", (p) => p.state.teleportAcrossTeams === true);
+    await settle(1100);
+    a.send({ type: "REQUEST_TELEPORT", targetClientId: b.id, requestId: 6 });
+    await b.waitType("REQUEST_TELEPORT", (p) => p.requestId === 6);
+}));
+
+test("vanilla teams racing: world sync stays within each team, presence is room-wide", () => withServer(async (mk) => {
+    const r1 = mk();
+    const r2 = mk();
+    const b1 = mk();
+    await r1.join({ teamId: "red" });
+    await r2.join({ teamId: "red" });
+    await b1.join({ teamId: "blue" });
+    for (const c of [r1, r2, b1]) c.enterStage("F_SP103");
+    await waitSync(b1, "blue", { [b1.id]: "ok" });
+    await settle();
+    r1.send({ type: "SET_EVENT_BIT", no: 0x2908, addToQueue: true });
+    assert.equal((await r2.waitType("SET_EVENT_BIT")).no, 0x2908);
+    await b1.expectNone((p) => p.type === "SET_EVENT_BIT", "red's event bit on blue");
+    r1.send({ type: "PLAYER_UPDATE", quiet: true });
+    await b1.waitType("PLAYER_UPDATE");
+    const blueView = await teamState(r1, "blue");
+    assert.equal(blueView.sameGameAsYours, true, "both play vanilla");
 }));
 
 test("room state carries teleportAcrossTeams, off by default and owner-only", () => withServer(async (mk) => {

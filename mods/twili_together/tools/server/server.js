@@ -9,15 +9,16 @@
  *   Handshake  Only app "twili-together" with protocolVersion >= 5 joins. Anything else gets
  *              SERVER_MESSAGE and DISABLE_CLIENT and is disconnected.
  *   Rooms      Keyed by roomId ("" = the public room). The first client owns a room; when the
- *              owner leaves, the longest-connected client takes over. A room left empty for
- *              TT_ROOM_TTL_SEC (default 6 h) is deleted with its caches.
+ *              owner leaves, the longest-connected client takes over. The owner may hand the room
+ *              to any member (SET_ROOM_OWNER). A room left empty for TT_ROOM_TTL_SEC (default
+ *              6 h) is deleted with its caches.
  *   Room state UPDATE_ROOM_STATE is accepted from the owner only and echoed to the room.
  *   Teams      Flag, event, item, dungeon and world-state packets go to the same room, teamId and
  *              save layout, stamped with the sender's clientId, teamId, session key, name and colour.
  *   Team game  Each client announces what it plays (HANDSHAKE "game", then GAME_IDENTITY). Every
- *              team has an owner (the room owner first, then members on the team game, then join
- *              order) and a sticky team game: set by the first member in game, switched only by
- *              the owner (after CLAIM_TEAM_GAME while teammates still play the old one). Team
+ *              team has a leader (its longest-connected member, or whom the leader promoted with
+ *              SET_TEAM_OWNER) and a sticky team game: set by the first member in game, switched
+ *              only by the leader (after CLAIM_TEAM_GAME while teammates still play the old one). Team
  *              packets flow only between members whose state is "ok" (in game on the team game).
  *              TEAM_STATE tells the room each team's owner, game and member states; the seed's
  *              permalink ("share") reaches that team only.
@@ -30,8 +31,7 @@
  *   Kills      ENEMY_DEFEATED / STORY_EVENT go to teammates in the same stage and layer, uncached.
  *   Story      STORY_MOVE goes to the whole team and is never queued.
  *   Teleport   REQUEST_TELEPORT / TELEPORT_TO go only to the client named, while teleportMode is on.
- *              Across teams where either plays a non-vanilla game only with teleportAcrossTeams,
- *              and never between different team games.
+ *              Across teams only with teleportAcrossTeams, and never between different team games.
  *   PvP        DAMAGE_PLAYER goes only to the client named, while pvpMode is on and the rules allow
  *              it, at most once per TT_DAMAGE_INTERVAL_MS per pair. DAMAGE_RESULT goes back to the
  *              attacker. Refusals are answered by the server.
@@ -199,8 +199,8 @@ let nextClientId = 1;
  *             gateLogged: Set<string> }} Client
  * @typedef {{ inGame: boolean, kind: string, key: string, display: { name: string, mode: string },
  *             share: object|null, allowUnverified: boolean }} GameIdentity
- * @typedef {{ id: string, ownerClientId: number|null, game: object|null, prevKeys: string[],
- *             conflictKey: string, sig: string }} Team
+ * @typedef {{ id: string, ownerClientId: number|null, game: object|null, conflictKey: string,
+ *             sig: string }} Team
  * @typedef {{ id: string, clients: Map<number, Client>, ownerClientId: number|null,
  *             state: object, teams: Map<string, Team>, teamStates: Map<string, object>,
  *             teamQueues: Map<string, object[]>, teamStoryMoves: Map<string, object>,
@@ -533,7 +533,7 @@ function assignOwnerIfNeeded(room) {
 function teamOf(room, teamId) {
     let team = room.teams.get(teamId);
     if (!team) {
-        team = { id: teamId, ownerClientId: null, game: null, prevKeys: [], conflictKey: "", sig: "" };
+        team = { id: teamId, ownerClientId: null, game: null, conflictKey: "", sig: "" };
         room.teams.set(teamId, team);
     }
     return team;
@@ -566,17 +566,13 @@ function teamGameKey(room, client) {
     return team && team.game ? team.game.key : "";
 }
 
-// Only while the team has no owner online: the room owner, then members in game on the team
-// game, then join order. Ownership does not follow the room owner around.
+// Only while the team has no leader online: its earliest-connected member, like the room owner.
 function electTeamOwner(room, team) {
     if (team.ownerClientId !== null && room.clients.has(team.ownerClientId)) return;
-    const members = teamMembers(room, team);
-    const pick = members.find((c) => c.clientId === room.ownerClientId) ??
-        members.find((c) => team.game !== null && c.game.inGame && c.game.key === team.game.key) ??
-        members[0];
+    const pick = teamMembers(room, team)[0];
     team.ownerClientId = pick ? pick.clientId : null;
     team.conflictKey = "";
-    if (pick) log(`[team ${describeTeam(team)}] owner is now ${pick.name} (id=${pick.clientId})`);
+    if (pick) log(`[team ${describeTeam(team)}] leader is now ${pick.name} (id=${pick.clientId})`);
 }
 
 // The previous game's caches are kept, so an owner who loaded the wrong save and switches back resumes.
@@ -584,7 +580,6 @@ function setTeamGame(room, team, client) {
     const g = client.game;
     const oldKey = team.game ? team.game.key : null;
     if (oldKey !== null && oldKey !== g.key) {
-        team.prevKeys = [oldKey];
         const keep = new Set([g.key, oldKey]);
         for (const map of [room.teamStates, room.teamQueues, room.teamQueueSeqs, room.teamStoryMoves]) {
             for (const k of [...map.keys()]) {
@@ -730,17 +725,40 @@ function handleClaimTeamGame(room, client) {
     broadcastTeams(room);
 }
 
-// Refused across teams when either plays something other than vanilla, unless the room allows
-// it, and never between two different team games.
+// Across teams only while the room allows it, and never between two different team games.
 function crossTeamTeleportRefusal(room, a, b) {
     if (a.teamId === b.teamId) return null;
+    if (!room.state.teleportAcrossTeams) return "other-team";
     const ga = room.teams.get(a.teamId)?.game ?? null;
     const gb = room.teams.get(b.teamId)?.game ?? null;
-    const special = (g) => g !== null && g.kind !== "vanilla";
-    if (!special(ga) && !special(gb)) return null;
-    if (!room.state.teleportAcrossTeams) return "other-team";
     if (ga === null || gb === null || ga.key !== gb.key) return "other-game";
     return null;
+}
+
+// The room owner hands the room to any connected member.
+function handleSetRoomOwner(room, client, packet) {
+    const target = room.clients.get(asInt(packet.targetClientId, 0, 0, 0x7fffffff));
+    if (room.ownerClientId !== client.clientId || !target || target === client) {
+        log(`[${client.name}] rejected SET_ROOM_OWNER (${room.ownerClientId !== client.clientId ? "not the owner" : "no such member"})`);
+        return;
+    }
+    room.ownerClientId = target.clientId;
+    log(`[room ${describeRoom(room)}] owner is now ${target.name} (id=${target.clientId}), promoted by ${client.name}`);
+    broadcastRoom(room, -1, roomStatePacket(room));
+}
+
+// A team leader hands the team to any connected teammate.
+function handleSetTeamOwner(room, client, packet) {
+    const team = teamOf(room, client.teamId);
+    const target = room.clients.get(asInt(packet.targetClientId, 0, 0, 0x7fffffff));
+    if (team.ownerClientId !== client.clientId || !target || target === client || target.teamId !== team.id) {
+        log(`[${client.name}] rejected SET_TEAM_OWNER (${team.ownerClientId !== client.clientId ? "not the team leader" : "no such teammate"})`);
+        return;
+    }
+    team.ownerClientId = target.clientId;
+    team.conflictKey = "";
+    log(`[team ${describeTeam(team)}] leader is now ${target.name} (id=${target.clientId}), promoted by ${client.name}`);
+    broadcastTeams(room);
 }
 
 // Why a HANDSHAKE may not join, or null. Newer protocols join.
@@ -1006,6 +1024,14 @@ function handlePacket(client, packet) {
     }
     if (packet.type === "CLAIM_TEAM_GAME") {
         handleClaimTeamGame(room, client);
+        return;
+    }
+    if (packet.type === "SET_ROOM_OWNER") {
+        handleSetRoomOwner(room, client, packet);
+        return;
+    }
+    if (packet.type === "SET_TEAM_OWNER") {
+        handleSetTeamOwner(room, client, packet);
         return;
     }
 

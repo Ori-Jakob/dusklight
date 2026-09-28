@@ -78,11 +78,18 @@ The handshake may also carry `game`, the client's game identity; `GAME_IDENTITY`
 `key` is `vanilla`, `rando/<format>/<digest>` (a randomizer seed found on disk and checked
 against the running randomizer), `rando-probe/<fingerprint>` (checked only by probing item
 checks: syncs once the player confirmed it, `allowUnverified`) or `mode/<game mode id>`. Each
-team has an owner and a team game, and team traffic only flows between members in game on it.
+team has a leader and a team game, and team traffic only flows between members in game on it.
 `TEAM_STATE {teamId, ownerClientId, game, members: [{clientId, sync, ...}]}` goes to the room
 on every change (and to a joiner for every team); only the team's own members get the keys and
-`game.share`. `TEAM_GAME_CONFLICT` asks a team owner who loaded another game while teammates
-still play the team's; `CLAIM_TEAM_GAME` switches the team to the owner's game anyway.
+`game.share`. `TEAM_GAME_CONFLICT` asks a team leader who loaded another game while teammates
+still play the team's; `CLAIM_TEAM_GAME` switches the team to the leader's game anyway.
+
+The room owner and each team leader are the longest-connected member of the room or team; when
+one leaves, the next by connection order takes over (the team keeps its game). The owner may hand
+the room to any member with `SET_ROOM_OWNER {targetClientId}`, a leader the team to a teammate
+with `SET_TEAM_OWNER {targetClientId}`. Teleport requests across teams are refused (`other-team`)
+unless the room's `teleportAcrossTeams` is on, and always between different team games
+(`other-game`).
 
 WebSocket clients may offer the subprotocol `twili-together.5`. The server selects it when it is
 offered and accepts connections that offer none or only unknown ones.
