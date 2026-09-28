@@ -1,0 +1,44 @@
+/* Twili-Together toasts (src/ui/ItemToasts.cpp, src/ui/Toasts.cpp). */
+
+toast.twili-item message {
+    max-width: 420dp;
+}
+
+toast.twili-item message row.item-line {
+    align-items: center;
+    gap: 12dp;
+}
+
+toast.twili-item message row.icons {
+    align-items: center;
+    gap: 6dp;
+}
+
+toast.twili-item img.item-icon {
+    display: block;
+    width: 40dp;
+    height: 40dp;
+    flex: 0 0 40dp;
+}
+
+toast.twili-item row.icons img.item-icon {
+    width: 32dp;
+    height: 32dp;
+    flex-basis: 32dp;
+}
+
+toast.twili-item span.player {
+    font-weight: bold;
+}
+
+toast.twili-item span.more {
+    opacity: 0.7;
+}
+
+toast.twili-item icon.item-fallback {
+    width: 40dp;
+    height: 40dp;
+    flex: 0 0 40dp;
+    font-size: 32dp;
+    decorator: text("&#xe1a1;" center center);
+}

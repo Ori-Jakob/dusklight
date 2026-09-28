@@ -38,6 +38,7 @@ set(TWILI_SOURCES
     src/core/Config.cpp
     src/core/GameAccess.cpp
     src/core/Host.cpp
+    src/core/LocalPlayer.cpp
     src/core/RoomStateSync.cpp
     src/core/SaveGate.cpp
     src/core/Session.cpp
@@ -63,12 +64,20 @@ set(TWILI_SOURCES
     src/presence/PlayerUpdate.cpp
     src/presence/RemotePose.cpp
     src/pvp/PvpStub.cpp
+    src/story/StoryUiStub.cpp
     src/sync/DungeonItems.cpp
     src/sync/Flags.cpp
     src/sync/GiveItem.cpp
     src/sync/WorldState.cpp
     src/sync/WorldSync.cpp
+    src/teleport/TeleportStub.cpp
+    src/ui/ColorMath.cpp
+    src/ui/ItemNames.cpp
+    src/ui/ItemToasts.cpp
+    src/ui/StoryPrompt.cpp
+    src/ui/Toasts.cpp
     src/ui/TwiliWindow.cpp
+    src/ui/Ui.cpp
 )
 
 if (TWILI_ENABLE_AUTOTEST)

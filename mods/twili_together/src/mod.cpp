@@ -18,7 +18,7 @@
 #include "core/Session.hpp"
 #include "hooks/Hooks.hpp"
 #include "sync/WorldSync.hpp"
-#include "ui/TwiliWindow.hpp"
+#include "ui/Ui.hpp"
 
 #if TWILI_ENABLE_AUTOTEST
 #include "autotest/AutoTest.hpp"
@@ -83,9 +83,7 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     std::string fxError;
     hooks::install(hooks::Group::Fx, fxError);
 
-    if (ui::registerMenu() != MOD_OK) {
-        TwiliLog.warn("[ui] could not add the menu tab");
-    }
+    ui::init();
 
 #if TWILI_ENABLE_AUTOTEST
     autotest::init();
@@ -104,6 +102,7 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
 
 MOD_EXPORT ModResult mod_update(ModError*) {
     twili::Session::instance().update();
+    twili::ui::tick();
 #if TWILI_ENABLE_AUTOTEST
     twili::autotest::tick();
 #endif

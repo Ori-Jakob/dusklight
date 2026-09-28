@@ -1,0 +1,35 @@
+/* Twili-Together window (src/ui/TwiliWindow.cpp). */
+
+/* The name tag as other players see it: dark fill, frame and dot in the player colour. */
+.twili-tag {
+    display: inline-block;
+    margin: 4dp 0 8dp 0;
+    padding: 3dp 8dp;
+    background-color: rgba(10, 12, 16, 75%);
+    border-width: 2dp;
+    border-color: #FFFFFF;
+    font-size: 16dp;
+    color: #F5F7FA;
+}
+
+.twili-tag-dot {
+    display: inline-block;
+    width: 4dp;
+    height: 4dp;
+    margin-right: 6dp;
+    vertical-align: middle;
+}
+
+.twili-swatch {
+    display: inline-block;
+    width: 12dp;
+    height: 12dp;
+    margin-right: 4dp;
+    border-width: 1dp;
+    border-color: rgba(0, 0, 0, 60%);
+}
+
+.twili-player-detail {
+    padding-left: 22dp;
+    opacity: 0.75;
+}
