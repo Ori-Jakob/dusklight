@@ -8,6 +8,7 @@
 
 #include "autotest/AutoTestSteps.hpp"
 
+#include "core/Host.hpp"
 #include "core/Log.hpp"
 #include "core/Session.hpp"
 #include "ui/NameTags.hpp"
@@ -117,6 +118,7 @@ std::optional<bool> viewPeer(StepContext& ctx) {
     const f32 reach = dist + step.value("beyond", 200.0f);
     cXyz pos(eye.x + ux * reach, dummy->current.pos.y, eye.z + uz * reach);
     player->setPlayerPosAndAngle(&pos, cM_atan2s(ux, uz), TRUE);
+    interp::requestPresentationSync();
     TwiliLog.info("[autotest] viewing {} from {:.0f} {:.0f} {:.0f}", c->name, pos.x, pos.y, pos.z);
     return true;
 }

@@ -3,6 +3,7 @@
 #include "autotest/AutoTestSteps.hpp"
 
 #include "actors/DummyPlayer.hpp"
+#include "core/Host.hpp"
 #include "core/Log.hpp"
 #include "core/Session.hpp"
 #include "core/Visibility.hpp"
@@ -345,6 +346,7 @@ std::optional<bool> motionSteps(const std::string& op, StepContext& ctx) {
         pos.y += step.value("dy", 0.0f);
         pos.z += step.value("dz", 0.0f);
         player->setPlayerPosAndAngle(&pos, player->shape_angle.y, TRUE);
+        interp::requestPresentationSync();
         TwiliLog.info("[autotest] moved to {:.0f} {:.0f} {:.0f}", pos.x, pos.y, pos.z);
         return true;
     }

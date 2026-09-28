@@ -25,6 +25,7 @@
 #include "autotest/AutoTestSteps.hpp"
 
 #include "actors/DummyPlayer.hpp"
+#include "core/Host.hpp"
 #include "core/Log.hpp"
 #include "core/Session.hpp"
 #include "pvp/Pvp.hpp"
@@ -124,6 +125,8 @@ bool approachDummy(StepContext& ctx) {
         if (camera_process_class* camera = dComIfGp_getCamera(dComIfGp_getPlayerCameraID(0))) {
             camera->mCamera.Reset(camera->mCamera.mCenter + delta, camera->mCamera.mEye + delta);
         }
+        // A cut: no presented frame lerps across the jump.
+        interp::requestPresentationSync();
     }
     // Held while settling: a proc that was turning Link would carry on from the old facing.
     if (ctx.ticks < 10) {

@@ -4,6 +4,7 @@
 #include "autotest/AutoTestSteps.hpp"
 
 #include "core/Config.hpp"
+#include "core/Host.hpp"
 #include "core/LocalPlayer.hpp"
 #include "core/Log.hpp"
 #include "story/StoryState.hpp"
@@ -221,6 +222,7 @@ std::optional<bool> triggerStory(StepContext& ctx) {
         daPy_py_c* player = dComIfGp_getLinkPlayer();
         cXyz pos = tag->current.pos;
         player->setPlayerPosAndAngle(&pos, player->shape_angle.y, TRUE);
+        interp::requestPresentationSync();
         TwiliLog.info(
             "[autotest] triggerStory: moved into the tag area of map event {}", find.eventNo);
         return true;

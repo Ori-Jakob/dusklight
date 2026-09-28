@@ -166,6 +166,7 @@ void standBeside(daAlink_c* link, const fopAc_ac_c* horse, float dist) {
     link->old.pos = pos;
     link->shape_angle.y = static_cast<s16>(yaw - 0x4000);
     link->current.angle.y = link->shape_angle.y;
+    interp::requestPresentationSync();
 }
 
 bool rideHorse(StepContext& ctx) {
