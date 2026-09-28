@@ -285,7 +285,7 @@ void drawTagBox(const TagDraw& tag) {
 
 void addProbe(uint32_t id, Probe::Kind kind, const TagDraw& tag) {
     s_drawn.push_back({id, kind, tag.lines[0].text, tag.lineCount > 1 ? tag.lines[1].text : "",
-        tag.x, tag.y, tag.width, tag.height});
+        tag.x, tag.y, tag.width, tag.height, tag.border.r, tag.border.g, tag.border.b});
 }
 
 void draw() {

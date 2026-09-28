@@ -250,6 +250,24 @@ Teleport (`StepsTeleport.cpp`):
 | `teleportTo` | `target`, `expect` (`arrived`, `local`, `stage`, `refused`, `timeout`, `failed`, or a list), `reason`, `timeoutSec` | asks to teleport to that peer and waits for the result |
 | `expectNear` | `target`, `maxDist` (250), `timeoutSec` | our Link within `maxDist` of the peer's reported position |
 
+Team games (`StepsTeamGame.cpp`). A team syncs only between members in game on its team game;
+the randomizer seed a player runs is found among the generated seeds on disk:
+
+| op | fields | does |
+| --- | --- | --- |
+| `setGameIdentity` | `identity` (`kind`, `key`, `name`, `mode`, `permalink`, `seed`, `version`, `inGame`; `{}` restores detection) | announce this game instead of the detected one |
+| `fakeRandoResolver` | `items` (`{checkName: itemNo}`), `clear` | an ItemService check resolver answering those checks, as a loaded randomizer seed does |
+| `expectLocalGame` | `kind`, `key`, `keyPrefix`, `name`, `verified`, `permalink`, `timeoutSec` | until the detected game matches every field given |
+| `expectSyncState` | `state` (`ok`, `pending`, `unverified`, `mismatch`), `timeoutSec` | until the server reports that state for us |
+| `expectMemberSync` | `peer`, `state`, `timeoutSec` | the same for a teammate |
+| `expectTeamGame` | `team` (default ours), `key`, `keyPrefix`, `kind`, `name`, `permalink`, `noPermalink`, `noKey`, `sameGame`, `owner` (peer name or `self`), `timeoutSec` | until the team's state matches every field given |
+| `expectCopyText` | `text`, `timeoutSec` | what Copy Permalink would put on the clipboard (the clipboard is left alone) |
+| `claimTeamGame` / `confirmUnverified` | | the Room tab's "Make My Game the Team's Game" / "Sync Unverified Match" |
+| `promote` | `peer`, `role` (`room`, `team`) | the Players tab's "Make ... Room Owner" / "Make ... Team Leader", confirmed |
+| `expectRoomOwner` | `owner` (peer name or `self`), `timeoutSec` | until the room state names that owner |
+| `setTeamColor` / `expectTeamColor` | `rgb`; `team` (default ours), `rgb`, `timeoutSec` | the Room tab's Team Colour (leader only) / until the server reports that team colour |
+| `expectTeleportBlocked` | `peer`, `code` (`other-team`, `other-game`, ..., null for none), `timeoutSec` | until teleporting to that peer is refused for that reason |
+
 Story (`StepsStory.cpp`):
 
 | op | fields | does |
@@ -335,7 +353,7 @@ Name tags (`StepsNameTags.cpp`):
 
 | op | fields | does |
 | --- | --- | --- |
-| `expectNameTag` | `name`, `shown`, `gate`, `line2`, `holdTicks`, `timeoutSec` | the peer's tag in the last presented frame (or none, for `gate`) |
+| `expectNameTag` | `name`, `shown`, `gate`, `line2`, `rgb`, `holdTicks`, `timeoutSec` | the peer's tag in the last presented frame (or none, for `gate`); `rgb` is its frame colour |
 | `viewPeer` | `name`, `yaw`, `beyond` | moves our player past the peer's dummy, seen from our camera, so the peer shows `yaw` degrees off centre |
 
 ## Adding a scenario
@@ -353,6 +371,8 @@ exporting an array. A scenario has:
 - `server`: force (`true`) or suppress (`false`) the relay server; by default it runs when a step
   uses a network op;
 - `enableMods`: ids of other mods next to the exe to keep enabled (`MODS` in `lib.js`);
+- `files`: `{path: text}` written into every instance's user dir before launch (an instance's own
+  `files` too), e.g. randomizer seeds under `mod_data/`;
 - `expectLog` / `rejectLog`: regexes (or `{pattern, instance}`) every instance log must / must not
   match. Every scenario also rejects a HookService "was inlined into callers" warning for our mod
   (the hook would miss the inlined calls) and a failure of our mod;

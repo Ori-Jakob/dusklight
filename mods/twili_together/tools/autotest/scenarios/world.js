@@ -1,13 +1,17 @@
 // World sync: flags, event bits, items and the server catch-up.
 
-const { MODS, STAGES, ITEMS, EVENTS, COMMON_CVARS, waitStage, barrier, meetIn, connect } = require("../lib");
+const { MODS, STAGES, ITEMS, EVENTS, COMMON_CVARS, RANDOMIZER_MODE_CVARS, waitStage, barrier, meetIn, connect } =
+    require("../lib");
 
 const WRONG_LAYOUT = "00000000deadbeef";
 
-// Prelaunch (forced open over the game by these two) restores the last game mode: the randomizer's.
-const RANDOMIZER_MODE_CVARS = [
-    "backend.skipPreLaunchUI=true",
-    `game.lastSelectedGameModeId=randomizer_${MODS.randomizer}`,
+// Both run the randomizer without a seed: equal probe keys, which sync only once confirmed.
+const confirmUnverified = [
+    waitStage(STAGES.linksHouse),
+    { op: "expectLocalGame", kind: "randomizer", keyPrefix: "rando-probe/", verified: false },
+    { op: "expectSyncState", state: "unverified" },
+    { op: "confirmUnverified" },
+    { op: "expectSyncState", state: "ok" },
 ];
 
 module.exports = [
@@ -143,17 +147,20 @@ module.exports = [
     },
     {
         name: "randomizer-active-sync",
-        description: "with the randomizer's game mode active (its hooks installed) flags, event bits and items still sync both ways",
+        description: "with the randomizer's game mode active (its hooks installed, no seed) the match is unverified until confirmed; then flags, event bits and items sync both ways",
         timeoutSec: 300,
         cvars: [...COMMON_CVARS, ...RANDOMIZER_MODE_CVARS],
         enableMods: [MODS.randomizer],
-        expectLog: [/randomizer game mode activated/, /\[core\] Twili-Together initialized/],
+        expectLog: [/randomizer game mode activated/, /\[core\] Twili-Together initialized/,
+            /\[game\] local game: randomizer rando-probe\/[0-9a-f]{16} "no seed loaded", unverified/,
+            /\[game\] unverified match prompt \(not shown under autotest\)/],
         rejectLog: [/conflict/i],
         instances: [
             {
                 name: "A",
                 steps: [
                     ...connect,
+                    ...confirmUnverified,
                     ...meetIn(STAGES.linksHouse, "B"),
                     { op: "setEventBit", no: EVENTS.shieldAttack },
                     { op: "giveItem", item: ITEMS.boomerang },
@@ -168,6 +175,7 @@ module.exports = [
                 name: "B",
                 steps: [
                     ...connect,
+                    ...confirmUnverified,
                     ...meetIn(STAGES.linksHouse, "A"),
                     ...barrier("a-done", "A"),
                     { op: "expectEventBit", no: EVENTS.shieldAttack },

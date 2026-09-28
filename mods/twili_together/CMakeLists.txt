@@ -123,6 +123,7 @@ if (TWILI_ENABLE_AUTOTEST)
         src/autotest/StepsRecolor.cpp
         src/autotest/StepsStatusFx.cpp
         src/autotest/StepsStory.cpp
+        src/autotest/StepsTeamGame.cpp
         src/autotest/StepsTeleport.cpp
         src/autotest/StepsWolfFx.cpp
         src/autotest/StepsWolf.cpp

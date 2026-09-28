@@ -33,6 +33,12 @@ const EVENTS = { shieldAttack: 0x2908, copyRodPower: 0x2580 };
 // Extra --cvar overrides for every instance.
 const COMMON_CVARS = [];
 
+// Prelaunch (forced open over the game by these two) restores the last game mode: the randomizer's.
+const RANDOMIZER_MODE_CVARS = [
+    "backend.skipPreLaunchUI=true",
+    `game.lastSelectedGameModeId=randomizer_${MODS.randomizer}`,
+];
+
 const warp = (s) => ({ op: "warp", ...s });
 const waitStage = (s, timeoutSec = 90) => ({ op: "waitStage", stage: s.stage, timeoutSec });
 const barrier = (name, from, timeoutSec = 120) => [
@@ -56,6 +62,6 @@ const connect = [
 ];
 
 module.exports = {
-    MOD_ID, CONFIG_PREFIX, escapeModId, tt, MODS, STAGES, ITEMS, EVENTS, COMMON_CVARS,
+    MOD_ID, CONFIG_PREFIX, escapeModId, tt, MODS, STAGES, ITEMS, EVENTS, COMMON_CVARS, RANDOMIZER_MODE_CVARS,
     warp, waitStage, barrier, meetIn, connect,
 };

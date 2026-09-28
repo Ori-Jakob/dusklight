@@ -315,6 +315,12 @@ async function runScenario(scenario, opts, outRoot) {
     const procs = [];
     for (const [index, inst] of scenario.instances.entries()) {
         const dataDir = prepareSlot(index, modIds, scenario.enableMods ?? []);
+        // Fixture files, relative to the user dir (e.g. a randomizer seed under mod_data).
+        for (const [rel, content] of Object.entries({ ...scenario.files, ...inst.files })) {
+            const dst = path.join(dataDir, rel);
+            fs.mkdirSync(path.dirname(dst), { recursive: true });
+            fs.writeFileSync(dst, content);
+        }
         const script = {
             instance: inst.name,
             url,

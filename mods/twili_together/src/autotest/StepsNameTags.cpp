@@ -1,7 +1,7 @@
 // Steps for name tags (src/ui/NameTags.cpp), read from what the last presented frame drew.
 //
 // expectNameTag  name, shown (true), gate (the reason nothing is drawn, with shown false),
-//                line2, holdTicks (0), timeoutSec (10)
+//                line2, rgb (the frame's "#RRGGBB"), holdTicks (0), timeoutSec (10)
 // viewPeer  name, yaw (0), beyond (200)
 //     Moves the local player past the peer's dummy, seen from our camera, so the peer shows yaw
 //     degrees off the centre (for captures).
@@ -39,9 +39,9 @@ const Client* clientNamed(const std::string& name) {
 std::string describe() {
     std::string s = fmt::format("frames={} gate='{}' tags=[", tags::frameCount(), tags::lastGate());
     for (const tags::Probe& p : tags::drawn()) {
-        s += fmt::format(" #{} {} '{}'{} at ({:.0f},{:.0f})", p.clientId,
+        s += fmt::format(" #{} {} '{}'{} at ({:.0f},{:.0f}) #{:02X}{:02X}{:02X}", p.clientId,
             p.kind == tags::Probe::Kind::Player ? "tag" : "card", p.line1,
-            p.line2.empty() ? "" : " / '" + p.line2 + "'", p.x, p.y);
+            p.line2.empty() ? "" : " / '" + p.line2 + "'", p.x, p.y, p.r, p.g, p.b);
     }
     return s + " ]";
 }
@@ -70,6 +70,10 @@ std::optional<bool> expectNameTag(StepContext& ctx) {
     bool ok = c != nullptr && (found != nullptr) == wantShown;
     if (ok && found != nullptr && step.contains("line2")) {
         ok = found->line2 == step.value("line2", std::string{});
+    }
+    if (ok && found != nullptr && step.contains("rgb")) {
+        ok = fmt::format("#{:02X}{:02X}{:02X}", found->r, found->g, found->b) ==
+             step.value("rgb", std::string{});
     }
     if (ok && !wantShown && step.contains("gate")) {
         ok = step.value("gate", std::string{}) == tags::lastGate();

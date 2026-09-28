@@ -19,6 +19,8 @@ struct Probe {
     std::string line1;
     std::string line2;
     float x = 0.0f, y = 0.0f, width = 0.0f, height = 0.0f;
+    // The frame's colour: the player's display colour.
+    uint8_t r = 0, g = 0, b = 0;
 };
 const std::vector<Probe>& drawn();
 // Frames the callback ran, and the last one's reason for drawing nothing ("" when it drew).
