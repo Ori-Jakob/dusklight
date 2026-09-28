@@ -1,5 +1,6 @@
 #include "mods/service.hpp"
 #include "mods/svc/actor.h"
+#include "mods/svc/camera.h"
 #include "mods/svc/config.h"
 #include "mods/svc/gfx.h"
 #include "mods/svc/hook.h"
@@ -46,6 +47,8 @@ IMPORT_OPTIONAL_SERVICE(ItemService, svc_item);
 // Either transport may be missing on a platform; the URL scheme picks one.
 IMPORT_OPTIONAL_SERVICE(WebSocketService, svc_websocket);
 IMPORT_OPTIONAL_SERVICE(NetService, svc_net);
+// Autotest camera holds only.
+IMPORT_OPTIONAL_SERVICE(CameraService, svc_camera);
 
 namespace {
 

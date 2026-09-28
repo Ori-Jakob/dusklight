@@ -1,0 +1,415 @@
+// PvP (pvp/, the dummy's hurtbox in actors/DummyPlayer.cpp). Steps in src/autotest/StepsPvp.cpp;
+// room options through setRoomOption / waitRoomOption.
+//
+// Damage values are the PvP table's (quarter hearts): a normal slash of the Ordon sword takes 2,
+// doubled for a wolf; a hit never takes more than 4.
+
+const { STAGES, COMMON_CVARS, barrier, meetIn, connect } = require("../lib");
+
+// Deterministic damage whatever the user's config says; pvp-rules turns the difficulty options up
+// on the victim to show PvP ignores them.
+const CVARS = [...COMMON_CVARS, "game.damageMultiplier=1", "game.instantDeath=false",
+               "game.infiniteHearts=false"];
+// Every instance sets it: whichever one owns the room pushes it.
+const room = (name, value) => [
+    { op: "setRoomOption", name, value },
+    { op: "waitRoomOption", name, value, timeoutSec: 20 },
+];
+// One press of B (PAD_BUTTON_B), then time for the cut to finish. With the sword sheathed the
+// press only draws it, so every attacker presses once (drawSword) before its first real swing.
+const swing = [{ op: "walk", frames: 1, stickX: 0, stickY: 0, buttons: 0x200 }, { op: "wait", frames: 45 }];
+const drawSword = swing;
+// More than the victim's 30 ticks of i-frames after a hit.
+const recover = { op: "wait", frames: 45 };
+const spawnAs = (form, s) => [
+    { op: "setForm", form },
+    { op: "warp", ...s },
+    { op: "waitStage", stage: s.stage, timeoutSec: 90 },
+    { op: "expectLocalForm", form },
+];
+
+module.exports = [
+    {
+        name: "pvp-rules",
+        description: "synthetic hits: refused while off, light and knockdown reactions, the one-heart floor, cutscene drop, lethal; the victim's difficulty options do not apply",
+        timeoutSec: 420,
+        cvars: CVARS,
+        instances: [
+            {
+                name: "A",
+                start: STAGES.southFaron,
+                steps: [
+                    ...connect,
+                    ...meetIn(STAGES.southFaron, "B"),
+                    { op: "sendPvpHit", target: "B", damage: 4 },
+                    { op: "expectPvpResult", target: "B", result: "refused", reason: "disabled" },
+                    ...room("pvpMode", true),
+                    ...barrier("pvp-on", "B"),
+                    ...barrier("b-life-12", "B"),
+                    // 12 -> 8 (a light hit) -> 4 (a knockdown), then the floor keeps B at one
+                    // heart.
+                    { op: "sendPvpHit", target: "B", damage: 4, knockback: "light" },
+                    { op: "expectPvpResult", target: "B", result: "applied", damage: 4 },
+                    recover,
+                    ...barrier("b-ready-2", "B"),
+                    { op: "sendPvpHit", target: "B", damage: 4, knockback: "knockdown" },
+                    { op: "expectPvpResult", target: "B", result: "applied", damage: 4 },
+                    recover,
+                    ...barrier("b-ready-3", "B"),
+                    { op: "sendPvpHit", target: "B", damage: 4 },
+                    { op: "expectPvpResult", target: "B", result: "applied", damage: 0 },
+                    ...barrier("floor-4", "B"),
+                    ...barrier("b-life-3", "B"),
+                    recover,
+                    { op: "sendPvpHit", target: "B", damage: 4 },
+                    { op: "expectPvpResult", target: "B", result: "applied", damage: 0 },
+                    ...barrier("floor-3", "B"),
+                    ...barrier("b-cutscene", "B"),
+                    { op: "sendPvpHit", target: "B", damage: 4 },
+                    { op: "expectPvpResult", target: "B", result: "dropped", reason: "busy" },
+                    ...barrier("cutscene-checked", "B"),
+                    ...room("pvpLethal", true),
+                    ...barrier("b-life-4", "B"),
+                    { op: "sendPvpHit", target: "B", damage: 4, knockback: "knockdown" },
+                    { op: "expectPvpResult", target: "B", result: "applied", damage: 4 },
+                    { op: "expectPvpStats", target: "B", sent: 7, applied: 5, refused: 1, dropped: 1, damage: 12 },
+                    ...barrier("lethal-checked", "B"),
+                    { op: "quit" },
+                ],
+            },
+            {
+                name: "B",
+                start: STAGES.southFaron,
+                // PvP damage ignores these: every hit below takes exactly what was sent.
+                cvars: ["game.damageMultiplier=4", "game.instantDeath=true"],
+                steps: [
+                    ...connect,
+                    ...meetIn(STAGES.southFaron, "A"),
+                    ...room("pvpMode", true),
+                    ...barrier("pvp-on", "A"),
+                    { op: "setLife", value: 12 },
+                    recover,
+                    ...barrier("b-life-12", "A"),
+                    { op: "expectReaction", knockback: "light" },
+                    { op: "expectLife", value: 8, timeoutSec: 10 },
+                    { op: "expectReaction", knockback: "none" },
+                    ...barrier("b-ready-2", "A"),
+                    { op: "expectReaction", knockback: "knockdown" },
+                    { op: "expectLife", value: 4, timeoutSec: 10 },
+                    { op: "expectReaction", knockback: "none", timeoutSec: 20 },
+                    ...barrier("b-ready-3", "A"),
+                    ...barrier("floor-4", "A"),
+                    { op: "expectLife", value: 4 },
+                    { op: "setLife", value: 3 },
+                    ...barrier("b-life-3", "A"),
+                    ...barrier("floor-3", "A"),
+                    { op: "expectLife", value: 3 },
+                    { op: "forceCutscene", on: true },
+                    { op: "wait", frames: 5 },
+                    ...barrier("b-cutscene", "A"),
+                    ...barrier("cutscene-checked", "A"),
+                    { op: "forceCutscene", on: null },
+                    { op: "expectLife", value: 3 },
+                    { op: "expectPvpTaken", count: 4, dropped: 1, damage: 8, reason: "busy" },
+                    ...room("pvpLethal", true),
+                    { op: "setLife", value: 4 },
+                    recover,
+                    ...barrier("b-life-4", "A"),
+                    { op: "expectLife", value: 0, timeoutSec: 10 },
+                    ...barrier("lethal-checked", "A"),
+                    { op: "quit" },
+                ],
+            },
+        ],
+    },
+    {
+        name: "pvp-sword",
+        description: "A's sword on B's dummy: nothing while PvP is off, half a heart once it is on, nothing more inside B's i-frames",
+        timeoutSec: 360,
+        cvars: CVARS,
+        instances: [
+            {
+                name: "A",
+                start: STAGES.southFaron,
+                steps: [
+                    ...connect,
+                    ...meetIn(STAGES.southFaron, "B"),
+                    ...drawSword,
+                    ...barrier("b-marked-off", "B"),
+                    { op: "expectDummyHurtbox", registered: false },
+                    { op: "approachDummy" },
+                    ...swing,
+                    { op: "expectPvpStats", target: "B", sent: 0 },
+                    ...barrier("off-swung", "B"),
+                    ...room("pvpMode", true),
+                    ...barrier("b-marked-on", "B"),
+                    { op: "expectDummyHurtbox", registered: true, timeoutSec: 10 },
+                    { op: "approachDummy" },
+                    // A second press at once: the combo's next cut lands inside B's i-frames.
+                    { op: "walk", frames: 1, stickX: 0, stickY: 0, buttons: 0x200 },
+                    { op: "wait", frames: 10 },
+                    ...swing,
+                    { op: "expectPvpStats", target: "B", applied: 1, damage: 2, timeoutSec: 10 },
+                    // The hit's i-frames flash on our dummy of B (StatusFx: B's damage timer).
+                    { op: "expectDummyStatus", flashesMin: 1, timeoutSec: 2 },
+                    { op: "wait", frames: 60 },
+                    { op: "expectPvpStats", target: "B", applied: 1, damage: 2 },
+                    ...barrier("on-swung", "B"),
+                    { op: "quit" },
+                ],
+            },
+            {
+                name: "B",
+                start: STAGES.southFaron,
+                steps: [
+                    ...connect,
+                    ...meetIn(STAGES.southFaron, "A"),
+                    { op: "setLife", value: 12 },
+                    { op: "wait", frames: 10 },
+                    { op: "markLife" },
+                    ...barrier("b-marked-off", "A"),
+                    { op: "expectLifeDelta", delta: 0, frames: 60 },
+                    ...barrier("off-swung", "A"),
+                    ...room("pvpMode", true),
+                    { op: "markLife" },
+                    ...barrier("b-marked-on", "A"),
+                    { op: "expectLifeDelta", delta: -2, timeoutSec: 20 },
+                    { op: "markLife" },
+                    { op: "expectLifeDelta", delta: 0, frames: 90 },
+                    { op: "expectPvpTaken", count: 1, damage: 2 },
+                    ...barrier("on-swung", "A"),
+                    { op: "quit" },
+                ],
+            },
+        ],
+    },
+    {
+        name: "pvp-team",
+        description: "two players on team red: no hurtbox and a server refusal without friendly fire, a hit with it",
+        timeoutSec: 300,
+        cvars: CVARS,
+        instances: ["A", "B"].map((name) => {
+            const other = name === "A" ? "B" : "A";
+            const common = [
+                { op: "connect", team: "red" },
+                { op: "waitConnected", timeoutSec: 20 },
+                ...meetIn(STAGES.southFaron, other),
+                ...room("pvpMode", true),
+                ...room("pvpFriendlyFire", false),
+            ];
+            if (name === "A") {
+                return {
+                    name,
+                    start: STAGES.southFaron,
+                    steps: [
+                        ...common,
+                        ...drawSword,
+                        ...barrier("b-marked", "B"),
+                        { op: "expectDummyHurtbox", registered: false },
+                        { op: "approachDummy" },
+                        ...swing,
+                        { op: "expectPvpStats", target: "B", sent: 0 },
+                        { op: "sendPvpHit", target: "B", damage: 2 },
+                        { op: "expectPvpResult", target: "B", result: "refused", reason: "team" },
+                        ...barrier("ff-off-checked", "B"),
+                        ...room("pvpFriendlyFire", true),
+                        ...barrier("b-marked-ff", "B"),
+                        { op: "expectDummyHurtbox", registered: true, timeoutSec: 10 },
+                        { op: "approachDummy" },
+                        ...swing,
+                        { op: "expectPvpStats", target: "B", applied: 1, damage: 2, timeoutSec: 10 },
+                        ...barrier("ff-on-checked", "B"),
+                        { op: "quit" },
+                    ],
+                };
+            }
+            return {
+                name,
+                start: STAGES.southFaron,
+                steps: [
+                    ...common,
+                    { op: "setLife", value: 12 },
+                    { op: "wait", frames: 10 },
+                    { op: "markLife" },
+                    ...barrier("b-marked", "A"),
+                    ...barrier("ff-off-checked", "A"),
+                    { op: "expectLifeDelta", delta: 0, frames: 1 },
+                    { op: "expectPvpTaken", count: 0, dropped: 0 },
+                    ...room("pvpFriendlyFire", true),
+                    ...barrier("b-marked-ff", "A"),
+                    { op: "expectLifeDelta", delta: -2, timeoutSec: 20 },
+                    ...barrier("ff-on-checked", "A"),
+                    { op: "quit" },
+                ],
+            };
+        }),
+    },
+    {
+        name: "pvp-wolf",
+        description: "A's sword on wolf B takes a doubled slash; wolf B's attack on A takes the wolf row",
+        timeoutSec: 480,
+        cvars: CVARS,
+        instances: ["A", "B"].map((name) => {
+            const other = name === "A" ? "B" : "A";
+            const common = [
+                { op: "waitStage", stage: STAGES.southFaron.stage, timeoutSec: 90 },
+                ...spawnAs(name === "B" ? "wolf" : "human", STAGES.southFaron),
+                ...connect,
+                ...meetIn(STAGES.southFaron, other),
+                ...drawSword,
+                ...room("pvpMode", true),
+                { op: "setLife", value: 12 },
+                { op: "wait", frames: 10 },
+                { op: "markLife" },
+            ];
+            if (name === "A") {
+                return {
+                    name,
+                    start: STAGES.southFaron,
+                    steps: [
+                        ...common,
+                        { op: "expectRemoteForm", form: "wolf", body: "wolf", timeoutSec: 20 },
+                        ...barrier("both-marked", "B"),
+                        { op: "expectDummyHurtbox", registered: true, timeoutSec: 10 },
+                        { op: "approachDummy" },
+                        ...swing,
+                        // The table's 2, doubled by B's wolf form.
+                        { op: "expectPvpStats", target: "B", applied: 1, damage: 4, timeoutSec: 10 },
+                        ...barrier("a-hit-wolf", "B"),
+                        // Now B bites A.
+                        { op: "expectLifeDelta", delta: -2, timeoutSec: 20 },
+                        { op: "expectPvpTaken", count: 1, damage: 2 },
+                        ...barrier("wolf-done", "B"),
+                        { op: "quit" },
+                    ],
+                };
+            }
+            return {
+                name,
+                start: STAGES.southFaron,
+                steps: [
+                    ...common,
+                    ...barrier("both-marked", "A"),
+                    { op: "expectLifeDelta", delta: -4, timeoutSec: 20 },
+                    { op: "expectPvpTaken", count: 1, damage: 4 },
+                    ...barrier("a-hit-wolf", "A"),
+                    recover,
+                    { op: "expectDummyHurtbox", registered: true, timeoutSec: 10 },
+                    { op: "approachDummy" },
+                    ...swing,
+                    { op: "expectPvpStats", target: "A", applied: 1, damage: 2, timeoutSec: 10 },
+                    ...barrier("wolf-done", "A"),
+                    { op: "quit" },
+                ],
+            };
+        }),
+    },
+    {
+        name: "pvp-guard",
+        description: "B's updates say its shield is up: A's slash rebounds off the dummy, the hit is blocked and B loses no life",
+        timeoutSec: 300,
+        cvars: CVARS,
+        instances: [
+            {
+                name: "A",
+                start: STAGES.southFaron,
+                steps: [
+                    ...connect,
+                    ...meetIn(STAGES.southFaron, "B"),
+                    ...drawSword,
+                    ...room("pvpMode", true),
+                    ...barrier("b-guarding", "B"),
+                    { op: "expectDummyHurtbox", registered: true, guard: true, timeoutSec: 10 },
+                    { op: "approachDummy" },
+                    ...swing,
+                    { op: "expectPvpResult", target: "B", result: "blocked", damage: 0 },
+                    { op: "expectPvpStats", target: "B", blocked: 1, applied: 0 },
+                    ...barrier("guard-checked", "B"),
+                    { op: "quit" },
+                ],
+            },
+            {
+                name: "B",
+                start: STAGES.southFaron,
+                steps: [
+                    ...connect,
+                    ...meetIn(STAGES.southFaron, "A"),
+                    ...room("pvpMode", true),
+                    { op: "setLife", value: 12 },
+                    { op: "wait", frames: 10 },
+                    { op: "markLife" },
+                    // kVisGuard (1 << 5) for about ten seconds.
+                    { op: "patchPlayerUpdate", patch: { vf: 32 }, packets: 300 },
+                    ...barrier("b-guarding", "A"),
+                    { op: "expectPvpTaken", count: 1, blocked: 1, damage: 0, timeoutSec: 20 },
+                    { op: "expectLifeDelta", delta: 0, frames: 30 },
+                    ...barrier("guard-checked", "A"),
+                    { op: "quit" },
+                ],
+            },
+        ],
+    },
+    {
+        name: "pvp-planted",
+        description: "a planted hit lands only when B's damage check takes it: one inside B's i-frames and one during B's event are dropped and cost nothing, the next one lands",
+        timeoutSec: 360,
+        cvars: CVARS,
+        instances: [
+            {
+                name: "A",
+                start: STAGES.southFaron,
+                steps: [
+                    ...connect,
+                    ...meetIn(STAGES.southFaron, "B"),
+                    ...room("pvpMode", true),
+                    ...barrier("b-ready", "B"),
+                    { op: "sendPvpHit", target: "B", damage: 2 },
+                    { op: "expectPvpResult", target: "B", result: "applied", damage: 2 },
+                    // Past the server's 200 ms pair limit, well inside B's i-frames.
+                    { op: "wait", frames: 8 },
+                    { op: "sendPvpHit", target: "B", damage: 2 },
+                    { op: "expectPvpResult", target: "B", result: "dropped", reason: "invincible" },
+                    recover,
+                    ...barrier("iframes-checked", "B"),
+                    ...barrier("b-event", "B"),
+                    { op: "sendPvpHit", target: "B", damage: 2 },
+                    { op: "expectPvpResult", target: "B", result: "dropped", reason: "busy" },
+                    ...barrier("event-checked", "B"),
+                    ...barrier("b-event-end", "B"),
+                    { op: "sendPvpHit", target: "B", damage: 2 },
+                    { op: "expectPvpResult", target: "B", result: "applied", damage: 2 },
+                    { op: "expectPvpStats", target: "B", sent: 4, applied: 2, dropped: 2, damage: 4 },
+                    ...barrier("done", "B"),
+                    { op: "quit" },
+                ],
+            },
+            {
+                name: "B",
+                start: STAGES.southFaron,
+                steps: [
+                    ...connect,
+                    ...meetIn(STAGES.southFaron, "A"),
+                    ...room("pvpMode", true),
+                    { op: "setLife", value: 12 },
+                    recover,
+                    { op: "markLife" },
+                    ...barrier("b-ready", "A"),
+                    ...barrier("iframes-checked", "A"),
+                    { op: "expectLifeDelta", delta: -2, timeoutSec: 5 },
+                    // A compulsory event is no cutscene: the hit is queued, the damage check skips it.
+                    { op: "beginEvent" },
+                    ...barrier("b-event", "A"),
+                    ...barrier("event-checked", "A"),
+                    { op: "expectLifeDelta", delta: -2, timeoutSec: 5 },
+                    { op: "endEvent" },
+                    { op: "wait", frames: 15 },
+                    ...barrier("b-event-end", "A"),
+                    { op: "expectLifeDelta", delta: -4, timeoutSec: 10 },
+                    { op: "expectPvpTaken", count: 2, dropped: 2, damage: 4, reason: "busy" },
+                    ...barrier("done", "A"),
+                    { op: "quit" },
+                ],
+            },
+        ],
+    },
+];

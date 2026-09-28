@@ -203,13 +203,19 @@ Items and projectiles (`StepsItemFx.cpp`):
 | `expectLocalItemFx` | `objects`, `events`, `hookOutTicks`, `ironBallTicks`, `levelSfxTicks`, `minHookDist`, `timeoutSec` | our capture's totals |
 | `markRemoteItemFx` / `expectRemoteItemFx` | many (see the file) | the first peer's dummy's item copies and events since the mark |
 
-Life and enemies (`StepsPvp.cpp`, `StepsEnemy.cpp`):
+Life, PvP and enemies (`StepsPvp.cpp`, `StepsEnemy.cpp`):
 
 | op | fields | does |
 | --- | --- | --- |
 | `setLife` / `markLife` | `value` (12, quarter hearts) | sets / remembers our life |
 | `expectLife` / `expectLifeDelta` | `value`, `min`, `max` / `delta`, `frames`, `timeoutSec` | our life (saved plus the meter's pending change) |
 | `approachDummy` | `dist` (110) | our Link in front of the first peer's dummy, facing it |
+| `sendPvpHit` | `target`, `kind` (`sword`), `damage` (2), `knockback` (`light`, `knockdown`), `dirY`, `blocked` | a real DAMAGE_PLAYER without our collision pass or cooldown |
+| `expectPvpResult` | `target`, `result` (string or list), `reason`, `damage`, `timeoutSec` | the DAMAGE_RESULT of our last hit on `target` |
+| `expectPvpStats` | `target`, `sent`, `applied`, `blocked`, `dropped`, `refused`, `damage`, `timeoutSec` (0) | our counters for hits on `target` (only the fields given) |
+| `expectPvpTaken` | `count` (applied + blocked), `blocked`, `dropped`, `damage`, `reason`, `timeoutSec` (0) | our counters for hits on us |
+| `expectDummyHurtbox` | `registered` (true), `guard`, `timeoutSec` (0) | the first peer's dummy registered its PvP hurtbox this tick |
+| `expectReaction` | `knockback` (`light`, `knockdown`, `none`), `timeoutSec` | our Link plays that reaction (`none`: neither, and no i-frames) |
 | `spawnEnemy` | `name`, `param`, `dx`, `dy`, `dz`, `tag`, `anchor` (`player`, `playerHome`), `setId` | an actor in the current room's layer |
 | `expectEnemyHealth` | `tag`, `health`, `max`, `tracked`, `timeoutSec` | until the tagged actor runs with that health, max and scaling |
 | `setEnemyHealthPercent` | `value`, `timeoutSec` | once we own the room: its enemy health percent |
@@ -221,6 +227,21 @@ Life and enemies (`StepsPvp.cpp`, `StepsEnemy.cpp`):
 | `expectEnemySync` | `sent`, `received`, `applied`, `echoes`, `expired`, `timeoutSec` | the enemy-death sync counters given |
 | `forceGroupFail` | `tags` | tagged Shadow Beasts into their downed wait, so the group is condemned |
 | `dumpEnemies` | | logs the current room's enemies and their scaling |
+
+Epona (`StepsHorse.cpp`):
+
+| op | fields | does |
+| --- | --- | --- |
+| `spawnHorse` | `dist` (250), `side`, `timeoutSec` | our Epona shown in front of our Link (created when the stage has none) |
+| `rideHorse` | `ride` (true), `mode` (`force`, `mount`), `timeoutSec` | on (forced or the real mount) or off our horse |
+| `expectLocalHorse` | `present` (true), `ridden`, `timeoutSec` | our horse as shown and ridden |
+| `setHorseHidden` | `hidden` (true) | our horse's call wait on or off |
+| `expectRemoteHorse` | `count`, `name`, `ridden`, `parked`, `maxDist`, `maxSeatDist`, `card`, `tagLine2`, `onScreen`, `tint`, `vanilla`, `hueGain`, `frames`, `timeoutSec` | peers' puppets as the fields say, held for `frames` ticks |
+| `expectNoRemoteHorse` | `timeoutSec` | no puppet shown, no horse card drawn |
+| `expectRidePrompt` | `target` (`own`, `remote`), `frames` (60), `dist` (110) | GET_ON on our horse / never on the puppet |
+| `expectNotRiding` | `frames` (30) | our Link rides nothing |
+| `clearEnemies` | `radius` (8000) | deletes the enemies near our Link |
+| `horseCamera` | `target` (`remote`, `own`, `both`), `back`, `up`, `side`, `height`, `hold` / `release` | the camera behind our Link looking at the horse; `hold` keeps it (CameraService operator) |
 
 Teleport (`StepsTeleport.cpp`):
 
