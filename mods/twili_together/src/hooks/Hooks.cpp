@@ -1,0 +1,112 @@
+#include "hooks/Hooks.hpp"
+
+#include "core/Log.hpp"
+
+#include <array>
+
+namespace twili::hooks {
+
+// Defined in the hooks_*.cpp files.
+#if TWILI_ENABLE_AUTOTEST
+ModResult installAutotest(std::string& error);
+#endif
+
+namespace {
+
+using Installer = ModResult (*)(std::string& error);
+
+struct GroupInfo {
+    const char* name;
+    Installer installer;
+};
+
+constexpr std::array<GroupInfo, static_cast<size_t>(Group::Count)> kGroups{{
+    {"core", nullptr},
+    {"fx", nullptr},
+    {"pvp", nullptr},
+    {"enemy", nullptr},
+    {"story", nullptr},
+    {"map", nullptr},
+#if TWILI_ENABLE_AUTOTEST
+    {"autotest", installAutotest},
+#else
+    {"autotest", nullptr},
+#endif
+}};
+
+std::array<bool, static_cast<size_t>(Group::Count)> s_active{};
+
+constexpr size_t kMaxScopeDepth = 16;
+std::array<ScopeEntry, kMaxScopeDepth> s_scopes{};
+// Also counts pushes past the array so pops stay balanced.
+size_t s_scopeDepth = 0;
+
+}  // namespace
+
+const char* groupName(Group group) {
+    return kGroups[static_cast<size_t>(group)].name;
+}
+
+ModResult install(Group group, std::string& error) {
+    const auto& info = kGroups[static_cast<size_t>(group)];
+    auto& active = s_active[static_cast<size_t>(group)];
+    if (active) {
+        return MOD_OK;
+    }
+    const ModResult result = info.installer != nullptr ? info.installer(error) : MOD_OK;
+    active = result == MOD_OK;
+    if (active) {
+        TwiliLog.debug("[hooks] group '{}' installed", info.name);
+    } else {
+        TwiliLog.error("[hooks] group '{}' failed: {}", info.name, error);
+    }
+    return result;
+}
+
+bool active(Group group) {
+    return s_active[static_cast<size_t>(group)];
+}
+
+void Scope::push(ScopeKind kind, const void* owner) {
+    if (s_scopeDepth < kMaxScopeDepth) {
+        s_scopes[s_scopeDepth] = {kind, owner};
+    } else if (s_scopeDepth == kMaxScopeDepth) {
+        TwiliLog.warn("[hooks] scope stack overflow (kind {})", static_cast<int>(kind));
+    }
+    s_scopeDepth++;
+}
+
+void Scope::pop(ScopeKind kind, const void* owner) {
+    if (s_scopeDepth == 0) {
+        TwiliLog.warn("[hooks] scope pop without push (kind {})", static_cast<int>(kind));
+        return;
+    }
+    s_scopeDepth--;
+    if (s_scopeDepth < kMaxScopeDepth) {
+        const ScopeEntry entry = s_scopes[s_scopeDepth];
+        if (entry.kind != kind || entry.owner != owner) {
+            TwiliLog.warn("[hooks] unbalanced scope pop (kind {}, expected {})",
+                static_cast<int>(kind), static_cast<int>(entry.kind));
+        }
+        s_scopes[s_scopeDepth] = {};
+    }
+}
+
+ScopeEntry Scope::top() {
+    if (s_scopeDepth == 0 || s_scopeDepth > kMaxScopeDepth) {
+        return {};
+    }
+    return s_scopes[s_scopeDepth - 1];
+}
+
+const void* Scope::owner(ScopeKind kind) {
+    const ScopeEntry entry = top();
+    return entry.kind == kind ? entry.owner : nullptr;
+}
+
+void Scope::clear() {
+    s_scopes = {};
+    s_scopeDepth = 0;
+}
+
+}  // namespace twili::hooks
