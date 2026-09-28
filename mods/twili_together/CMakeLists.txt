@@ -43,6 +43,9 @@ set(TWILI_SOURCES
     src/core/SaveGate.cpp
     src/core/Session.cpp
     src/core/Visibility.cpp
+    src/enemy/EnemyDefeated.cpp
+    src/enemy/EnemyScaling.cpp
+    src/enemy/EnemySync.cpp
     src/fx/ItemFx.cpp
     src/fx/PlayerRecolor.cpp
     src/fx/RemoteTransformFx.cpp
@@ -50,6 +53,7 @@ set(TWILI_SOURCES
     src/fx/WolfFx.cpp
     src/hooks/Hooks.cpp
     src/hooks/hooks_actor.cpp
+    src/hooks/hooks_enemy.cpp
     src/hooks/hooks_fx.cpp
     src/hooks/hooks_map.cpp
     src/hooks/hooks_player.cpp

@@ -3,6 +3,8 @@
 #include "core/Config.hpp"
 #include "core/Log.hpp"
 #include "core/SaveGate.hpp"
+#include "enemy/EnemyScaling.hpp"
+#include "enemy/EnemySync.hpp"
 #include "sync/WorldSync.hpp"
 
 #if TWILI_ENABLE_AUTOTEST
@@ -79,6 +81,7 @@ void Session::resetSessionState() {
     mRoomState = RoomState{};
     mVersionMismatchLogged.clear();
     sync::resetSession();
+    enemy_sync::resetSession();
 }
 
 void Session::connect() {
@@ -201,6 +204,8 @@ void Session::update() {
             break;
         }
     }
+    // Before stage tracking: a kill made right before a stage change goes where the enemy lived.
+    enemy_sync::flush();
     if (isConnected()) {
         tickStageTracking();
         tickSelfColor();
@@ -208,6 +213,8 @@ void Session::update() {
         tickRoomOwnerSettings();
         manageDummyActors();
     }
+    enemy_sync::tick();
+    enemy_scaling::tick();
 }
 
 void Session::onConnected() {
@@ -266,6 +273,7 @@ void Session::onMessage(const nlohmann::json& packet) {
     } else if (type == "UPDATE_ROOM_STATE") {
         handleUpdateRoomState(packet);
     } else if (sync::handlePacket(type, packet)) {
+    } else if (enemy_sync::handlePacket(type, packet)) {
     } else if (type == "AUTOTEST_SIGNAL") {
 #if TWILI_ENABLE_AUTOTEST
         autotest::onSignal(packet.value("instance", std::string{}),

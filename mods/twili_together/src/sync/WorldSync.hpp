@@ -22,6 +22,9 @@ void setLayoutOverrideForTest(const std::string& layout);
 // False for a teammate whose save layout differs from ours; world packets from it are dropped.
 bool layoutCompatible(const Client& client);
 
+// Adds the team, protocol and layout fields every team-scoped packet carries.
+void stampPacket(nlohmann::json& packet, bool addToQueue);
+
 // Swap save data with the team as soon as a stage's save table is live.
 void requestExchange();
 void onStageSaveTableLoaded();

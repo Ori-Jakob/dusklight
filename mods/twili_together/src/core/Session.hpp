@@ -121,6 +121,10 @@ public:
     void onStageSaveTableLoaded(int saveTblNo);
     void onStageSaveTableUnloaded();
     int currentSaveTblNo() const { return mCurrentSaveTblNo; }
+    // The stage and layer we last reported: where the server routes our presence.
+    const char* reportedStageName() const { return mLastStageName; }
+    int8_t reportedLayerNo() const { return mLastLayerNo; }
+    bool clientIsInCurrentLayer(const Client& client) const;
 
     // Owner only; the server rejects everyone else.
     void sendUpdateRoomState();
@@ -130,7 +134,7 @@ public:
 
     // PvP (P5): a hit our collision pass registered on a dummy.
     void queuePvpHit(uint32_t victimId, const pvp::HitReport& hit);
-    // Story sync (P5): we share a cutscene with this client, so its dummy hides.
+    // Story sync: we share a cutscene with this client, so its dummy hides.
     bool storySharedEventWith(uint32_t clientId) const;
 
     // Presence packets may be dropped under pressure; false when this one was.
@@ -165,7 +169,6 @@ private:
 
     void manageDummyActors();
     void destroyDummies();
-    bool clientIsInCurrentLayer(const Client& client) const;
     bool clientHasPlayerInCurrentLayer(const Client& client) const;
     bool hasRemoteClientInCurrentLayer() const;
 

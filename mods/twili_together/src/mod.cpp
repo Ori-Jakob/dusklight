@@ -17,6 +17,8 @@
 #include "core/Layout.hpp"
 #include "core/Log.hpp"
 #include "core/Session.hpp"
+#include "enemy/EnemyScaling.hpp"
+#include "enemy/EnemySync.hpp"
 #include "hooks/Hooks.hpp"
 #include "sync/WorldSync.hpp"
 #include "ui/Ui.hpp"
@@ -85,6 +87,9 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     // Optional: without it peers' item impacts are not shown.
     std::string fxError;
     hooks::install(hooks::Group::Fx, fxError);
+    // Optional: without it enemy sync and scaling stay off.
+    std::string enemyError;
+    hooks::install(hooks::Group::Enemy, enemyError);
 
     ui::init();
 
@@ -120,6 +125,8 @@ MOD_EXPORT ModResult mod_shutdown(ModError*) {
 #endif
     ui::shutdown();
     sync::shutdown();
+    enemy_sync::shutdown();
+    enemy_scaling::shutdown();
     Session::shutdown();
     // Our actors are gone by now; make sure the local Link owns the audio again.
     restoreLocalLinkAudioPtr();

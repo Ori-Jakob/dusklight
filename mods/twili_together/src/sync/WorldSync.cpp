@@ -177,6 +177,10 @@ bool layoutCompatible(const Client& client) {
     return client.layout.empty() || client.layout == localLayout();
 }
 
+void stampPacket(nlohmann::json& packet, bool addToQueue) {
+    stampWorldPacket(packet, addToQueue);
+}
+
 void requestExchange() {
     if (Session::active() && Session::instance().isConnected()) {
         s_state.exchangePending = true;
