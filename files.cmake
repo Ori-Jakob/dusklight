@@ -1531,6 +1531,7 @@ set(DUSK_FILES
         src/dusk/mods/svc/hook.cpp
         src/dusk/mods/svc/host.cpp
         src/dusk/mods/svc/http.cpp
+        src/dusk/mods/svc/interp.cpp
         src/dusk/mods/svc/net.cpp
         src/dusk/mods/svc/net.hpp
         src/dusk/mods/svc/websocket.cpp

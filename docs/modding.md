@@ -1115,6 +1115,29 @@ first in-game frame. Projection matrices match the renderer's WebGPU clip conven
 Camera operators allow overriding the main camera. When an operator callback returns true, its values replace the camera
 state for the current frame. Register and unregister using `register_camera_operator` / `unregister_camera_operator`.
 
+### InterpService ([`mods/svc/interp.h`](../sdk/include/mods/svc/interp.h))
+
+The game simulates at a fixed 30 Hz. With frame interpolation enabled, frames are presented between simulation ticks
+and the renderer blends matrices recorded on the last two ticks. Game code takes part automatically; InterpService lets
+a mod take part when it writes matrices by hand, moves an actor discontinuously, or draws once per presented frame.
+
+```cpp
+IMPORT_OPTIONAL_SERVICE(InterpService, svc_interp);
+
+// After teleporting an actor: show the new position immediately instead of sliding there.
+svc_interp->request_presentation_sync(mod_ctx);
+
+// After writing a weight-envelope matrix by hand (once per simulation tick):
+MtxP slot = model->getWeightAnmMtx(i);
+svc_interp->record_final_mtx(mod_ctx, slot, slot);
+
+// In a per-frame draw: blend between the last two simulation positions.
+const float t = svc_interp->presentation_step(mod_ctx);
+```
+
+`record_final_mtx` keys a recording by the address the renderer reads the matrix from; call `forget_mtx` before that
+memory is freed. `sim_tick_seq` and `sim_rate_hz` expose the simulation clock (the rate changes with the time scale).
+
 ### GameModeService ([`mods/svc/game_mode.h`](../sdk/include/mods/svc/game_mode.h))
 
 Allows a mod to register a game mode with callbacks for key gameplay and save lifecycle events. Registered game modes
