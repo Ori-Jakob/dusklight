@@ -23,7 +23,7 @@ namespace twili::team_game {
 namespace {
 
 // Base64 has no break opportunities; the window wraps these chunks instead.
-constexpr size_t kPermalinkChunk = 40;
+constexpr size_t kPermalinkChunk = 24;
 constexpr auto kTeamColorPushInterval = std::chrono::milliseconds(250);
 
 struct Conflict {
@@ -590,14 +590,17 @@ std::string permalinkRml() {
         return "<p>The team's seed has no permalink to share: the leader's randomizer has no "
                "anti-spoiler log for it, or the seed could not be identified.</p>";
     }
-    std::string rml = "<p>Seed permalink (your team only):</p><p class=\"twili-player-detail\">" +
-                      chunked(team->game.permalink) + "</p>";
+    std::string rml =
+        "<p>Seed permalink (your team only):</p><p>" + chunked(team->game.permalink) + "</p>";
     rml += fmt::format(
-        "<p>To join this seed: 1. Press Copy Permalink. 2. Not in the randomizer yet? Reset from "
-        "the menu bar and pick Randomizer in the launcher. 3. In the Randomizer tab, Seed "
-        "Management: press Paste Permalink (it replaces your randomizer settings), then Generate "
-        "Seed. 4. On file select choose an empty file, pick the seed <b>{}</b> under Play and "
-        "press Start Randomizer.</p>",
+        "<p>To join this seed:</p>"
+        "<p>1. Press Copy Permalink.</p>"
+        "<p>2. Not in the randomizer yet? Reset from the menu bar and pick Randomizer in the "
+        "launcher.</p>"
+        "<p>3. In the Randomizer tab, Seed Management: press Paste Permalink (it replaces your "
+        "randomizer settings), then Generate Seed.</p>"
+        "<p>4. On file select choose an empty file, pick the seed <b>{}</b> under Play and press "
+        "Start Randomizer.</p>",
         ui::escapeRml(
             team->game.name.empty() ? std::string("that was generated") : team->game.name));
     return rml;

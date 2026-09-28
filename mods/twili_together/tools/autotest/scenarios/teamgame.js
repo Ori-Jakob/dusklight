@@ -484,6 +484,7 @@ module.exports = [
                     waitStage(STAGES.linksHouse),
                     ...connect,
                     { op: "expectSyncState", state: "ok" },
+                    { op: "waitPeers", count: 1, timeoutSec: 120 },
                     ...barrier("done", "B", 240),
                     { op: "quit" },
                 ],
