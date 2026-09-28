@@ -118,8 +118,22 @@ autotest's `NetDriver`); without it they fail with "needs the network session".
 
 ### Feature steps
 
-Features register more steps from their own files through `src/autotest/AutoTestSteps.hpp`; each
-file documents its ops at the top.
+Features register more steps from their own files through `src/autotest/AutoTestSteps.hpp`.
+
+Motion (`StepsMotion.cpp`):
+
+| op | fields | does |
+| --- | --- | --- |
+| `poseSelfTest` | | playout buffer rules and the cutscene classifier; needs no peer |
+| `waitRoomState` | `key`, `value`, `timeoutSec` | until the room state's `key` equals `value` |
+| `forceCutscene` | `on` (true, false, null = real events) | forces our cutscene state |
+| `beginEvent` / `endEvent` | `kind` (`compulsory`), `timeoutSec` | orders a compulsory event / resets the running one |
+| `expectDummyHidden` | `hidden`, `timeoutSec` | every peer in our layer has a dummy, hidden (or shown) |
+| `expectPeerFlag` | `flag` (`inCutscene`, `wolf`), `set`, `timeoutSec` | the PLAYER_UPDATE presence flag of every peer in our layer |
+| `measureDummyMotion` | `frames`, `settleFrames`, `minSpeed`, `maxBadRatio`, `self` | per-tick motion of the first peer's dummy (or our player) and its playout clock; fails on stalls and bursts |
+| `dumpDummies` | | logs every remote client's pose and dummy state |
+| `teleportSelf` | `dx`, `dy`, `dz` | moves our player at once |
+| `expectDummyTeleport` | `minDist`, `maxPreStep`, `timeoutSec` | the first peer's dummy jumps `minDist` within one frame, without a slide before |
 
 ## Adding a scenario
 
@@ -129,6 +143,10 @@ exporting an array. A scenario has:
 - `name`, `description`, `timeoutSec`;
 - `cvars`: extra `--cvar` overrides for every instance;
 - `serverEnv`: environment for the relay server (network scenarios only);
+- `transport`: `"tcp"` connects over `tcp://` to the relay's TCP port instead of WebSocket;
+- `restartServer`: `{afterSignal, downMs}` kills the relay once it logs that AUTOTEST_SIGNAL and
+  starts it again on the same ports `downMs` later (default 3000); the scenario fails if it never
+  happened;
 - `server`: force (`true`) or suppress (`false`) the relay server; by default it runs when a step
   uses a network op;
 - `enableMods`: ids of other mods next to the exe to keep enabled (`MODS` in `lib.js`);

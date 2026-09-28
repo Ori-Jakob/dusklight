@@ -36,7 +36,7 @@ const NET_OPS = new Set(["connect", "disconnect", "waitConnected", "waitPeers", 
     "waitNoDummies", "checkDummies", "expectPeers", "signal", "waitSignal"]);
 // Fail any scenario: a partly inlined hook target, or our mod failing.
 const GLOBAL_REJECT = [
-    new RegExp(`was inlined into callers.*${MOD_ID.replace(/\./g, "\\.")}`),
+    new RegExp(`for ${MOD_ID.replace(/\./g, "\\.")} was inlined into callers`),
     new RegExp(`${MOD_ID.replace(/\./g, "\\.")}.*failed: `),
 ];
 
@@ -186,27 +186,51 @@ function usesNetwork(scenario) {
     return scenario.server ?? scenario.instances.some((i) => i.steps.some((s) => NET_OPS.has(s.op)));
 }
 
-async function startServer(outDir, extraEnv = {}) {
+// `ports` restarts on the ports of an earlier run; the default picks free ones.
+async function startServer(outDir, extraEnv = {}, ports = null) {
     const logPath = path.join(outDir, "server.log");
-    const proc = spawn(process.execPath, [SERVER_JS, "0"], {
+    const args = ports ? [SERVER_JS, String(ports.port), String(ports.tcpPort)] : [SERVER_JS, "0"];
+    const proc = spawn(process.execPath, args, {
         env: { ...process.env, ...extraEnv, TT_LOG_PATH: logPath },
         stdio: ["ignore", "pipe", "pipe"],
     });
-    const port = await new Promise((resolve, reject) => {
+    const [port, tcpPort] = await new Promise((resolve, reject) => {
         let out = "";
         const timer = setTimeout(() => reject(new Error(`server did not start:\n${out}`)), 10000);
         proc.stdout.on("data", (d) => {
             out += d.toString();
-            const m = out.match(/listening on port (\d+)/);
-            if (m) {
+            const ws = out.match(/listening on port (\d+)/);
+            const tcp = out.match(/tcp relay on port (\d+)/);
+            if (ws && tcp) {
                 clearTimeout(timer);
-                resolve(parseInt(m[1], 10));
+                resolve([parseInt(ws[1], 10), parseInt(tcp[1], 10)]);
             }
         });
         proc.stderr.on("data", (d) => (out += d.toString()));
         proc.on("exit", (code) => reject(new Error(`server exited (${code}):\n${out}`)));
     });
-    return { proc, port, logPath };
+    return { proc, port, tcpPort, logPath, extraEnv, outDir };
+}
+
+// scenario.restartServer: once the relay logs AUTOTEST_SIGNAL `afterSignal`, it is killed and
+// started again on the same ports `downMs` later; the clients have to find it on their own.
+async function watchServerRestart(scenario, server) {
+    const spec = scenario.restartServer;
+    if (!spec || server.restarted || server.restarting) return;
+    const log = readText(server.logPath);
+    if (!new RegExp(`AUTOTEST_SIGNAL instance=\\S+ name=${spec.afterSignal}\\b`).test(log)) return;
+    server.restarting = true;
+    console.log(`    relay: killing it after signal '${spec.afterSignal}', restart in ${spec.downMs ?? 3000} ms`);
+    await new Promise((resolve) => {
+        server.proc.once("exit", resolve);
+        server.proc.kill();
+    });
+    await sleep(spec.downMs ?? 3000);
+    const next = await startServer(server.outDir, server.extraEnv, server);
+    server.proc = next.proc;
+    server.restarted = true;
+    server.restarting = false;
+    console.log(`    relay: restarted on ${server.port}/${server.tcpPort}`);
 }
 
 function killTree(pid) {
@@ -277,7 +301,8 @@ async function runScenario(scenario, opts, outRoot) {
         if (!fs.existsSync(SERVER_JS)) throw new Error(`scenario ${scenario.name} needs the relay server (${SERVER_JS})`);
         server = await startServer(outDir, scenario.serverEnv);
     }
-    const url = server ? `ws://127.0.0.1:${server.port}` : "";
+    const url = !server ? "" :
+        scenario.transport === "tcp" ? `tcp://127.0.0.1:${server.tcpPort}` : `ws://127.0.0.1:${server.port}`;
     console.log(`\n=== ${scenario.name}: ${scenario.description}`);
     console.log(`    ${server ? `server ${url}` : "no server"}, timeout ${timeoutSec}s, out ${outDir}`);
 
@@ -341,6 +366,7 @@ async function runScenario(scenario, opts, outRoot) {
     const resultSeen = new Map();
     while (procs.some((p) => p.exitCode === null)) {
         await sleep(500);
+        if (server) await watchServerRestart(scenario, server);
         for (const p of procs) {
             if (p.exitCode !== null || p.killedForCrash) continue;
             const log = findSlotLog(p.dataDir);
@@ -421,6 +447,10 @@ async function runScenario(scenario, opts, outRoot) {
             console.log(`        ${a.warnings.length} Twili-Together warning(s):`);
             for (const l of a.warnings.slice(0, 5)) console.log(`          ${l}`);
         }
+    }
+    if (scenario.restartServer && server && !server.restarted) {
+        pass = false;
+        console.log(`    FAIL: the relay was never restarted (signal '${scenario.restartServer.afterSignal}' not seen)`);
     }
     if (server) {
         report.serverErrors = readText(server.logPath).split(/\r?\n/).filter((l) => /ws error|rejected|error/i.test(l));
