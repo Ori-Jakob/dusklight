@@ -24,7 +24,6 @@ enum class Var : uint8_t {
     SyncEnemyDeaths,
     CutsceneSync,
     HidePlayersInCutscene,
-    EnemyCountMultiplier,
     EnemyHealthMultiplier,
     StoryPrompts,
     ItemToasts,

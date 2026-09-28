@@ -908,11 +908,10 @@ test("room state values are type-checked", () => withServer(async (mk) => {
     const b = mk();
     await a.join();
     await b.join();
-    a.send({ type: "UPDATE_ROOM_STATE", state: { pvpMode: "yes", syncWorldState: null, enemyCountMultiplier: "9", enemyHealthMultiplier: 1e9 } });
+    a.send({ type: "UPDATE_ROOM_STATE", state: { pvpMode: "yes", syncWorldState: null, enemyHealthMultiplier: 1e9 } });
     const got = await b.waitType("UPDATE_ROOM_STATE");
     assert.equal(typeof got.state.pvpMode, "boolean");
     assert.equal(got.state.syncWorldState, true, "invalid value keeps the previous setting");
-    assert.equal(got.state.enemyCountMultiplier, 100);
     assert.equal(got.state.enemyHealthMultiplier, 500, "multiplier is clamped to the UI range");
 }));
 

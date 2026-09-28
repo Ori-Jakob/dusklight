@@ -332,8 +332,6 @@ const RoomBool kVisibilityOptions[] = {
 };
 
 const RoomInt kDifficultyOptions[] = {
-    {Var::EnemyCountMultiplier, &RoomState::enemyCountMultiplier, "Enemy Count",
-        "<p>Multiplier for enemy spawn count. 100% is normal.</p>"},
     {Var::EnemyHealthMultiplier, &RoomState::enemyHealthMultiplier, "Enemy Health",
         "<p>Health of regular enemies. 100% is normal. Bosses, mini-bosses and enemies that "
         "always die in one hit keep normal health.</p>"},

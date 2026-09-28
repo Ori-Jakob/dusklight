@@ -30,7 +30,6 @@ RoomState Session::roomStateFromSettings() const {
     state.syncNPCs = config::getBool(Var::SyncEnemyDeaths);
     state.cutsceneSync = config::getBool(Var::CutsceneSync);
     state.hidePlayersInCutscene = config::getBool(Var::HidePlayersInCutscene);
-    state.enemyCountMultiplier = static_cast<int>(config::getInt(Var::EnemyCountMultiplier));
     state.enemyHealthMultiplier = static_cast<int>(config::getInt(Var::EnemyHealthMultiplier));
     return state;
 }

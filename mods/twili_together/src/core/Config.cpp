@@ -34,7 +34,6 @@ constexpr VarDef kVars[] = {
     {Var::SyncEnemyDeaths, "sync_enemy_deaths", CONFIG_VAR_BOOL},
     {Var::CutsceneSync, "cutscene_sync", CONFIG_VAR_BOOL, true},
     {Var::HidePlayersInCutscene, "hide_players_in_cutscene", CONFIG_VAR_BOOL},
-    {Var::EnemyCountMultiplier, "enemy_count_multiplier", CONFIG_VAR_INT, false, 100},
     {Var::EnemyHealthMultiplier, "enemy_health_multiplier", CONFIG_VAR_INT, false, 100},
     {Var::StoryPrompts, "story_prompts", CONFIG_VAR_BOOL, true},
     {Var::ItemToasts, "item_toasts", CONFIG_VAR_BOOL, true},

@@ -228,7 +228,6 @@ function defaultRoomState() {
         syncNPCs: false,
         cutsceneSync: true,
         hidePlayersInCutscene: false,
-        enemyCountMultiplier: 100,
         enemyHealthMultiplier: 100,
     };
 }
@@ -457,7 +456,6 @@ function updateCachedClientState(client, packet) {
 
 // Unknown keys and wrong types are ignored; numbers are clamped.
 const ROOM_STATE_LIMITS = {
-    enemyCountMultiplier: [100, 500],
     enemyHealthMultiplier: [100, 500],
 };
 

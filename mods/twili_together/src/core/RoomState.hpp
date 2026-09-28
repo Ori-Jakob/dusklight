@@ -22,7 +22,6 @@ struct RoomState {
     bool syncNPCs = false;
     bool cutsceneSync = true;
     bool hidePlayersInCutscene = false;
-    int enemyCountMultiplier = 100;   // percent
     int enemyHealthMultiplier = 100;  // percent
 
     // Compares everything except ownerClientId.
@@ -33,7 +32,6 @@ struct RoomState {
                syncWorldState == o.syncWorldState && shareWoodenShield == o.shareWoodenShield &&
                syncNPCs == o.syncNPCs && cutsceneSync == o.cutsceneSync &&
                hidePlayersInCutscene == o.hidePlayersInCutscene &&
-               enemyCountMultiplier == o.enemyCountMultiplier &&
                enemyHealthMultiplier == o.enemyHealthMultiplier;
     }
 
@@ -51,7 +49,6 @@ struct RoomState {
             {"syncNPCs", syncNPCs},
             {"cutsceneSync", cutsceneSync},
             {"hidePlayersInCutscene", hidePlayersInCutscene},
-            {"enemyCountMultiplier", enemyCountMultiplier},
             {"enemyHealthMultiplier", enemyHealthMultiplier},
         };
     }
@@ -71,7 +68,6 @@ struct RoomState {
         syncNPCs = j.value("syncNPCs", syncNPCs);
         cutsceneSync = j.value("cutsceneSync", cutsceneSync);
         hidePlayersInCutscene = j.value("hidePlayersInCutscene", hidePlayersInCutscene);
-        enemyCountMultiplier = j.value("enemyCountMultiplier", enemyCountMultiplier);
         enemyHealthMultiplier = j.value("enemyHealthMultiplier", enemyHealthMultiplier);
     }
 };
