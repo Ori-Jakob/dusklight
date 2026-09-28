@@ -5,6 +5,8 @@
 #include "core/SaveGate.hpp"
 #include "enemy/EnemyScaling.hpp"
 #include "enemy/EnemySync.hpp"
+#include "game/GameIdentity.hpp"
+#include "game/TeamGame.hpp"
 #include "story/Story.hpp"
 #include "sync/WorldSync.hpp"
 #include "teleport/Teleport.hpp"
@@ -85,6 +87,7 @@ void Session::resetSessionState() {
     // The server knows nothing of our horse in a new session.
     mHorseStateSent = false;
     sync::resetSession();
+    team_game::resetSession();
     enemy_sync::resetSession();
     story::resetSession();
     pvp::resetSession();
@@ -183,6 +186,10 @@ bool Session::isTeammate(const Client& client) const {
     return client.teamId == selfTeamId();
 }
 
+bool Session::memberMaySync(uint32_t clientId) const {
+    return team_game::memberMaySync(clientId);
+}
+
 bool Session::send(const nlohmann::json& packet, net::Delivery delivery) {
     return mLink.send(packet, delivery);
 }
@@ -212,6 +219,8 @@ void Session::update() {
     }
     // Before stage tracking: a kill made right before a stage change goes where the enemy lived.
     enemy_sync::flush();
+    // Detects our game even while offline, so it is known at the handshake.
+    team_game::tick();
     if (isConnected()) {
         tickStageTracking();
         tickSelfColor();
@@ -285,6 +294,7 @@ void Session::onMessage(const nlohmann::json& packet) {
     } else if (type == "UPDATE_ROOM_STATE") {
         handleUpdateRoomState(packet);
     } else if (sync::handlePacket(type, packet)) {
+    } else if (team_game::handlePacket(type, packet)) {
     } else if (teleport::handlePacket(type, packet)) {
     } else if (enemy_sync::handlePacket(type, packet)) {
     } else if (story::handlePacket(type, packet)) {
@@ -320,6 +330,7 @@ void Session::sendHandshake() {
         {"roomId", trimAsciiWhitespace(mParams.room)},
         {"sessionKey", mSessionKey},
         {"color", {{"r", color[0]}, {"g", color[1]}, {"b", color[2]}}},
+        {"game", game_identity::handshakeJson()},
     });
 }
 

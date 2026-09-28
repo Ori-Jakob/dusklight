@@ -40,6 +40,8 @@ constexpr VarDef kVars[] = {
     {Var::ItemToasts, "item_toasts", CONFIG_VAR_BOOL, true},
     {Var::ItemToastsOwn, "item_toasts_own", CONFIG_VAR_BOOL},
     {Var::AutoReconnect, "auto_reconnect", CONFIG_VAR_BOOL, true},
+    {Var::RandoAllowUnverified, "rando_allow_unverified", CONFIG_VAR_BOOL},
+    {Var::TeleportAcrossTeams, "teleport_across_teams", CONFIG_VAR_BOOL},
 #if TWILI_ENABLE_AUTOTEST
     {Var::AutotestScript, "autotest_script", CONFIG_VAR_STRING},
 #endif
@@ -161,6 +163,34 @@ double hostFloat(const char* key, double fallback) {
     }
     double value = fallback;
     if (it->second == 0 || svc_config->get_float(mod_ctx, it->second, &value) != MOD_OK) {
+        return fallback;
+    }
+    return value;
+}
+
+std::string hostString(const char* key, const std::string& fallback) {
+    static std::unordered_map<std::string, ConfigVarHandle> s_hostHandles;
+    if (!SERVICE_HAS(svc_config, ConfigService, find_host_var) ||
+        svc_config->find_host_var == nullptr)
+    {
+        return fallback;
+    }
+    auto it = s_hostHandles.find(key);
+    if (it == s_hostHandles.end()) {
+        ConfigVarHandle found = 0;
+        if (svc_config->find_host_var(mod_ctx, key, CONFIG_VAR_STRING, &found) != MOD_OK) {
+            found = 0;
+        }
+        it = s_hostHandles.emplace(key, found).first;
+    }
+    size_t length = 0;
+    if (it->second == 0 ||
+        svc_config->get_string(mod_ctx, it->second, nullptr, 0, &length) != MOD_OK)
+    {
+        return fallback;
+    }
+    std::string value(length, '\0');
+    if (svc_config->get_string(mod_ctx, it->second, value.data(), length + 1, nullptr) != MOD_OK) {
         return fallback;
     }
     return value;

@@ -4,6 +4,7 @@
 
 #include <mods/svc/ui.h>
 
+#include <iterator>
 #include <utility>
 
 namespace twili::ui {
@@ -14,11 +15,11 @@ struct Prompt {
     StoryPromptProps props;
 };
 
-// [0] the gameplay prompt, [1] the catch-up confirmation.
-Prompt s_prompts[2];
+// [0] the gameplay prompt, [1] the catch-up confirmation, [2] team game questions.
+Prompt s_prompts[3];
 
 Prompt& slot(void* userData) {
-    return s_prompts[reinterpret_cast<uintptr_t>(userData) & 1];
+    return s_prompts[reinterpret_cast<uintptr_t>(userData) % std::size(s_prompts)];
 }
 
 // The dialog closes itself after an action or a dismiss: forget it before running the callback,
@@ -92,6 +93,14 @@ bool storyPromptShowing() {
 
 void pushStoryConfirm(StoryPromptProps props) {
     push(1, std::move(props));
+}
+
+void showTeamPrompt(StoryPromptProps props) {
+    push(2, std::move(props));
+}
+
+bool teamPromptShowing() {
+    return s_prompts[2].handle != 0;
 }
 
 void forgetStoryPrompts() {

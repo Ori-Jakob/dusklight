@@ -23,6 +23,10 @@ bool storyPromptShowing();
 // The "Catch up to story" confirmation over the Twili-Together window.
 void pushStoryConfirm(StoryPromptProps props);
 
+// Team game questions (unverified randomizer match, switching the team's game).
+void showTeamPrompt(StoryPromptProps props);
+bool teamPromptShowing();
+
 // Any host or mod document visible (they take the gamepad).
 bool anyDocumentVisible();
 

@@ -4,6 +4,7 @@
 #include "core/Layout.hpp"
 #include "core/Log.hpp"
 #include "core/Session.hpp"
+#include "game/TeamGame.hpp"
 #include "story/StoryUi.hpp"
 #include "teleport/Teleport.hpp"
 #include "ui/ColorMath.hpp"
@@ -15,6 +16,7 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <map>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -41,15 +43,25 @@ struct Live {
     UiElementHandle color = 0;
     UiElementHandle tagPreview = 0;
     UiElementHandle roomInfo = 0;
+    UiElementHandle teamInfo = 0;
+    UiElementHandle teamPermalink = 0;
+    UiElementHandle teamColor = 0;
+    bool teamColorShown = false;
     UiElementHandle players = 0;
     std::array<UiElementHandle, kTeleportSlots> teleport{};
     std::array<uint32_t, kTeleportSlots> teleportIds{};
     UiElementHandle teleportStatus = 0;
+    // [0] Make ... Room Owner, [1] Make ... Team Leader.
+    std::array<std::array<UiElementHandle, kTeleportSlots>, 2> promote{};
+    std::array<std::array<uint32_t, kTeleportSlots>, 2> promoteIds{};
+    std::array<std::array<std::string, kTeleportSlots>, 2> lastPromoteLabels;
     UiElementHandle storyStatus = 0;
     UiElementHandle catchUp = 0;
     std::string lastStatus;
     std::string lastTag;
     std::string lastRoomInfo;
+    std::string lastTeamInfo;
+    std::string lastTeamPermalink;
     std::string lastPlayers;
     std::array<std::string, kTeleportSlots> lastTeleportLabels;
     std::string lastTeleportStatus;
@@ -61,6 +73,8 @@ Live s_live;
 // The Mods window panel.
 UiElementHandle s_panelStatus = 0;
 std::string s_panelLastStatus;
+UiElementHandle s_panelTeam = 0;
+std::string s_panelLastTeam;
 
 void addControl(UiElementHandle pane, UiControlDesc& control, UiElementHandle* out = nullptr) {
     if (svc_ui->pane_add_control(mod_ctx, pane, &control, out) != MOD_OK) {
@@ -181,7 +195,8 @@ ModResult buildConnectionTab(ModContext*, UiWindowHandle, UiElementHandle left, 
     addString(left, Var::DisplayName, "Name",
         "<p>Your name on your name tag. Takes effect on the next connect.</p>", 20);
     addString(left, Var::TeamId, "Team",
-        "<p>Players on the same team share flags, items and save progress. Takes effect on the "
+        "<p>Players on the same team share flags, items and save progress while they play the "
+        "same game, and show in the team's colour. Other teams stay visible. Takes effect on the "
         "next connect.</p>",
         16);
     addString(left, Var::RoomId, "Room",
@@ -311,6 +326,9 @@ const RoomBool kVisibilityOptions[] = {
         "<p>Show other players' positions on the minimap and the dungeon map.</p>"},
     {Var::TeleportMode, &RoomState::teleportMode, "Teleport to Player",
         "<p>Allow players to teleport to each other from the Players tab.</p>"},
+    {Var::TeleportAcrossTeams, &RoomState::teleportAcrossTeams, "Teleport Across Teams",
+        "<p>Allow teleporting to players of other teams. Teams playing different games (vanilla, "
+        "different randomizer seeds) never teleport to each other.</p>"},
 };
 
 const RoomInt kDifficultyOptions[] = {
@@ -395,9 +413,127 @@ std::string roomInfoRml() {
     return "Room settings are controlled by " + escapeRml(clientName(ownerId)) + ".";
 }
 
+// --- Your team (Room tab)
+
+void onCopyPermalink(ModContext*, void*) {
+    team_game::copyPermalink();
+}
+
+bool noPermalink(ModContext*, void*) {
+    return team_game::ownPermalink().empty();
+}
+
+void onClaimTeamGame(ModContext*, void*) {
+    team_game::claimTeamGame();
+}
+
+bool cannotClaim(ModContext*, void*) {
+    return !team_game::conflictOpen();
+}
+
+void onAllowUnverified(ModContext*, void*) {
+    team_game::allowUnverified();
+}
+
+// The team leader's picker: the team colour everyone shows the team's players in.
+void getTeamColor(ModContext*, void*, UiControlValue* out) {
+    static std::string s_value;
+    color::Rgb8 c;
+    s_value = team_game::teamColor(c.r, c.g, c.b) ? color::formatConfig(c) : std::string{};
+    out->string_value = s_value.c_str();
+}
+
+void setTeamColor(ModContext*, void*, const UiControlValue* value) {
+    if (const auto parsed =
+            color::parseHex(value->string_value != nullptr ? value->string_value : ""))
+    {
+        team_game::setTeamColor(parsed->r, parsed->g, parsed->b);
+    }
+}
+
+bool cannotSetTeamColor(ModContext*, void*) {
+    return !team_game::canSetTeamColor();
+}
+
+bool nothingToConfirm(ModContext*, void*) {
+    return team_game::localSync() != team_game::Sync::Unverified || team_game::unverifiedAllowed();
+}
+
+// Hidden while empty.
+void setOptionalRml(UiElementHandle elem, std::string& last, const std::string& rml) {
+    const std::string shown = rml.empty() ? std::string(" ") : rml;
+    if (elem != 0 && shown != last) {
+        svc_ui->elem_set_visible(mod_ctx, elem, !rml.empty());
+        setRml(elem, last, shown);
+    }
+}
+
+void addTeamSection(UiElementHandle left) {
+    svc_ui->pane_add_section(mod_ctx, left, "Your Team");
+    s_live.lastTeamInfo = team_game::statusRml();
+    s_live.teamInfo = addRml(left, s_live.lastTeamInfo);
+    const std::string permalink = team_game::permalinkRml();
+    s_live.lastTeamPermalink = permalink.empty() ? std::string(" ") : permalink;
+    s_live.teamPermalink = addRml(left, s_live.lastTeamPermalink);
+    if (s_live.teamPermalink != 0 && permalink.empty()) {
+        svc_ui->elem_set_visible(mod_ctx, s_live.teamPermalink, false);
+    }
+
+    UiControlDesc copy = UI_CONTROL_DESC_INIT;
+    copy.kind = UI_CONTROL_BUTTON;
+    copy.label = "Copy Permalink";
+    copy.help_rml = "<p>Copy your team's randomizer seed permalink, to paste it in the "
+                    "Randomizer tab and generate the same seed.</p>";
+    copy.on_pressed = onCopyPermalink;
+    copy.is_disabled = noPermalink;
+    addControl(left, copy);
+
+    UiControlDesc claim = UI_CONTROL_DESC_INIT;
+    claim.kind = UI_CONTROL_BUTTON;
+    claim.label = "Make My Game the Team's Game";
+    claim.help_rml = "<p>Team leader only: switch the team to the game you are playing. Teammates "
+                     "stop syncing until they load it too.</p>";
+    claim.on_pressed = onClaimTeamGame;
+    claim.is_disabled = cannotClaim;
+    addControl(left, claim);
+
+    UiControlDesc confirm = UI_CONTROL_DESC_INIT;
+    confirm.kind = UI_CONTROL_BUTTON;
+    confirm.label = "Sync Unverified Match";
+    confirm.help_rml =
+        "<p>Your randomizer game matches the team's by item probes only. Sync anyway "
+        "for this session.</p>";
+    confirm.on_pressed = onAllowUnverified;
+    confirm.is_disabled = nothingToConfirm;
+    addControl(left, confirm);
+
+    UiControlDesc teamColor = UI_CONTROL_DESC_INIT;
+    teamColor.kind = UI_CONTROL_COLOR;
+    teamColor.label = "Team Colour";
+    teamColor.help_rml = "<p>Team leader only: everyone sees your team's players in this colour "
+                         "(tunic, name tag, map marker). Players without a team keep theirs.</p>";
+    teamColor.binding = UI_BINDING_CALLBACKS;
+    teamColor.get = getTeamColor;
+    teamColor.set = setTeamColor;
+    teamColor.is_disabled = cannotSetTeamColor;
+    teamColor.color_presets = kColorPresets;
+    teamColor.color_preset_count = std::size(kColorPresets);
+    addControl(left, teamColor, &s_live.teamColor);
+    s_live.teamColorShown = team_game::canSetTeamColor();
+    if (s_live.teamColor != 0 && !s_live.teamColorShown) {
+        svc_ui->elem_set_visible(mod_ctx, s_live.teamColor, false);
+    }
+
+    addToggle(left, Var::RandoAllowUnverified, "Always Sync Unverified Randomizer Games",
+        "<p>Sync with teammates whose randomizer game can only be compared by probing item checks "
+        "(no generated seed here matches it), without asking.</p>");
+}
+
 ModResult buildRoomTab(ModContext*, UiWindowHandle, UiElementHandle left, UiElementHandle,
     void*, ModError*) {
     s_live = {};
+    addTeamSection(left);
+    svc_ui->pane_add_section(mod_ctx, left, "Room");
     s_live.lastRoomInfo = roomInfoRml();
     s_live.roomInfo = addRml(left, s_live.lastRoomInfo);
     addRoomBools(left, "Synchronization", kSyncOptions, std::size(kSyncOptions));
@@ -425,48 +561,114 @@ ModResult buildRoomTab(ModContext*, UiWindowHandle, UiElementHandle left, UiElem
 
 ModResult updateRoomTab(ModContext*, void*, ModError*) {
     setRml(s_live.roomInfo, s_live.lastRoomInfo, roomInfoRml());
+    setRml(s_live.teamInfo, s_live.lastTeamInfo, team_game::statusRml());
+    setOptionalRml(s_live.teamPermalink, s_live.lastTeamPermalink, team_game::permalinkRml());
+    if (const bool leader = team_game::canSetTeamColor();
+        s_live.teamColor != 0 && leader != s_live.teamColorShown)
+    {
+        s_live.teamColorShown = leader;
+        svc_ui->elem_set_visible(mod_ctx, s_live.teamColor, leader);
+    }
     return MOD_OK;
 }
 
 // --- Players tab
 
+const team_game::Team* findTeam(const std::string& teamId) {
+    const auto it = team_game::teams().find(teamId);
+    return it == team_game::teams().end() ? nullptr : &it->second;
+}
+
+// "Team red · Randomizer 1.0.5: Soldier Beth Dragonfly"; other teams show the mode and seed name.
+std::string teamHeaderRml(const std::string& teamId) {
+    std::string text = teamId.empty() ? std::string("No team") : "Team " + teamId;
+    std::string swatch;
+    if (const team_game::Team* team = findTeam(teamId)) {
+        text += " · " + team_game::gameLabel(team->game);
+        if (team->sameGameAsYours) {
+            text += " (same game as your team)";
+        }
+        if (team->hasColor) {
+            swatch = fmt::format(
+                "<span class=\"twili-swatch\" style=\"background-color: {};\"></span> ",
+                colorCss(team->colorR, team->colorG, team->colorB));
+        }
+    }
+    return "<p>" + swatch + "<b>" + escapeRml(text) + "</b></p>";
+}
+
+std::string playerRml(uint32_t id, const Client& c, bool ownTeam) {
+    const Session& session = Session::instance();
+    std::string tags;
+    if (c.self) tags += " (you)";
+    if (id == session.roomState().ownerClientId) tags += " [room owner]";
+    if (const team_game::Team* team = findTeam(c.teamId);
+        team != nullptr && team->ownerClientId == id)
+    {
+        tags += " [team leader]";
+    }
+    if (!c.online) tags += " [offline]";
+    if (!c.self && c.protocolVersion != Session::kProtocolVersion) {
+        tags += " [version mismatch]";
+    } else if (!c.self && !c.layout.empty() && c.layout != layout::saveLayoutHex()) {
+        tags += " [incompatible version]";
+    }
+    const std::string where =
+        !c.isSaveLoaded ? "no save loaded"
+                        : fmt::format("{} layer {} room {}",
+                              std::string(c.stageName, strnlen(c.stageName, sizeof(c.stageName))),
+                              c.layerNo, c.roomNo);
+    std::string rml = fmt::format(
+        "<p><span class=\"twili-swatch\" style=\"background-color: {};\"></span> {}{}</p>",
+        colorCss(c.colorR, c.colorG, c.colorB), escapeRml(clientName(id)), escapeRml(tags));
+    std::string details = where;
+    // The form comes with PLAYER_UPDATE, which only players in our stage and layer send.
+    if (c.isSaveLoaded && !c.self && c.hasPlayerUpdate) {
+        details += c.transformStatus != 0 ? " (wolf)" : " (human)";
+    }
+    // Teammates: may they sync with us; other teams: what they play.
+    if (const team_game::Member* m = team_game::member(id)) {
+        if (ownTeam) {
+            details += " · " + team_game::memberBadge(*m);
+        } else if (m->inGame) {
+            details += " · " + (m->mode.empty() ? m->kind : m->mode) +
+                       (m->name.empty() ? "" : ": " + m->name);
+        }
+    }
+    if (!c.modVersion.empty()) {
+        details += " · " + c.modVersion;
+    }
+    rml += "<p class=\"twili-player-detail\">" + escapeRml(details) + "</p>";
+    if (const std::string story = story::clientLine(id); !story.empty()) {
+        rml += "<p class=\"twili-player-detail\">Story: " + escapeRml(story) + "</p>";
+    }
+    return rml;
+}
+
+// Grouped by team, ours first.
 std::string playersRml() {
     const Session& session = Session::instance();
     if (!session.isConnected()) {
         return "Not connected.";
     }
-    std::string rml;
+    std::map<std::string, std::vector<uint32_t>> others;
+    std::vector<uint32_t> ours;
     for (const auto& [id, c] : session.clients()) {
-        std::string tags;
-        if (c.self) tags += " (you)";
-        if (id == session.roomState().ownerClientId) tags += " [owner]";
-        if (!c.online) tags += " [offline]";
-        if (!c.self && c.protocolVersion != Session::kProtocolVersion) {
-            tags += " [version mismatch]";
-        } else if (!c.self && !c.layout.empty() && c.layout != layout::saveLayoutHex()) {
-            tags += " [incompatible version]";
+        (c.teamId == session.selfTeamId() ? ours : others[c.teamId]).push_back(id);
+    }
+    std::string rml;
+    const auto addGroup = [&](const std::string& teamId, const std::vector<uint32_t>& ids) {
+        if (ids.empty()) {
+            return;
         }
-        const std::string where =
-            !c.isSaveLoaded ? "no save loaded"
-                            : fmt::format("{} layer {} room {}",
-                                  std::string(c.stageName, strnlen(c.stageName, sizeof(c.stageName))),
-                                  c.layerNo, c.roomNo);
-        rml += fmt::format(
-            "<p><span class=\"twili-swatch\" style=\"background-color: {};\"></span> {}{}</p>",
-            colorCss(c.colorR, c.colorG, c.colorB), escapeRml(clientName(id)), escapeRml(tags));
-        std::string details = where;
-        // The form comes with PLAYER_UPDATE, which only players in our stage and layer send.
-        if (c.isSaveLoaded && !c.self && c.hasPlayerUpdate) {
-            details += c.transformStatus != 0 ? " (wolf)" : " (human)";
+        rml += teamHeaderRml(teamId);
+        for (const uint32_t id : ids) {
+            rml += playerRml(id, session.clients().at(id), teamId == session.selfTeamId());
         }
-        details += c.teamId.empty() ? " · no team" : " · team " + c.teamId;
-        if (!c.modVersion.empty()) {
-            details += " · " + c.modVersion;
-        }
-        rml += "<p class=\"twili-player-detail\">" + escapeRml(details) + "</p>";
-        if (const std::string story = story::clientLine(id); !story.empty()) {
-            rml += "<p class=\"twili-player-detail\">Story: " + escapeRml(story) + "</p>";
-        }
+    };
+    addGroup(session.selfTeamId(), ours);
+    for (const auto& [teamId, ids] : others) {
+        addGroup(teamId, ids);
     }
     return rml.empty() ? std::string("No players.") : rml;
 }
@@ -505,6 +707,62 @@ bool teleportDisabled(ModContext*, void* data) {
 void onTeleport(ModContext*, void* data) {
     if (const uint32_t id = slotClient(data); id != 0) {
         teleport::request(id);
+    }
+}
+
+// --- handing over the room or the team
+
+enum PromoteRole : uintptr_t { kRoomOwner = 0, kTeamLeader = 1 };
+
+// Every other member for the room owner; every other teammate for the team leader.
+std::vector<uint32_t> promoteTargets(PromoteRole role) {
+    std::vector<uint32_t> ids;
+    const Session& session = Session::instance();
+    const bool allowed = role == kRoomOwner ? session.isRoomOwner() : team_game::isTeamOwner();
+    if (!session.isConnected() || !allowed) {
+        return ids;
+    }
+    for (const auto& [id, c] : session.clients()) {
+        if (!c.self && c.online && ids.size() < kTeleportSlots &&
+            (role == kRoomOwner || c.teamId == session.selfTeamId()))
+        {
+            ids.push_back(id);
+        }
+    }
+    return ids;
+}
+
+void* promoteData(PromoteRole role, size_t slot) {
+    return reinterpret_cast<void*>(static_cast<uintptr_t>(role) * kTeleportSlots + slot);
+}
+
+void onPromote(ModContext*, void* data) {
+    const auto value = reinterpret_cast<uintptr_t>(data);
+    const auto role = static_cast<PromoteRole>(value / kTeleportSlots);
+    const uint32_t id = s_live.promoteIds[role][value % kTeleportSlots];
+    if (id == 0) {
+        return;
+    }
+    const std::string name = escapeRml(clientName(id));
+    if (role == kRoomOwner) {
+        pushStoryConfirm({
+            .title = "Hand over the room",
+            .bodyRml = "<p>Make <b>" + name +
+                       "</b> the room owner? They take over the room settings, and you cannot "
+                       "take the room back yourself.</p>",
+            .acceptLabel = "Make Room Owner",
+            .declineLabel = "Cancel",
+            .onAccept = [id] { team_game::promoteRoomOwner(id); },
+        });
+    } else {
+        pushStoryConfirm({
+            .title = "Hand over the team",
+            .bodyRml = "<p>Make <b>" + name +
+                       "</b> the team leader? They decide the team's game from now on.</p>",
+            .acceptLabel = "Make Team Leader",
+            .declineLabel = "Cancel",
+            .onAccept = [id] { team_game::promoteTeamLeader(id); },
+        });
     }
 }
 
@@ -557,6 +815,25 @@ ModResult buildPlayersTab(ModContext*, UiWindowHandle, UiElementHandle left, UiE
     }
     svc_ui->pane_add_text(mod_ctx, left, "", &s_live.teleportStatus);
 
+    svc_ui->pane_add_section(mod_ctx, left, "Room Owner and Team Leader");
+    svc_ui->pane_add_text(mod_ctx, left,
+        "The room owner can hand the room to anyone here, a team leader the team to a teammate. "
+        "When one of them leaves, the longest-connected player takes over.",
+        nullptr);
+    for (const PromoteRole role : {kRoomOwner, kTeamLeader}) {
+        for (size_t i = 0; i < kTeleportSlots; ++i) {
+            UiControlDesc button = UI_CONTROL_DESC_INIT;
+            button.kind = UI_CONTROL_BUTTON;
+            button.label = role == kRoomOwner ? "Make Room Owner" : "Make Team Leader";
+            button.on_pressed = onPromote;
+            button.user_data = promoteData(role, i);
+            addControl(left, button, &s_live.promote[role][i]);
+            if (s_live.promote[role][i] != 0) {
+                svc_ui->elem_set_visible(mod_ctx, s_live.promote[role][i], false);
+            }
+        }
+    }
+
     svc_ui->pane_add_section(mod_ctx, left, "Story");
     s_live.lastStoryStatus = story::statusRml();
     s_live.storyStatus = addRml(left, s_live.lastStoryStatus);
@@ -593,6 +870,24 @@ ModResult updatePlayersTab(ModContext*, void*, ModError*) {
         status = status.empty() ? "No other players." : status;
     }
     setText(s_live.teleportStatus, s_live.lastTeleportStatus, std::move(status));
+    for (const PromoteRole role : {kRoomOwner, kTeamLeader}) {
+        const std::vector<uint32_t> ids = promoteTargets(role);
+        for (size_t i = 0; i < kTeleportSlots; ++i) {
+            const uint32_t id = i < ids.size() ? ids[i] : 0;
+            if (s_live.promote[role][i] == 0) {
+                continue;
+            }
+            if (id != s_live.promoteIds[role][i]) {
+                s_live.promoteIds[role][i] = id;
+                svc_ui->elem_set_visible(mod_ctx, s_live.promote[role][i], id != 0);
+            }
+            if (id != 0) {
+                const char* what = role == kRoomOwner ? " Room Owner" : " Team Leader";
+                setLabel(s_live.promote[role][i], s_live.lastPromoteLabels[role][i],
+                    "Make " + clientName(id) + what);
+            }
+        }
+    }
     setRml(s_live.storyStatus, s_live.lastStoryStatus, story::statusRml());
     setLabel(s_live.catchUp, s_live.lastCatchUp, catchUpLabel());
     return MOD_OK;
@@ -616,6 +911,8 @@ void onOpenFromPanel(ModContext*, void*) {
 ModResult buildModsPanel(ModContext*, UiElementHandle pane, void*, ModError*) {
     s_panelLastStatus = Session::instance().statusText();
     svc_ui->pane_add_text(mod_ctx, pane, s_panelLastStatus.c_str(), &s_panelStatus);
+    s_panelLastTeam = team_game::panelLine();
+    svc_ui->pane_add_text(mod_ctx, pane, s_panelLastTeam.c_str(), &s_panelTeam);
     UiControlDesc open = UI_CONTROL_DESC_INIT;
     open.kind = UI_CONTROL_BUTTON;
     open.label = "Open Twili-Together";
@@ -626,6 +923,7 @@ ModResult buildModsPanel(ModContext*, UiElementHandle pane, void*, ModError*) {
 
 ModResult updateModsPanel(ModContext*, void*, ModError*) {
     setText(s_panelStatus, s_panelLastStatus, Session::instance().statusText());
+    setText(s_panelTeam, s_panelLastTeam, team_game::panelLine());
     return MOD_OK;
 }
 
@@ -691,6 +989,7 @@ void shutdownWindow() {
     s_live = {};
     s_menuTab = 0;
     s_panelStatus = 0;
+    s_panelTeam = 0;
     forgetStoryPrompts();
 }
 

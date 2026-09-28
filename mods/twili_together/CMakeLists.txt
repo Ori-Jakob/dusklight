@@ -53,6 +53,9 @@ set(TWILI_SOURCES
     src/fx/RemoteTransformFx.cpp
     src/fx/StatusFx.cpp
     src/fx/WolfFx.cpp
+    src/game/GameIdentity.cpp
+    src/game/RandoSeeds.cpp
+    src/game/TeamGame.cpp
     src/hooks/Hooks.cpp
     src/hooks/hooks_actor.cpp
     src/hooks/hooks_enemy.cpp

@@ -24,6 +24,7 @@ RoomState Session::roomStateFromSettings() const {
     state.pvpLethal = config::getBool(Var::PvpLethal);
     state.showLocationsMode = config::getBool(Var::ShowLocations);
     state.teleportMode = config::getBool(Var::TeleportMode);
+    state.teleportAcrossTeams = config::getBool(Var::TeleportAcrossTeams);
     state.syncWorldState = config::getBool(Var::SyncWorldState);
     state.shareWoodenShield = config::getBool(Var::ShareWoodenShield);
     state.syncNPCs = config::getBool(Var::SyncEnemyDeaths);

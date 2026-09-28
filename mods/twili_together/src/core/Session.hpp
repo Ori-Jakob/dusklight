@@ -82,11 +82,8 @@ public:
     }
     bool isTeammate(const Client& client) const;
     const std::string& sessionKey() const { return mSessionKey; }
-    // Gate for world sync with a member (ourselves included); the randomizer game key goes here.
-    bool memberMaySync(uint32_t clientId) const {
-        (void)clientId;
-        return true;
-    }
+    // Gate for world sync with a member (ourselves included): in game on the team's game.
+    bool memberMaySync(uint32_t clientId) const;
 
     // Once per simulation tick.
     void update();

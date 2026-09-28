@@ -14,6 +14,8 @@ struct RoomState {
     bool pvpLethal = false;
     bool showLocationsMode = true;
     bool teleportMode = false;
+    // Teleport to other teams' players (never between two different team games).
+    bool teleportAcrossTeams = false;
     bool syncWorldState = true;
     bool shareWoodenShield = true;
     // Enemy-death sync ("Sync Enemy Deaths").
@@ -27,8 +29,8 @@ struct RoomState {
     bool sameSettings(const RoomState& o) const {
         return pvpMode == o.pvpMode && pvpFriendlyFire == o.pvpFriendlyFire &&
                pvpLethal == o.pvpLethal && showLocationsMode == o.showLocationsMode &&
-               teleportMode == o.teleportMode && syncWorldState == o.syncWorldState &&
-               shareWoodenShield == o.shareWoodenShield &&
+               teleportMode == o.teleportMode && teleportAcrossTeams == o.teleportAcrossTeams &&
+               syncWorldState == o.syncWorldState && shareWoodenShield == o.shareWoodenShield &&
                syncNPCs == o.syncNPCs && cutsceneSync == o.cutsceneSync &&
                hidePlayersInCutscene == o.hidePlayersInCutscene &&
                enemyCountMultiplier == o.enemyCountMultiplier &&
@@ -43,6 +45,7 @@ struct RoomState {
             {"pvpLethal", pvpLethal},
             {"showLocationsMode", showLocationsMode},
             {"teleportMode", teleportMode},
+            {"teleportAcrossTeams", teleportAcrossTeams},
             {"syncWorldState", syncWorldState},
             {"shareWoodenShield", shareWoodenShield},
             {"syncNPCs", syncNPCs},
@@ -62,6 +65,7 @@ struct RoomState {
         pvpLethal = j.value("pvpLethal", pvpLethal);
         showLocationsMode = j.value("showLocationsMode", showLocationsMode);
         teleportMode = j.value("teleportMode", teleportMode);
+        teleportAcrossTeams = j.value("teleportAcrossTeams", teleportAcrossTeams);
         syncWorldState = j.value("syncWorldState", syncWorldState);
         shareWoodenShield = j.value("shareWoodenShield", shareWoodenShield);
         syncNPCs = j.value("syncNPCs", syncNPCs);

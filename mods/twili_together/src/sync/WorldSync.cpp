@@ -118,7 +118,9 @@ bool acceptsWorldPacket(const nlohmann::json& packet, const char* what) {
         warnLayoutMismatch(id, packet.value("senderName", std::string{}), layout);
         return false;
     }
-    if (!session.memberMaySync(id)) {
+    // Replays come from the server's cache of the team's game, even from members who left it.
+    const bool replay = packet.value("fromQueue", false) || packet.value("fromCache", false);
+    if (!replay && !session.memberMaySync(id)) {
         return false;
     }
 

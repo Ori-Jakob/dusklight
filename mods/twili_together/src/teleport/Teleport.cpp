@@ -8,6 +8,7 @@
 #include "core/Log.hpp"
 #include "core/SaveGate.hpp"
 #include "core/Session.hpp"
+#include "game/TeamGame.hpp"
 #include "story/Story.hpp"
 #include "ui/Toasts.hpp"
 
@@ -481,6 +482,8 @@ std::string reasonText(std::string_view code) {
         {"layer", "in a version of the area your progress does not load"},
         {"bad-destination", "sent an unusable destination"},
         {"rate-limited", "too many requests, try again"},
+        {"other-team", "on another team"},
+        {"other-game", "playing a different game"},
         {"timeout", "did not answer"},
         {"disconnected", "disconnected"},
         {"stuck", "the destination did not finish loading"},
@@ -529,6 +532,9 @@ const char* blockCode(uint32_t clientId) {
     }
     if (!it->second.isSaveLoaded || it->second.stageName[0] == '\0') {
         return "not-in-game";
+    }
+    if (const char* code = team_game::teleportBlock(clientId)) {
+        return code;
     }
     if (s_state.status.phase != Phase::Idle || story::loadActive()) {
         return "pending";

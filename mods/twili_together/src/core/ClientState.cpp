@@ -64,7 +64,12 @@ static void applyClientState(Client& client, const nlohmann::json& state) {
         client.saveTblNo = static_cast<int8_t>(state.value("saveTblNo", -1));
     }
 
-    if (const auto color = state.find("color"); color != state.end() && color->is_object()) {
+    // Everyone shows a team member in the team colour ("displayColor"); "color" is their own.
+    auto color = state.find("displayColor");
+    if (color == state.end() || !color->is_object()) {
+        color = state.find("color");
+    }
+    if (color != state.end() && color->is_object()) {
         client.colorR = static_cast<uint8_t>(color->value("r", 255u));
         client.colorG = static_cast<uint8_t>(color->value("g", 255u));
         client.colorB = static_cast<uint8_t>(color->value("b", 255u));
@@ -258,7 +263,8 @@ void Session::syncSelfRow() {
         self.roomNo = mLastRoomNo;
         self.saveTblNo = static_cast<int8_t>(mLastSaveTblNo);
     }
-    if (mSentColor[0] >= 0) {
+    // On a team we show in the team colour, which the server tells us.
+    if (mSentColor[0] >= 0 && self.teamId.empty()) {
         self.colorR = static_cast<uint8_t>(mSentColor[0]);
         self.colorG = static_cast<uint8_t>(mSentColor[1]);
         self.colorB = static_cast<uint8_t>(mSentColor[2]);
