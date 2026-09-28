@@ -725,6 +725,20 @@ Change callbacks fire on the game thread whenever the value changes at runtime (
 Writes that store the same value are silent. Values applied from `config.json` or `--cvar` at registration do
 **not** fire callbacks; read the value after `register_var` for the starting state.
 
+**Host settings (ConfigService 1.1):** `find_host_var` returns a read-only handle to one of Dusklight's own settings by
+its config key, for mods that need to follow a host option (mirror mode, HUD scale, ...). Use it with the matching
+`get_*` accessor and `subscribe`; `set_*` returns `MOD_UNSUPPORTED`. Bool, integer, float and string settings are
+exposed; enum-valued settings and other mods' `mod.*` keys are not.
+
+```cpp
+ConfigVarHandle mirror = 0;
+bool mirrored = false;
+if (SERVICE_HAS(svc_config, ConfigService, find_host_var) &&
+    svc_config->find_host_var(mod_ctx, "game.enableMirrorMode", CONFIG_VAR_BOOL, &mirror) == MOD_OK) {
+    svc_config->get_bool(mod_ctx, mirror, &mirrored);
+}
+```
+
 ### SaveService ([`mods/svc/save.h`](../sdk/include/mods/svc/save.h))
 
 Allows reading and writing binary blobs associated with save slots. Blobs are scoped to your mod and the active game

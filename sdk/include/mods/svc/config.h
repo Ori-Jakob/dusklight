@@ -8,7 +8,7 @@
 
 #define CONFIG_SERVICE_ID DUSKLIGHT_SERVICE_ID_PREFIX "config"
 #define CONFIG_SERVICE_MAJOR 1u
-#define CONFIG_SERVICE_MINOR 0u
+#define CONFIG_SERVICE_MINOR 1u
 
 /* Handle for a config var registered by the calling mod. 0 is never a valid handle. */
 typedef uint64_t ConfigVarHandle;
@@ -98,6 +98,12 @@ typedef struct ConfigService {
     ModResult (*subscribe)(ModContext* ctx, ConfigVarHandle var, ConfigChangedFn callback,
         void* user_data, ConfigSubscriptionHandle* out_handle);
     ModResult (*unsubscribe)(ModContext* ctx, ConfigSubscriptionHandle handle);
+
+    /* Minor version 1 */
+
+    /* Read-only handle to a host setting such as "game.enableMirrorMode"; no enum or mod.* keys. */
+    ModResult (*find_host_var)(
+        ModContext* ctx, const char* name, ConfigVarType type, ConfigVarHandle* out_handle);
 } ConfigService;
 
 MOD_DECLARE_SERVICE(

@@ -15,8 +15,10 @@
 #include <chrono>
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 namespace dusk::mods::svc {
@@ -27,7 +29,12 @@ constexpr borealis::Log Log{"dusk::mods::config"};
 enum class ConfigSlotKind : uint8_t {
     Var,
     Subscription,
+    HostVar,
 };
+
+// Reads a host setting's value, or *previous (a const T*) when given.
+using HostVarReadFn = ConfigVarValue (*)(
+    const config::ConfigVarBase& var, const void* previous, std::string& storage);
 
 struct ConfigSlot {
     ConfigSlotKind kind = ConfigSlotKind::Var;
@@ -37,6 +44,9 @@ struct ConfigSlot {
     // Subscription payload
     uint64_t varHandle = 0;
     config::Subscription coreSubscription = 0;
+    // HostVar payload (with `type`): a setting the host owns, read-only for mods
+    config::ConfigVarBase* hostVar = nullptr;
+    HostVarReadFn hostRead = nullptr;
 };
 
 SlotMap<ConfigSlot> s_slots;
@@ -133,6 +143,96 @@ ConfigVar<T>* find_typed_var(ModContext* context, ConfigVarHandle handle, uint32
     return static_cast<ConfigVar<T>*>(find_var(*mod, handle, type));
 }
 
+template <typename T>
+constexpr ConfigVarType host_var_type() {
+    if constexpr (std::is_same_v<T, bool>) {
+        return CONFIG_VAR_BOOL;
+    } else if constexpr (std::is_integral_v<T>) {
+        return CONFIG_VAR_INT;
+    } else if constexpr (std::is_floating_point_v<T>) {
+        return CONFIG_VAR_FLOAT;
+    } else {
+        return CONFIG_VAR_STRING;
+    }
+}
+
+template <typename T>
+ConfigVarValue read_host_var(
+    const config::ConfigVarBase& varBase, const void* previous, std::string& storage) {
+    const T& value = previous != nullptr ? *static_cast<const T*>(previous) :
+                                           static_cast<const ConfigVar<T>&>(varBase).getValue();
+    ConfigVarValue out{};
+    out.struct_size = sizeof(ConfigVarValue);
+    out.type = host_var_type<T>();
+    if constexpr (std::is_same_v<T, bool>) {
+        out.bool_value = value;
+    } else if constexpr (std::is_integral_v<T>) {
+        out.int_value = static_cast<int64_t>(value);
+    } else if constexpr (std::is_floating_point_v<T>) {
+        out.float_value = static_cast<double>(value);
+    } else {
+        storage = value;
+        out.string_value = storage.c_str();
+        out.string_length = storage.size();
+    }
+    return out;
+}
+
+template <typename T>
+bool match_host_var(config::ConfigVarBase& var, ConfigSlot& slot) {
+    if (dynamic_cast<ConfigVar<T>*>(&var) == nullptr) {
+        return false;
+    }
+    slot.type = host_var_type<T>();
+    slot.hostRead = read_host_var<T>;
+    return true;
+}
+
+// Enum and structured settings have no ConfigService type.
+bool match_host_var(config::ConfigVarBase& var, ConfigSlot& slot) {
+    return match_host_var<bool>(var, slot) || match_host_var<s8>(var, slot) ||
+           match_host_var<u8>(var, slot) || match_host_var<s16>(var, slot) ||
+           match_host_var<u16>(var, slot) || match_host_var<s32>(var, slot) ||
+           match_host_var<u32>(var, slot) || match_host_var<s64>(var, slot) ||
+           match_host_var<u64>(var, slot) || match_host_var<f32>(var, slot) ||
+           match_host_var<f64>(var, slot) || match_host_var<std::string>(var, slot);
+}
+
+const ConfigSlot* find_host_slot(ModContext* context, ConfigVarHandle handle) {
+    auto* mod = mod_from_context(context);
+    if (mod == nullptr || handle == 0) {
+        return nullptr;
+    }
+    const auto* entry = s_slots.find_owned(handle, *mod);
+    if (entry == nullptr || entry->value.kind != ConfigSlotKind::HostVar) {
+        return nullptr;
+    }
+    return &entry->value;
+}
+
+// get_* on a find_host_var handle; nullopt when `handle` is not one.
+template <typename T>
+std::optional<ModResult> get_host_value(
+    ModContext* context, ConfigVarHandle handle, uint32_t type, T* outValue) {
+    const auto* slot = find_host_slot(context, handle);
+    if (slot == nullptr) {
+        return std::nullopt;
+    }
+    if (slot->type != type || outValue == nullptr) {
+        return MOD_INVALID_ARGUMENT;
+    }
+    std::string storage;
+    const ConfigVarValue value = slot->hostRead(*slot->hostVar, nullptr, storage);
+    if constexpr (std::is_same_v<T, bool>) {
+        *outValue = value.bool_value;
+    } else if constexpr (std::is_same_v<T, int64_t>) {
+        *outValue = value.int_value;
+    } else {
+        *outValue = value.float_value;
+    }
+    return MOD_OK;
+}
+
 void config_remove_mod(LoadedMod& mod) {
     const auto entries = s_slots.take_all(mod);
     for (const auto& entry : entries) {
@@ -205,10 +305,13 @@ ModResult config_unregister_var(ModContext* context, ConfigVarHandle var) {
         return MOD_INVALID_ARGUMENT;
     }
     const auto* entry = s_slots.find_owned(var, *mod);
-    if (entry == nullptr || entry->value.kind != ConfigSlotKind::Var) {
+    if (entry == nullptr ||
+        (entry->value.kind != ConfigSlotKind::Var && entry->value.kind != ConfigSlotKind::HostVar))
+    {
         Log.error("[{}] config unregister failed: unknown handle {}", mod->metadata.id, var);
         return MOD_INVALID_ARGUMENT;
     }
+    const bool hostVar = entry->value.kind == ConfigSlotKind::HostVar;
 
     // Only the owning mod can (currently) subscribe to a var
     std::vector<uint64_t> bound;
@@ -221,6 +324,11 @@ ModResult config_unregister_var(ModContext* context, ConfigVarHandle var) {
         config::unsubscribe(s_slots.take(handle)->value.coreSubscription);
     }
 
+    if (hostVar) {
+        // The host owns the setting; only the handle goes away.
+        s_slots.erase(var);
+        return MOD_OK;
+    }
     // The persisted value is stashed and restored by a future registration of the same name.
     config::unregister(*s_slots.take(var)->value.var);
     return MOD_OK;
@@ -229,6 +337,9 @@ ModResult config_unregister_var(ModContext* context, ConfigVarHandle var) {
 ModResult config_get_bool(ModContext* context, ConfigVarHandle var, bool* outValue) {
     if (outValue != nullptr) {
         *outValue = false;
+    }
+    if (const auto hostResult = get_host_value(context, var, CONFIG_VAR_BOOL, outValue)) {
+        return *hostResult;
     }
     auto* cvar = find_typed_var<bool>(context, var, CONFIG_VAR_BOOL);
     if (cvar == nullptr || outValue == nullptr) {
@@ -239,6 +350,9 @@ ModResult config_get_bool(ModContext* context, ConfigVarHandle var, bool* outVal
 }
 
 ModResult config_set_bool(ModContext* context, ConfigVarHandle var, bool value) {
+    if (find_host_slot(context, var) != nullptr) {
+        return MOD_UNSUPPORTED;
+    }
     auto* cvar = find_typed_var<bool>(context, var, CONFIG_VAR_BOOL);
     if (cvar == nullptr) {
         return MOD_INVALID_ARGUMENT;
@@ -252,6 +366,9 @@ ModResult config_get_int(ModContext* context, ConfigVarHandle var, int64_t* outV
     if (outValue != nullptr) {
         *outValue = 0;
     }
+    if (const auto hostResult = get_host_value(context, var, CONFIG_VAR_INT, outValue)) {
+        return *hostResult;
+    }
     auto* cvar = find_typed_var<s64>(context, var, CONFIG_VAR_INT);
     if (cvar == nullptr || outValue == nullptr) {
         return MOD_INVALID_ARGUMENT;
@@ -261,6 +378,9 @@ ModResult config_get_int(ModContext* context, ConfigVarHandle var, int64_t* outV
 }
 
 ModResult config_set_int(ModContext* context, ConfigVarHandle var, int64_t value) {
+    if (find_host_slot(context, var) != nullptr) {
+        return MOD_UNSUPPORTED;
+    }
     auto* cvar = find_typed_var<s64>(context, var, CONFIG_VAR_INT);
     if (cvar == nullptr) {
         return MOD_INVALID_ARGUMENT;
@@ -274,6 +394,9 @@ ModResult config_get_float(ModContext* context, ConfigVarHandle var, double* out
     if (outValue != nullptr) {
         *outValue = 0.0;
     }
+    if (const auto hostResult = get_host_value(context, var, CONFIG_VAR_FLOAT, outValue)) {
+        return *hostResult;
+    }
     auto* cvar = find_typed_var<f64>(context, var, CONFIG_VAR_FLOAT);
     if (cvar == nullptr || outValue == nullptr) {
         return MOD_INVALID_ARGUMENT;
@@ -283,6 +406,9 @@ ModResult config_get_float(ModContext* context, ConfigVarHandle var, double* out
 }
 
 ModResult config_set_float(ModContext* context, ConfigVarHandle var, double value) {
+    if (find_host_slot(context, var) != nullptr) {
+        return MOD_UNSUPPORTED;
+    }
     auto* cvar = find_typed_var<f64>(context, var, CONFIG_VAR_FLOAT);
     if (cvar == nullptr) {
         return MOD_INVALID_ARGUMENT;
@@ -297,11 +423,20 @@ ModResult config_get_string(
     if (outLength != nullptr) {
         *outLength = 0;
     }
-    auto* cvar = find_typed_var<std::string>(context, var, CONFIG_VAR_STRING);
-    if (cvar == nullptr) {
+    std::string hostValue;
+    const std::string* valuePtr = nullptr;
+    if (const auto* host = find_host_slot(context, var)) {
+        if (host->type != CONFIG_VAR_STRING) {
+            return MOD_INVALID_ARGUMENT;
+        }
+        host->hostRead(*host->hostVar, nullptr, hostValue);
+        valuePtr = &hostValue;
+    } else if (auto* cvar = find_typed_var<std::string>(context, var, CONFIG_VAR_STRING)) {
+        valuePtr = &cvar->getValue();
+    } else {
         return MOD_INVALID_ARGUMENT;
     }
-    const auto& value = cvar->getValue();
+    const auto& value = *valuePtr;
     if (outLength != nullptr) {
         *outLength = value.size();
     }
@@ -317,6 +452,9 @@ ModResult config_get_string(
 }
 
 ModResult config_set_string(ModContext* context, ConfigVarHandle var, const char* value) {
+    if (find_host_slot(context, var) != nullptr) {
+        return MOD_UNSUPPORTED;
+    }
     auto* cvar = find_typed_var<std::string>(context, var, CONFIG_VAR_STRING);
     if (cvar == nullptr || value == nullptr) {
         return MOD_INVALID_ARGUMENT;
@@ -336,16 +474,27 @@ ModResult config_subscribe(ModContext* context, ConfigVarHandle var, ConfigChang
         return MOD_INVALID_ARGUMENT;
     }
     const auto* entry = s_slots.find_owned(var, *mod);
-    if (entry == nullptr || entry->value.kind != ConfigSlotKind::Var) {
+    if (entry == nullptr ||
+        (entry->value.kind != ConfigSlotKind::Var && entry->value.kind != ConfigSlotKind::HostVar))
+    {
         return MOD_INVALID_ARGUMENT;
     }
+    const auto* target = entry->value.kind == ConfigSlotKind::HostVar ? entry->value.hostVar :
+                                                                        entry->value.var.get();
 
-    const auto coreSubscription = config::subscribe(entry->value.var->getName(),
-        [modPtr = mod, callback, userData, varHandle = var, type = entry->value.type](
-            config::ConfigVarBase& varBase, const void* previous) {
-            const ConfigVarValue previousValue = translate_previous(type, previous);
+    const auto coreSubscription = config::subscribe(
+        target->getName(), [modPtr = mod, callback, userData, varHandle = var,
+                               type = entry->value.type, hostRead = entry->value.hostRead](
+                               config::ConfigVarBase& varBase, const void* previous) {
+            // Host settings are stored as their own C++ type, not the mod-facing one.
+            std::string previousStorage;
             std::string stringStorage;
-            const ConfigVarValue currentValue = translate_current(type, varBase, stringStorage);
+            const ConfigVarValue previousValue = hostRead != nullptr ?
+                                                     hostRead(varBase, previous, previousStorage) :
+                                                     translate_previous(type, previous);
+            const ConfigVarValue currentValue = hostRead != nullptr ?
+                                                    hostRead(varBase, nullptr, stringStorage) :
+                                                    translate_current(type, varBase, stringStorage);
             try {
                 callback(modPtr->context.get(), varHandle, &currentValue, &previousValue, userData);
             } catch (const std::exception& e) {
@@ -381,6 +530,35 @@ ModResult config_unsubscribe(ModContext* context, ConfigSubscriptionHandle handl
     return MOD_OK;
 }
 
+ModResult config_find_host_var(
+    ModContext* context, const char* name, ConfigVarType type, ConfigVarHandle* outHandle) {
+    if (outHandle != nullptr) {
+        *outHandle = 0;
+    }
+    auto* mod = mod_from_context(context);
+    if (mod == nullptr || name == nullptr || outHandle == nullptr) {
+        return MOD_INVALID_ARGUMENT;
+    }
+    // Mod settings stay private to their owner.
+    const std::string_view key{name};
+    if (key.starts_with("mod.")) {
+        return MOD_UNAVAILABLE;
+    }
+    auto* var = config::GetConfigVar(key);
+    if (var == nullptr) {
+        return MOD_UNAVAILABLE;
+    }
+    ConfigSlot slot{.kind = ConfigSlotKind::HostVar, .hostVar = var};
+    if (!match_host_var(*var, slot)) {
+        return MOD_UNAVAILABLE;
+    }
+    if (slot.type != type) {
+        return MOD_INVALID_ARGUMENT;
+    }
+    *outHandle = s_slots.emplace(*mod, std::move(slot));
+    return MOD_OK;
+}
+
 constexpr ConfigService s_configService{
     .header = SERVICE_HEADER(ConfigService, CONFIG_SERVICE_MAJOR, CONFIG_SERVICE_MINOR),
     .register_var = config_register_var,
@@ -395,6 +573,7 @@ constexpr ConfigService s_configService{
     .set_string = config_set_string,
     .subscribe = config_subscribe,
     .unsubscribe = config_unsubscribe,
+    .find_host_var = config_find_host_var,
 };
 
 }  // namespace
