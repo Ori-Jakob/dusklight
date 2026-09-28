@@ -1,6 +1,6 @@
 // Remote players in wolf form (actors/DummyPlayer.cpp), Midna on their back
 // (actors/DummyMidna.cpp) and their transformations' effects (fx/RemoteTransformFx.cpp).
-// Steps in src/autotest/StepsWolfRemote.cpp.
+// Steps in src/autotest/StepsWolf.cpp.
 
 const { STAGES, COMMON_CVARS, tt, warp, waitStage, barrier, meetIn, connect } = require("../lib");
 

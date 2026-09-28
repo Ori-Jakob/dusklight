@@ -155,7 +155,7 @@ Fidelity (`StepsFidelity.cpp`):
 | `assignItemX` | `item` | an owned item on X (press it with a walk's `buttons`: X = 0x400) |
 | `expectDummyLook` | `clothes`, `casualHead`, `heavyBoots`, `zoraMask`, `lantern`, `heldItem`, `basePack`, `basePackAnm`, `standIn`, `ground`, `hidden`, `armorDrained`, `armorSettled`, `maxMissing`, `frames`, `timeoutSec` | the first peer's dummy shows every field given, then for `frames` more ticks |
 
-Wolf, Midna and transformations (`StepsWolfRemote.cpp`):
+Wolf, Midna and transformations (`StepsWolf.cpp`):
 
 | op | fields | does |
 | --- | --- | --- |

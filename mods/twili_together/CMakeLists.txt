@@ -104,7 +104,6 @@ if (TWILI_ENABLE_AUTOTEST)
         src/autotest/StepsRecolor.cpp
         src/autotest/StepsStatusFx.cpp
         src/autotest/StepsWolfFx.cpp
-        src/autotest/StepsWolfRemote.cpp
         src/autotest/StepsWolf.cpp
         src/autotest/StepsWorld.cpp
         src/hooks/hooks_autotest.cpp
