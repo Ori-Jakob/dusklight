@@ -11,6 +11,7 @@
 #include "m_Do/m_Do_ext.h"  // the enemy headers are not self-contained
 
 #include "SSystem/SComponent/c_malloc.h"
+#include "d/actor/d_a_e_hz.h"
 #include "d/actor/d_a_e_oc.h"
 #include "d/actor/d_a_e_s1.h"
 #include "d/d_com_inf_game.h"
@@ -129,6 +130,27 @@ std::optional<bool> killEnemy(StepContext& ctx) {
         // In Deku Baba's order: the zone actor bit after the delete request.
         if (ctx.step.value("onActor", false)) {
             fopAcM_onActor(ac);
+        }
+        return true;
+    }
+    if (how == "hz" || how == "hzReal") {
+        if (fopAcM_GetName(ac) != fpcNm_E_HZ_e) {
+            ctx.fail("killEnemy " + how + ": '" + tag + "' is not a Tile Worm");
+            return false;
+        }
+        auto* hz = static_cast<daE_HZ_c*>(ac);
+        if (how == "hz") {
+            // The end of every death path: its puff, then the death wait (mode 0 sets its switch).
+            layer_class* saved = fpcLy_CurrentLayer();
+            fpcLy_SetCurrentLayer(ac->layer_tag.layer);
+            fopAcM_createDisappear(ac, &ac->current.pos, 10, 0, 5);
+            fpcLy_SetCurrentLayer(saved);
+            hz->setActionMode(11);
+        } else {
+            // ACTION_DEATH as damage_check starts it; the roll needs ground contact.
+            ac->health = 0;
+            hz->field_0x6cc = 0;
+            hz->setActionMode(6);
         }
         return true;
     }
@@ -348,6 +370,21 @@ std::optional<bool> enemySteps(const std::string& op, StepContext& ctx) {
 
     if (op == "expectEnemySync") {
         return expectEnemySync(ctx);
+    }
+
+    if (op == "expectEnemyDeadInPlace") {
+        fopAc_ac_c* ac = runningActor(taggedId(ctx.step));
+        const bool dead = ac != nullptr && fopAcM_GetName(ac) == fpcNm_E_HZ_e &&
+                          static_cast<daE_HZ_c*>(ac)->field_0x6e8 != 0 &&
+                          fopAcM_GetGroup(ac) != fopAc_ENEMY_e;
+        if (dead) {
+            return true;
+        }
+        if (ctx.seconds > ctx.timeout(20.0)) {
+            ctx.fail(ac == nullptr ? "enemy '" + tagOf(ctx) + "' is not running" :
+                                     "enemy '" + tagOf(ctx) + "' is not defeated in place");
+        }
+        return false;
     }
 
     // Tagged Shadow Beasts into their downed wait: the group is condemned without the demo.

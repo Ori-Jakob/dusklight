@@ -8,8 +8,11 @@
 
 #include "m_Do/m_Do_ext.h"  // the enemy headers are not self-contained
 
+#include "d/actor/d_a_e_hz.h"
 #include "d/actor/d_a_e_s1.h"
 #include "d/actor/d_a_player.h"
+#include "d/d_bg_w.h"
+#include "d/d_camera.h"
 #include "d/d_com_inf_game.h"
 #include "d/d_event.h"
 #include "f_op/f_op_actor_mng.h"
@@ -45,9 +48,49 @@ constexpr float kHomeTolerance = 1.0f;
 constexpr size_t kMaxPending = 64;
 constexpr size_t kMaxRecent = 256;
 
+// Enemies that die without being deleted: synced as "defeated in place".
+struct InPlaceDeath {
+    s16 procName;
+    bool (*isDead)(const fopAc_ac_c*);
+    void (*kill)(fopAc_ac_c*);
+};
+
+bool hzIsDead(const fopAc_ac_c* ac) {
+    return static_cast<const daE_HZ_c*>(ac)->field_0x6e8 != 0;
+}
+
+// executeDeathWait's created-dead branch: no switch write (the killer's comes by world sync).
+void hzKill(fopAc_ac_c* ac) {
+    auto* hz = static_cast<daE_HZ_c*>(ac);
+    // Its execute stops running, so nothing would release a force lock later.
+    if (dCamera_c* cam = dCam_getBody(); cam != nullptr && cam->GetForceLockOnActor() == ac) {
+        cam->ForceLockOff(ac);
+    }
+    if (hz->mpBgW != nullptr) {
+        dComIfG_Bgsp().Release(hz->mpBgW);
+        hz->mpBgW = nullptr;
+    }
+    hz->setActionMode(11);  // ACTION_DEATH_WAIT
+    hz->mMode = 1;
+}
+
+constexpr InPlaceDeath kInPlace[] = {
+    {fpcNm_E_HZ_e, hzIsDead, hzKill},  // Tile Worm: keeps drawing its tile plate
+};
+
+const InPlaceDeath* findInPlace(s16 procName) {
+    for (const InPlaceDeath& d : kInPlace) {
+        if (d.procName == procName) {
+            return &d;
+        }
+    }
+    return nullptr;
+}
+
 struct Record {
     fopAc_ac_c* actor;  // valid until onActorDeleted
     SpawnKey key;
+    const InPlaceDeath* inPlace = nullptr;
     char stage[8];
     int8_t layer;
     uint8_t fxSize = 10, fxType = 0;
@@ -112,6 +155,7 @@ bool isKillSyncable(s16 procName, u32 params) {
     case fpcNm_E_BU_e:   // Bubble
     case fpcNm_E_KG_e:   // Young Gohma
     case fpcNm_E_BS_e:   // Stalkin (no puff: markDefeated)
+    case fpcNm_E_HZ_e:   // Tile Worm (defeated in place)
         return true;
     case fpcNm_E_RD_e: {
         // Bulblin, not King Bulblin (4, 5, 11, 12): scripted fights.
@@ -178,6 +222,19 @@ Record* live(const fopAc_ac_c* ac) {
 
 enum class Apply { Done, NoMatch, Deferred };
 
+// createDisappear's parameters, enemy id 0xFF (no item roll), queued in the enemy's layer.
+void spawnPuff(fopAc_ac_c* ac, layer_class* layer, const Kill& kill) {
+    if (layer == nullptr) {
+        return;
+    }
+    const u32 prm = (0xFFu << 16) | (u32(kill.fxSize) << 8) | kill.fxType;
+    layer_class* saved = fpcLy_CurrentLayer();
+    fpcLy_SetCurrentLayer(layer);
+    fopAcM_create(fpcNm_DISAPPEAR_e, prm, &ac->current.pos, fopAcM_GetRoomNo(ac),
+        &ac->current.angle, nullptr, -1);
+    fpcLy_SetCurrentLayer(saved);
+}
+
 // Why removing the enemy must wait (our cutscene, Link holds or bites it), or nullptr.
 const char* deferReason(fopAc_ac_c* ac) {
     if (dComIfGp_event_runCheck()) {
@@ -222,9 +279,21 @@ Apply tryApply(const Pending& p, const char*& why) {
             continue;
         }
         fopAc_ac_c* ac = r.actor;
+        if (r.inPlace != nullptr && r.inPlace->isDead(ac)) {
+            return Apply::Done;
+        }
         why = deferReason(ac);
         if (why != nullptr) {
             return Apply::Deferred;
+        }
+        if (r.inPlace != nullptr) {
+            r.inPlace->kill(ac);
+            r.remoteRemoved = true;
+            spawnPuff(ac, ac->layer_tag.layer, p.kill);
+            ++s_stats.applied;
+            TwiliLog.info("[enemy] {} ({}) defeated in place by a teammate",
+                fopAcM_getProcNameString(ac), keyText(r.key));
+            return Apply::Done;
         }
         // The actor stays readable until fopAc_Delete runs next frame.
         layer_class* layer = ac->layer_tag.layer;
@@ -236,15 +305,7 @@ Apply tryApply(const Pending& p, const char*& why) {
             return Apply::Deferred;
         }
         r.remoteRemoved = true;
-        // createDisappear's parameters, enemy id 0xFF (no item roll), queued in the enemy's layer.
-        if (layer != nullptr) {
-            const u32 prm = (0xFFu << 16) | (u32(p.kill.fxSize) << 8) | p.kill.fxType;
-            layer_class* saved = fpcLy_CurrentLayer();
-            fpcLy_SetCurrentLayer(layer);
-            fopAcM_create(fpcNm_DISAPPEAR_e, prm, &ac->current.pos, fopAcM_GetRoomNo(ac),
-                &ac->current.angle, nullptr, -1);
-            fpcLy_SetCurrentLayer(saved);
-        }
+        spawnPuff(ac, layer, p.kill);
         ++s_stats.applied;
         TwiliLog.info("[enemy] removed {} ({}): defeated by a teammate",
             fopAcM_getProcNameString(ac), keyText(r.key));
@@ -271,6 +332,7 @@ void onActorCreated(fopAc_ac_c* ac) {
     const cXyz home = prm->base.position;
     r.key = {fopAcM_GetName(ac), prm->room_no, static_cast<uint32_t>(prm->base.parameters),
         static_cast<uint16_t>(prm->base.setID), {home.x, home.y, home.z}};
+    r.inPlace = findInPlace(r.key.procName);
     std::strncpy(r.stage, stage, sizeof(r.stage) - 1);
     r.layer = static_cast<int8_t>(dComIfG_play_c::getLayerNo(0));
     s_records[fopAcM_GetID(ac)] = r;
@@ -392,6 +454,15 @@ void detail::queueRemote(const Kill& kill) {
 void tick() {
     const auto now = Clock::now();
     std::erase_if(s_recent, [&](const auto& e) { return now - e.second > kRecentTtl; });
+    // Created dead never puffs, so never reports.
+    for (auto& [id, r] : s_records) {
+        if (r.inPlace != nullptr && !r.reported && !r.remoteRemoved &&
+            !isUnset(r.disappearAt) && now - r.disappearAt <= kPairWindow &&
+            fopAcM_IsExecuting(id) && r.inPlace->isDead(r.actor))
+        {
+            report(r, zoneOk(r.key) && dComIfGs_isActor(r.key.setId, r.key.roomNo));
+        }
+    }
     const Session& session = Session::instance();
     if (!session.isConnected() || !session.roomState().syncNPCs || !isSaveLoaded()) {
         s_pending.clear();

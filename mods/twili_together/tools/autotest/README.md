@@ -246,7 +246,8 @@ Life, PvP and enemies (`StepsPvp.cpp`, `StepsEnemy.cpp`):
 | `expectEnemyHealthPercent` | `value`, `timeoutSec` | the percent we apply (the room's while joined, else 100) |
 | `setEnemyHealth` / `deleteEnemy` | `tag`, `health` / `tag` | writes health directly (a bite, a get-up) / deletes the actor |
 | `expectEnemyGone` / `expectEnemiesGone` | `tag` / `tags`, `maxSpreadTicks`, `timeoutSec` | no longer running (and not scaled) / all gone within that many ticks of each other |
-| `killEnemy` | `tag`, `how` (`disappear`, `real`, `fall`), `size`, `type`, `onActor` | a puff and delete (with the zone actor bit after it), or a Bokoblin's own death or void fall |
+| `killEnemy` | `tag`, `how` (`disappear`, `real`, `fall`, `hz`, `hzReal`), `size`, `type`, `onActor` | a puff and delete (with the zone actor bit after it), a Bokoblin's own death or void fall, or a Tile Worm's death wait after its puff / its own death roll |
+| `expectEnemyDeadInPlace` | `tag`, `timeoutSec` | the tagged Tile Worm still runs, dead (its tile only) and out of the ENEMY group |
 | `expectZoneActor` | `setId`, `room`, `set`, `timeoutSec` | the zone actor bit |
 | `expectEnemySync` | `sent`, `received`, `applied`, `echoes`, `expired`, `timeoutSec` | the enemy-death sync counters given |
 | `forceGroupFail` | `tags` | tagged Shadow Beasts into their downed wait, so the group is condemned |

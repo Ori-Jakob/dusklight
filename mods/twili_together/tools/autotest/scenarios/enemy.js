@@ -8,6 +8,10 @@ const BOKOBLIN = { name: "E_oc", param: 0xffffff00, dy: 30 };
 const TEKTITE = { name: "E_tt", param: 0xffffffff, dy: 30 };
 // Mini Freezard, not on the kill-sync allowlist (its death has no puff and no mark).
 const FREEZARD = { name: "E_fz", param: 0xffffffff, dy: 30 };
+// Tile Worm with defeated switch 0x13 (its low param byte).
+const TILE_WORM = { name: "E_hz", param: 0xffffff13, dy: 0 };
+// Shadow Bulblin variant 12 with a club, the Twilit Kargorok's rider; it spawns its E_YC 5000 up.
+const KARGOROK_RIDER = { name: "E_rdy", param: 0xffffc1ff, dy: 30 };
 // The spawned enemies attack the idle players; keep those alive for the whole run.
 const CVARS = [...COMMON_CVARS, "game.infiniteHearts=1"];
 
@@ -293,6 +297,75 @@ module.exports = [
                         : [{ op: "expectEnemiesGone", tags, maxSpreadTicks: 1, timeoutSec: 15 }]),
                     ...barrier("gone", other),
                     { op: "expectEnemySync", ...(isA ? { sent: 3, received: 0 } : { sent: 0, received: 3, applied: 3 }) },
+                    ...barrier("done", other),
+                    { op: "quit" },
+                ],
+            };
+        }),
+    },
+    {
+        name: "enemy-hz-sync",
+        description: "a Tile Worm A defeats stays on B as a dead tile (defeated in place, not deleted) and its switch syncs; a worm created dead reports nothing",
+        timeoutSec: 300,
+        cvars: CVARS,
+        instances: ["A", "B"].map((name) => {
+            const isA = name === "A";
+            const other = isA ? "B" : "A";
+            return {
+                name,
+                start: STAGES.forestTemple,
+                launchDelayMs: isA ? 20000 : 1500,
+                steps: [
+                    waitStage(STAGES.forestTemple),
+                    ...connect,
+                    ...syncOn(isA),
+                    { op: "waitPeers", count: 1, sameStage: true, timeoutSec: 120 },
+                    ...barrier("ready", other),
+                    ...spawnAndSettle([["hz", TILE_WORM, 0, 400]]),
+                    ...barrier("spawned", other),
+                    ...(isA ? [{ op: "killEnemy", tag: "hz", how: "hz" }] : []),
+                    { op: "expectEnemyDeadInPlace", tag: "hz", timeoutSec: 15 },
+                    // A's own death wait sets it; B gets it through world sync.
+                    { op: "expectSwitch", no: 0x13, room: 0, timeoutSec: 15 },
+                    { op: "expectEnemySync", ...(isA ? { sent: 1, received: 0 } : { sent: 0, received: 1, applied: 1 }) },
+                    ...barrier("killed", other),
+                    // The switch is set now: this one is created dead and never puffs.
+                    { op: "spawnEnemy", ...TILE_WORM, ...HOME, dx: 250, dz: 400, tag: "hz2" },
+                    { op: "expectEnemyDeadInPlace", tag: "hz2", timeoutSec: 15 },
+                    { op: "wait", frames: 90 },
+                    { op: "expectEnemySync", ...(isA ? { sent: 1, received: 0 } : { sent: 0, received: 1, applied: 1 }), timeoutSec: 0 },
+                    ...barrier("done", other),
+                    { op: "quit" },
+                ],
+            };
+        }),
+    },
+    {
+        name: "enemy-kill-rdy12",
+        description: "the Twilit Kargorok's Shadow Bulblin rider (variant 12) is not kill-synced: A's kill leaves B's rider and its mount alone",
+        timeoutSec: 300,
+        cvars: CVARS,
+        instances: ["A", "B"].map((name) => {
+            const isA = name === "A";
+            const other = isA ? "B" : "A";
+            return {
+                name,
+                // A fresh save: the rider refuses to exist once event bit 84 is set.
+                start: STAGES.forestTemple,
+                launchDelayMs: isA ? 20000 : 1500,
+                steps: [
+                    waitStage(STAGES.forestTemple),
+                    ...connect,
+                    ...syncOn(isA),
+                    { op: "waitPeers", count: 1, sameStage: true, timeoutSec: 120 },
+                    ...barrier("ready", other),
+                    ...spawnAndSettle([["rdy", KARGOROK_RIDER, 0, 250]]),
+                    ...barrier("spawned", other),
+                    ...(isA ? [{ op: "killEnemy", tag: "rdy", how: "disappear" }, { op: "expectEnemyGone", tag: "rdy", timeoutSec: 5 }] : []),
+                    ...barrier("killed", other),
+                    { op: "wait", frames: 150 },
+                    ...(isA ? [] : [{ op: "expectEnemyHealth", tag: "rdy", timeoutSec: 0 }]),
+                    { op: "expectEnemySync", sent: 0, received: 0, applied: 0, timeoutSec: 0 },
                     ...barrier("done", other),
                     { op: "quit" },
                 ],
