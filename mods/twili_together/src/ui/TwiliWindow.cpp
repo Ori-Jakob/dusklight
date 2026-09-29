@@ -808,6 +808,17 @@ void onCatchUp(ModContext*, void*) {
     });
 }
 
+void onForgetStory(ModContext*, void*) {
+    pushStoryConfirm({
+        .title = "Forget learned story",
+        .bodyRml = "<p>Forget the story destinations this game learned? Catch up to story then "
+                   "knows only what the team does from now on.</p>",
+        .acceptLabel = "Forget",
+        .declineLabel = "Cancel",
+        .onAccept = [] { story::forgetLearnedStory(); },
+    });
+}
+
 ModResult buildPlayersTab(ModContext*, UiWindowHandle, UiElementHandle left, UiElementHandle,
     void*, ModError*) {
     s_live = {};
@@ -863,6 +874,13 @@ ModResult buildPlayersTab(ModContext*, UiWindowHandle, UiElementHandle left, UiE
     catchUp.on_pressed = onCatchUp;
     catchUp.is_disabled = catchUpDisabled;
     addControl(left, catchUp, &s_live.catchUp);
+    UiControlDesc forget = UI_CONTROL_DESC_INIT;
+    forget.kind = UI_CONTROL_BUTTON;
+    forget.label = "Forget Learned Story";
+    forget.help_rml = "<p>Catch up to story remembers where story events took the team, per game. "
+                      "Forget it if a wrong place was learned.</p>";
+    forget.on_pressed = onForgetStory;
+    addControl(left, forget);
     return MOD_OK;
 }
 

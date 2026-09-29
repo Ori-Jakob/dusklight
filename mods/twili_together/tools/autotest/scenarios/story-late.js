@@ -45,6 +45,9 @@ const observeScenarios = [
         [{ op: "expectSwitch", no: 27, set: false }, { op: "triggerStory", via: "arrival", room: 0, point: 24, layer: 11 }, { op: "wait", sec: 5 }]),
     observe("tear", "one Eldin tear picked up in Kakariko", { ...STORY.eldinTwilight, lightDrops: { 1: 10 } },
         [{ op: "countTears" }, { op: "collectTear", nth: 0 }, { op: "expectLightDrops", area: 1, num: 11 }]),
+    observe("npcs-ordon", "daNpcT_c actors and PLYR points of Ordon Village on day 1", { ...STAGES.ordonVillage, point: 1 }, [{ op: "listNpcs" }]),
+    observe("npcs-kakariko", "daNpcT_c actors of Kakariko after the Eldin spring, before the mines",
+        { ...STORY.kakariko, eventBits: [...STORY.eldinGate.eventBits, B.eldinSpirit] }, [{ op: "listNpcs" }]),
     bossExit("forestBoss", "Forest Temple (V13)"),
     bossExit("goronMinesBoss", "Goron Mines (V19)"),
     bossExit("lakebedBoss", "Lakebed Temple and the Zant chain (V30)"),
@@ -169,7 +172,7 @@ const scenarios = [
             ],
         },
         b: {
-            start: { ...STORY.kakariko, stage: "F_SP110" },
+            start: { ...STORY.kakariko, stage: "F_SP110", point: 0 },
             steps: [
                 { op: "waitSignal", name: "a-moved", from: "A", timeoutSec: 240 },
                 { op: "expectStoryMove", role: "received", toStage: "F_SP109" },
@@ -337,7 +340,7 @@ const scenarios = [
             ],
         },
         b: {
-            start: { ...STORY.kakariko, stage: "F_SP110" },
+            start: { ...STORY.kakariko, stage: "F_SP110", point: 0 },
             steps: [
                 { op: "expectPrompt", kind: "move", timeoutSec: 300 },
                 { op: "answerPrompt", answer: "decline" },
@@ -490,6 +493,86 @@ const scenarios = [
                 [{ op: "expectJoin", state: "missed", reason: "state", timeoutSec: 60 }]),
         ];
     })(),
+    pair({
+        name: "story-eldin-gate",
+        description: "A is pulled through the Eldin twilight wall (the gate's load of Hyrule Field room 2 point 10 on layer 14) and turns wolf; B in South Faron follows and ends a wolf where eldin-twilight is consistent",
+        timeoutSec: 720,
+        a: {
+            // Walking into Tag_TWGate here plays its _TALK variant, so a potential event stands in.
+            start: { stage: "F_SP108", room: 0, point: 0, eventBits: STORY.eldinGate.eventBits, levels: STORY.eldinGate.levels },
+            steps: [
+                { op: "triggerStory", via: "forcedMove", stage: "F_SP121", room: 2, point: 10, layer: 14 },
+                settle(300),
+                { op: "expectStoryMove", role: "sent", curated: "eldin-gate", toStage: "F_SP121", toRoom: 2, toPoint: 10 },
+                { op: "expectLocalForm", form: "wolf" },
+                { op: "expectTransformLevel", level: 1 },
+            ],
+        },
+        b: {
+            start: { stage: "F_SP108", room: 0, point: 0, eventBits: STORY.eldinGate.eventBits, levels: STORY.eldinGate.levels },
+            steps: [
+                ...followTo("F_SP121", "Eldin twilight wall"),
+                settle(),
+                { op: "expectLocalForm", form: "wolf" },
+                { op: "expectSegment", id: "eldin-twilight", state: "consistent" },
+            ],
+        },
+    }),
+    ...[
+        ["goronMinesBoss", "Goron Mines", "F_SP109", 0, 39],
+        ["snowpeakBoss", "Snowpeak Ruins", "F_SP114", 1, 11],
+        ["totBoss", "Temple of Time", "F_SP117", 2, 101],
+        ["cityBoss", "City in the Sky", "D_MN07", 0, 4],
+    ].map(([key, dungeon, toStage, toRoom, toPoint]) => pair({
+        name: `story-boss-exit-${STORY[key].stage}`,
+        description: `A leaves ${dungeon} through the boss warp: a strong move to its observed destination; B follows and arrives on the layer its own flags pick`,
+        timeoutSec: 720,
+        a: {
+            start: STORY[key],
+            steps: [
+                { op: "triggerStory", via: "bossWarp" },
+                noSave,
+                settle(400),
+                { op: "expectStoryMove", role: "sent", qualHas: QUAL.boss, toStage, toRoom, toPoint },
+            ],
+        },
+        b: {
+            start: { ...STAGES.linksHouse, eventBits: STORY[key].eventBits, levels: STORY[key].levels },
+            steps: [
+                ...followTo(toStage, `cleared the ${dungeon}`),
+                noSave,
+                settle(),
+                { op: "expectLayer", natural: true },
+                { op: "expectStoryMove", role: "none" },
+            ],
+        },
+    })),
+    pair({
+        name: "story-palace",
+        description: "A reaches the throne room point 25 on cutscene layer 9 after Zant; its scene ends on the natural layer, so B is never held as transient and catches up there",
+        timeoutSec: 600,
+        a: {
+            start: STORY.palaceZant,
+            steps: [
+                { op: "setEventBit", no: B.zantDefeated },
+                { op: "triggerStory", via: "forcedMove", stage: "D_MN08A", room: 10, point: 25, layer: 9 },
+                settle(),
+                { op: "expectStoryMove", role: "sent", toStage: "D_MN08A", toPoint: 23 },
+            ],
+        },
+        b: {
+            start: { ...STAGES.linksHouse, eventBits: STORY.palaceZant.eventBits, levels: STORY.palaceZant.levels },
+            steps: [
+                { op: "expectStoryMove", role: "received", toStage: "D_MN08A", timeoutSec: 240 },
+                { op: "expectTransient", value: false },
+                { op: "catchUp", expectKind: "entrance", toStage: "D_MN08A" },
+                { op: "expectStoryLoad", state: "arrived", timeoutSec: 150 },
+                at("D_MN08A"),
+                settle(),
+                { op: "expectLayer", natural: true },
+            ],
+        },
+    }),
 ];
 
 module.exports = [...observeScenarios, ...scenarios];

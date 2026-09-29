@@ -471,6 +471,12 @@ void Tracker::settle() {
     PendingMove p = std::move(*mMove);
     mMove.reset();
     MoveRecord& m = p.move;
+    // After the arrival scenes: a twilight wall's arrival changes Link after he spawned.
+    if (daAlink_c* link = local::liveLink()) {
+        m.wolfAfter = link->checkWolf();
+    }
+    m.tlvAfter = transformLevels();
+    m.dclAfter = darkClearLevels();
     const uint32_t sinceAccept = mLocalEventBitsSet - p.bitsAtAccept;
     // Bits of the departure stage's earlier story events count too (BOSSCLEAR before WARPHOLE).
     const uint32_t sinceVisit = collectBits(p);

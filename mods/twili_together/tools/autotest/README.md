@@ -103,6 +103,13 @@ South Faron in twilight), `levels` (`{transform: [n], darkClear: [n]}`) and `fir
 (default false: rupees count as seen before, so a dropped rupee never opens the first-pickup
 message that pauses the world).
 
+Story checkpoints (`lib.js` `STORY`, one per area) use more fields, all applied before the first
+load: `fixture` (a save captured with `saveFixture`, read from `fixtures/<name>.json`; the other
+fields apply on top), `saveSwitches` (`[{stage, no}]`), `items` (item numbers, given through
+`execItemGet`), `collect` (`{crystal: [n], mirror: [n]}`), `lightDrops` (`{area: count}`),
+`vessels` (areas whose Vessel of Light is held), `transformStatus` (`wolf`, `human`), `stageBoss`
+(stages whose boss is defeated) and `midna` (`ride`, `off`).
+
 Pick start and warp stages that load without a forced cutscene on a fresh save; the ones in
 `lib.js` `STAGES` are known to.
 
@@ -319,17 +326,28 @@ Story (`StepsStory.cpp`):
 | `storySelfTest` | | classification, curated moves, segments, spawn form, entrances, STORY_MOVE round trip |
 | `dumpStory` | | logs the story state and the room's map events, exits, PLYR points and event tags |
 | `expectLayer` | `layer` or `natural` | our layer, or the one our flags pick here |
-| `triggerStory` | `via` (`requester`, `walk`, `arrival`), `mapToolId`, `point`, `layer` | starts a story event from its natural trigger |
-| `expectStoryMove` | `role` (`sent`, `received`, `none`, `notReceived`), `curated`, `qualHas`, `cached`, `sec`, `timeoutSec` | our sent / received moves |
-| `expectPrompt` / `expectNoPrompt` | `kind` (`move`, `inconsistent`) / `sec` | that pop-up shows / none is offered for `sec` |
+| `triggerStory` | `via`, `mapToolId`, `point`, `layer`, ... | starts a story event: `requester`, `walk` (a map event's tag), `arrival` (`room`, `point`, `layer`: a PLYR start event), `bossWarp` (a defeated boss's warp hole plays BOSS_WARPIN), `tearsFull` (`area`, `num`: the tears complete, a reload runs kytag04's warp), `actor` (`profile`: stand on the nearest one), `forcedMove` (`stage`, `room`, `point`, `layer`, `bit`: Midna requests a potential event and the stage loads during it; follow it with a story step), `npc` (`profile`, `index`: that NPC orders its event table entry) |
+| `expectStoryMove` | `role` (`sent`, `received`, `none`, `notReceived`), `curated`, `qualHas`, `cached`, `toStage`, `toRoom`, `toPoint`, `sec`, `timeoutSec` | our sent / received moves |
+| `expectPrompt` / `expectNoPrompt` | `kind` (`move`, `inconsistent`), `titleHas` / `sec` | that pop-up shows (with that text in its title) / none is offered for `sec` |
 | `answerPrompt` | `answer` (`follow`, `decline`, `catchup`) | presses the pop-up's button |
-| `catchUp` | `expectKind` (`entrance`, `teleport`, `none`), `start` (true) | the Players tab's Catch up to story, confirmed |
-| `expectStoryLoad` | `state` (`idle`, `waiting`, `loading`, `arrived`, `failed`), `reason`, `timeoutSec` | the follow / catch-up load |
+| `catchUp` | `expectKind` (`entrance`, `teleport`, `none`), `toStage`, `start` (true) | the Players tab's Catch up to story, confirmed |
+| `expectStoryLoad` | `state` (`idle`, `waiting`, `loading`, `arrived`, `failed`), `reason`, `layerArg`, `timeoutSec` | the follow / catch-up load |
+| `expectSegment` | `id` (`none` for no segment), `state` (`consistent`, `behind`, `inconsistent`) | the active story segment and where we stand in it |
+| `expectTransient` | `value` | the team's move ended on a cutscene or battle layer its originator is still on |
+| `expectLearned` / `forgetLearned` | `key` or `curated`, `count` | learned story moves of this game |
+| `entranceSweep` | `timeoutSec` | loads every segment entrance, curated follow point and learned destination; each must be a known point and spawn the predicted form |
+| `testRemap` | `from` (`stage`, `room`, `point`), `to` (`stage`, `room`, `point`, `layer`); none clears | a stand-in for the randomizer's entrance shuffle on every stage request |
+| `allowNpcEvent` / `perturbStoryDigest` | `profile`, `event` / `value` | allowlists an NPC event for the pull-in / makes our story digest differ |
+| `collectTear` | `nth` | frees the nth live tear from its shadow insect and picks it up |
+| `countTears` / `expectTears` | none / `delta` | the stage's live tears now / that count plus `delta` |
+| `expectLightDrops` | `area`, `num` | our tear count |
+| `keepTakenTears` | `value` | tears teammates took stay on screen (to race a pickup) |
+| `saveFixture` | `name` | writes the save and our place to `<out>/fixtures/<name>.json` |
 | `expectConsistent` | `value`, `segment`, `timeoutSec` | whether our position fits our story |
 | `expectJoin` | `state` (or a list), `reason`, `holdSec`, `timeoutSec` | the pull-in state; with `holdSec` it must hold |
-| `waitStorySettled` | `timeoutSec` | our relocation chain played out and nothing ran for 60 ticks |
+| `waitStorySettled` | `pressA`, `timeoutSec` | our relocation chain played out and nothing ran for 60 ticks; `pressA` advances the scenes' text |
 | `forcePullInBlocker` | `code` (null: the real checks) | forces the pull-in safety check |
-| `setTransformLevel` / `setDarkClear` / `expectTransformLevel` | `level`, `set` | level bits of our save |
+| `setTransformLevel` / `setDarkClear` / `expectTransformLevel` / `expectDarkClear` | `level`, `set` | level bits of our save |
 | `dismissSaveRequest` | `optional`, `timeoutSec` | answers the capture's save prompt with no |
 | `storyPrompts` | `value` | the per-player pop-up setting |
 
@@ -428,4 +446,6 @@ exporting an array. A scenario has:
 
 The helpers in `lib.js`: `meetIn(stage, other)` waits for both players in a stage, checks each
 other's dummy and barriers; `barrier(name, other)` synchronises two instances; `tt(name, value)`
-builds a mod-setting `--cvar`.
+builds a mod-setting `--cvar`. `STORY` holds the story checkpoints (start fields for one area each)
+and `STORY_BITS` their event bits; `scenarios/story-late.js` builds on them, and its manual
+`story-observe-*` scenarios play one beat and log what the story tracker saw.

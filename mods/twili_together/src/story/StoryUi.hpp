@@ -18,5 +18,7 @@ const char* catchUpBlockCode();
 std::string catchUpConfirmRml();
 // The confirmation was accepted; re-checks everything.
 void startCatchUp();
+// Drops the story log and this game's learned destinations.
+void forgetLearnedStory();
 
 }  // namespace twili::story

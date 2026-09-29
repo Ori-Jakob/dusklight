@@ -171,6 +171,7 @@ repairs the stream.
 | `SET_EVENT_BIT` / `UNSET_EVENT_BIT` | `no` | story event bits; a few local-only bits are never sent |
 | `GIVE_ITEM` | `itemNo` | the receiver grants it through the game's item service, so a randomizer applies its own logic |
 | `UPDATE_DUNGEON_ITEMS` | `saveTblNo`, `keyDelta`, `dungeonItemBits` | small keys, map, compass, boss key |
+| `LIGHT_DROP` | `area`, `tbl`, `tbox` | a tear of light picked up. Unless that tear's TBOX bit is already set, the receiver sets it, adds one to the area's count (at most 16) and removes the tear from its screen; the bit keeps replays from counting twice |
 | `UPDATE_WORLD_STATE` | `fmt` (`dsv1`), `save`, `dan`, `danStageNo`, `saveTblNo`, optional `targetClientId` | the whole save as base64; merged, never simply copied |
 | `REQUEST_WORLD_STATE` | `catchUp` | asks the team for its state |
 
@@ -182,8 +183,8 @@ Catch-up: the relay keeps, per team, team game and layout, the last untargeted
 `queueSeq`, so a reconnecting client skips what it already applied). A joining client sends
 `REQUEST_WORLD_STATE`. Teammates who are online and caught up answer with a targeted
 `UPDATE_WORLD_STATE`; the cache answers only when none can. With `catchUp: true` the relay also
-replays the queue and the team's latest story move. A fresh untargeted world state replaces the
-cache and empties the queue.
+replays the queue and the team's last 16 story moves, oldest first. A fresh untargeted world state
+replaces the cache and empties the queue.
 
 ### Kills and story (teammates only)
 
@@ -191,8 +192,8 @@ cache and empties the queue.
 | --- | --- | --- |
 | `ENEMY_DEFEATED` | teammates in the same stage and layer | `{v: 2, stageName, layerNo, kills: [...]}`; a kill is the enemy's spawn key `{roomNo, procName, params, setId, home, dup}` (`dup` 0, or 1 to 4 for an Enemy Count extra) plus `fxSize`, `fxType`, `zoneActor`. Never cached, a replay would delete an enemy that respawned |
 | `ENEMY_DAMAGE` | teammates in the same stage and layer | `{v: 1, quiet: true, stageName, layerNo, hits: [...]}`; a hit is a spawn key as in `ENEMY_DEFEATED` plus `dmg` (1 to 30000), `pct` (the sender's health percent for that enemy, 100 to 500) and `hpAfter` (the sender's health left at 100%, or -1). The receiver lowers its copy's health by `dmg` converted to its own percent, and further to `hpAfter` if that is lower (a hit it missed), never below 2 (11 for Wooden Puppets and Skulltulas): deaths stay with `ENEMY_DEFEATED`. Never cached |
-| `STORY_EVENT` | teammates in the same stage and layer | `ph` = `start`, `joined` or `end`; a story cutscene teammates in the same room may watch too |
-| `STORY_MOVE` | the whole team | `ph: "arrive"`: a story event moved the sender to another stage. Teammates get a prompt to follow. The latest one per team is replayed on catch-up |
+| `STORY_EVENT` | teammates in the same stage and layer | `ph` = `start`, `joined` or `end`; a story cutscene teammates in the same room may watch too. With `req: "npc"` it carries `npc: {prof, room, params, set, home, k, sd}`: the NPC's spawn key, the entry of its event table it ordered and a digest of the story flags; a teammate joins through its own copy of that NPC, only for allowlisted events and never in a randomizer game |
+| `STORY_MOVE` | the whole team | `ph: "arrive"`: a story event moved the sender to another stage. Teammates get a prompt to follow. The last 16 per team are replayed on catch-up, oldest first. Besides `from`, `to`, `event`, `qual` and `hops` it carries `hl` (each arrival: `at`, the arrival demo's `m`, `sw`, `name`), `bits` (event bits the move set), `key`, `th` (it ended on a cutscene or battle layer) and `boss` |
 
 ### Teleport (one target, while `teleportMode` is on)
 

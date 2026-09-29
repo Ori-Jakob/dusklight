@@ -156,7 +156,9 @@ Lists everyone in the room, grouped by team, with where they are and whether the
 From there you can teleport to a player (when the room allows it), hand over the room or your
 team, and use **Catch up to story**: when a teammate's story event moved them (for example
 Link's capture into Hyrule Castle) and you were not there, this takes you to the matching place
-with the matching form.
+with the matching form. It prefers the team's latest strong story move to a later minor one, and
+it also works offline from the moves this game learned before. Tears of light a teammate collects
+count for the whole team.
 
 ## Known limitations
 
@@ -166,8 +168,11 @@ with the matching form.
   and a teammate with a different save layout gets a warning and no world data.
 - A randomizer team has to run the same seed, generated on every player's computer (or confirmed
   as an unverified match).
-- Story sync knows a handful of story moves (the capture, the escape from the castle, the
-  twilight gate, the Faron Spring). Other cutscenes only play for the player who triggers them.
+- Story sync follows the story events that move a player (dungeon exits, the twilight walls and
+  springs, Zant's curse, the Master Sword, ...) to where the teammate actually arrived, and learns
+  those destinations per game for later catch-ups. Cutscenes started by NPCs or objects play only
+  for the player who triggers them; teammates in the room get the follow prompt if the scene moves
+  them.
 - While the game is paused by "Pause on Focus Lost", the mod does not run: a `tcp://`
   connection drops after 30 s and reconnects when you come back.
 - Name tags are drawn under the HUD.

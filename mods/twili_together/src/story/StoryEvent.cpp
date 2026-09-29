@@ -53,8 +53,9 @@ bool isEventTag(int16_t profile) {
 
 // Only when our own state kept us out, not while loading, in our own cutscene or elsewhere.
 bool missToastWorthy(const char* reason) {
-    for (const char* quiet :
-        {"loading", "cutscene", "room", "seen", "different-event", "trigger", "ended", "refused"})
+    for (const char* quiet : {"loading", "cutscene", "room", "seen", "different-event", "trigger",
+             "ended", "refused", "state", "npc-missing", "npc-event", "npc-not-allowlisted",
+             "npc-randomizer", "npc-data"})
     {
         if (std::strcmp(reason, quiet) == 0) {
             return false;

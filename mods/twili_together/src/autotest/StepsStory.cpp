@@ -137,6 +137,7 @@ using nlohmann::json;
 namespace sd = story::detail;
 
 json sForcedMove;
+int sForcedRetry = 0;
 bool sSaveReqSeen = false;
 int sTearsAtMark = 0;
 int sTearTbox = -1;
@@ -828,9 +829,18 @@ std::optional<bool> dismissSaveRequest(StepContext& ctx) {
 
 // The stage change of a forcedMove, once its event runs.
 void tickForcedMove() {
-    if (sForcedMove.is_null() || !dComIfGp_event_runCheck() ||
-        dComIfGp_getEvent()->getPt1() != daPy_py_c::getMidnaActor())
-    {
+    if (sForcedMove.is_null()) {
+        return;
+    }
+    fopAc_ac_c* midna = daPy_py_c::getMidnaActor();
+    if (!dComIfGp_event_runCheck()) {
+        // Refused while another event ran (a room's start event): order it again.
+        if (midna != nullptr && ++sForcedRetry % 10 == 0) {
+            fopAcM_orderPotentialEvent(midna, 0, 0xFFFF, 0);
+        }
+        return;
+    }
+    if (dComIfGp_getEvent()->getPt1() != midna) {
         return;
     }
     const json step = std::move(sForcedMove);
@@ -1002,7 +1012,8 @@ std::optional<bool> storySteps(const std::string& op, StepContext& ctx) {
     if (op == "waitStorySettled") {
         const bool settled = !dComIfGp_isEnableNextStage() && !dComIfGp_event_runCheck() &&
                              !story::tracker().movePending() && !story::loadActive() &&
-                             !sd::followChainOpen() && story::tracker().quietTicks() >= 60;
+                             !sd::followChainOpen() && story::tracker().quietTicks() >= 60 &&
+                             sForcedMove.is_null();
         // pressA: advances the text of the scenes on the way.
         if (!settled && step.value("pressA", false) && dComIfGp_event_runCheck() && !padBusy() &&
             ctx.ticks % 20 == 0)
@@ -1135,6 +1146,23 @@ std::optional<bool> storySteps(const std::string& op, StepContext& ctx) {
     // from {stage, room?, point?} -> to {stage, room, point, layer?}, like a shuffled entrance.
     if (op == "testRemap") {
         sRemap = step.contains("from") ? json{{"from", step["from"]}, {"to", step["to"]}} : json();
+        return true;
+    }
+
+    // Logs the daNpcT_c actors of the stage (for picking a pull-in test NPC).
+    if (op == "listNpcs") {
+        s_tears.clear();
+        fopAcM_Search(
+            [](void* proc, void*) -> void* {
+                auto* a = static_cast<fopAc_ac_c*>(proc);
+                if (story::npc::isNpcT(fopAcM_GetName(a))) {
+                    TwiliLog.info("[autotest] npc 0x{:X} room {} at ({:.0f} {:.0f} {:.0f})",
+                        fopAcM_GetName(a), fopAcM_GetRoomNo(a), a->current.pos.x, a->current.pos.y,
+                        a->current.pos.z);
+                }
+                return nullptr;
+            },
+            nullptr);
         return true;
     }
 

@@ -392,8 +392,9 @@ void tickLoadWaiting() {
     l.phase = LoadPhase::Loading;
     l.reason.clear();
     l.loadStartedAt = now;
-    TwiliLog.info("[story] load started {} room {} point {} layer arg {}", l.entrance.stage,
-        l.entrance.room, l.entrance.point, l.layerArg);
+    TwiliLog.info("[story] load started {} room {} point {} layer arg {} (Midna {})",
+        l.entrance.stage, l.entrance.room, l.entrance.point, l.layerArg,
+        dComIfGs_isEventBit(dSv_event_flag_c::M_067) ? "riding" : "not riding");
 }
 
 void tickLoadLoading() {
@@ -427,9 +428,11 @@ void tickLoadLoading() {
             return;
         }
         const bool wolf = link->checkWolf() != 0;
-        TwiliLog.info("[story] load arrived {} room {} point {} layer {} {} (expected {}, {})",
+        TwiliLog.info("[story] load arrived {} room {} point {} layer {} {} (expected {}, {}; "
+                      "Midna {})",
             stage, dComIfGp_roomControl_getStayNo(), dComIfGp_getStartStagePoint(),
-            dComIfG_play_c::getLayerNo(0), wolf ? "wolf" : "human", formName(l.form), l.source);
+            dComIfG_play_c::getLayerNo(0), wolf ? "wolf" : "human", formName(l.form), l.source,
+            dComIfGs_isEventBit(dSv_event_flag_c::M_067) ? "riding" : "not riding");
         tracker().setLastOwnStoryArrival(now);
         storylog::noteOwnStoryArrival();
         if (!l.moveId.empty() && s_state.team.valid && s_state.team.move.id == l.moveId) {

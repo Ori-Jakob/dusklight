@@ -1,6 +1,7 @@
 #include "story/StoryUi.hpp"
 
 #include "core/SaveGate.hpp"
+#include "story/StoryLog.hpp"
 #include "story/StoryState.hpp"
 #include "teleport/Teleport.hpp"
 #include "ui/Toasts.hpp"
@@ -97,6 +98,10 @@ std::string catchUpConfirmRml() {
 
 void startCatchUp() {
     detail::startCatchUpPlan();
+}
+
+void forgetLearnedStory() {
+    storylog::forget();
 }
 
 }  // namespace twili::story
