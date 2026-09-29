@@ -110,4 +110,24 @@ std::string mapName(const char* stage, int roomNo) {
     return anyRoom != nullptr ? anyRoom : stage;
 }
 
+namespace {
+const OwnStageRequest* s_ownRequest = nullptr;
+}  // namespace
+
+OwnStageRequest::OwnStageRequest(const char* s, int p, int r, int l)
+    : point(static_cast<int16_t>(p)), room(static_cast<int8_t>(r)), layer(static_cast<int8_t>(l)) {
+    std::strncpy(stage, s, sizeof(stage) - 1);
+    s_ownRequest = this;
+}
+
+OwnStageRequest::~OwnStageRequest() {
+    if (s_ownRequest == this) {
+        s_ownRequest = nullptr;
+    }
+}
+
+const OwnStageRequest* OwnStageRequest::current() {
+    return s_ownRequest;
+}
+
 }  // namespace twili::local

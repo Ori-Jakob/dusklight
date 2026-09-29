@@ -78,7 +78,7 @@ const followTo = (stage, titleHas = "") => [
 const scenarios = [
     pair({
         name: "story-eldin-spring",
-        description: "A completes the Eldin tears: kytag04's potential-event warp is one strong move; B, a wolf on Death Mountain, follows and ends human in Kakariko",
+        description: "A completes the Eldin tears: kytag04's potential-event warp is one strong move; B in Faron follows and ends human in Kakariko",
         a: {
             start: STORY.eldinTwilight,
             steps: [
@@ -423,6 +423,47 @@ const scenarios = [
             steps: [at("F_SP109"), { op: "storyPrompts", value: false }, { op: "entranceSweep", timeoutSec: 1100 }, { op: "quit" }],
         }],
     },
+    (() => {
+        const teleportOn = [
+            { op: "setRoomOption", name: "teleportMode", value: true },
+            { op: "waitRoomOption", name: "teleportMode", value: true, timeoutSec: 20 },
+        ];
+        return pair({
+            name: "story-rando-bypass",
+            description: "a stand-in entrance shuffle on B sends every load into South Faron to Kakariko: B's follow and teleport still land in South Faron, a plain exit there is shuffled",
+            timeoutSec: 780,
+            a: {
+                start: STORY.kakariko,
+                steps: [
+                    ...teleportOn,
+                    { op: "triggerStory", via: "forcedMove", stage: "F_SP108", room: 1, point: 3, layer: -1 },
+                    settle(),
+                    { op: "expectStoryMove", role: "sent", qualHas: QUAL.side, toStage: "F_SP108" },
+                    { op: "waitSignal", name: "b-teleported", from: "B", timeoutSec: 480 },
+                ],
+            },
+            b: {
+                start: { ...STORY.kakariko, stage: "F_SP110", point: 0 },
+                steps: [
+                    ...teleportOn,
+                    { op: "testRemap", from: { stage: "F_SP108" }, to: { stage: "F_SP109", room: 0, point: 33 } },
+                    ...followTo("F_SP108"),
+                    settle(),
+                    { op: "warp", stage: "F_SP110", room: 0, point: 0 },
+                    { op: "wait", sec: 3 },
+                    at("F_SP110"),
+                    { op: "teleportTo", target: "A", expect: "stage", timeoutSec: 90 },
+                    at("F_SP108"),
+                    { op: "signal", name: "b-teleported" },
+                    // A game exit into South Faron is still shuffled.
+                    { op: "warp", stage: "F_SP108", room: 0, point: 0 },
+                    { op: "wait", sec: 3 },
+                    at("F_SP109"),
+                    { op: "testRemap" },
+                ],
+            },
+        });
+    })(),
 ];
 
 module.exports = [...observeScenarios, ...scenarios];

@@ -25,6 +25,8 @@ bool takeOverBoot(scene_class* logoScene);
 void applyStoryStart(const nlohmann::json& start);
 // A stage's save table for those fields, -1 if unknown.
 int stageSaveTbl(const char* stage);
+// The testRemap step's stand-in for the randomizer's entrance shuffle (dComIfGp_setNextStage).
+void remapStageRequest(const char*& stage, int16_t& point, int8_t& room, int8_t& layer);
 
 // Scripted input on port 0, neutral otherwise.
 void overridePad(PADStatus* status);

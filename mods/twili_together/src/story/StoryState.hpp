@@ -110,6 +110,11 @@ struct State {
     uint32_t lastMoveQual = 0;
     bool lastMoveFromCache = false;
     MoveRecord lastMove;
+    // Segments whose predicate our own side undid (the randomizer's return to spawn clears
+    // levels and story bits that world sync merges back): menu row only, no pop-up.
+    std::set<std::string> leftSegments;
+    std::string lastSegment;
+    uint8_t lastTlv = 0, lastDcl = 0;
 };
 
 State& state();

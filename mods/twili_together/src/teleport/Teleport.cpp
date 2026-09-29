@@ -153,6 +153,7 @@ void startStageTeleport(const Destination& d, int8_t layerArg) {
     dComIfGs_setRestartRoom(pos, d.angleY, d.roomNo);
     dComIfGs_setRestartRoomParam(stageTeleportRoomParam(d));
     // setPoint 1 stores start point -1, so nothing matches a point of the stage we leave.
+    const local::OwnStageRequest own(d.stageName, -1, d.roomNo, layerArg);
     dComIfGp_setNextStage(d.stageName, -1, d.roomNo, layerArg, 0.0f, 0, 1, 0, 0, 1, 0);
 }
 

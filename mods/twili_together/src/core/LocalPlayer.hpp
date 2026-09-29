@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 
 class daAlink_c;
@@ -27,5 +28,23 @@ bool isKnownEntrance(const char* stage, int roomNo, int point);
 
 // The warp tool's name for the stage and room, else the stage name.
 std::string mapName(const char* stage, int roomNo);
+
+// Around our own stage requests (story follow and repair, teleport): a remap of that request by
+// another mod (the randomizer's entrance shuffle) is undone by a last-priority hook. The game's own
+// exits are left alone.
+class OwnStageRequest {
+public:
+    OwnStageRequest(const char* stage, int point, int room, int layer);
+    ~OwnStageRequest();
+    OwnStageRequest(const OwnStageRequest&) = delete;
+    OwnStageRequest& operator=(const OwnStageRequest&) = delete;
+
+    static const OwnStageRequest* current();
+
+    char stage[8] = {};
+    int16_t point;
+    int8_t room;
+    int8_t layer;
+};
 
 }  // namespace twili::local

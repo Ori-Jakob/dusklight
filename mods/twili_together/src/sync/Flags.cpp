@@ -303,6 +303,8 @@ void onEventBit(uint16_t no, bool set) {
     if (set) {
         // Story qualification: we wrote a synced story bit.
         story::noteLocalEventBit(no);
+    } else {
+        story::noteLocalEventBitCleared(no);
     }
     if (!enabled()) {
         return;

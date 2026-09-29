@@ -42,6 +42,32 @@ int stageSaveTbl(const char* stage) {
     return story::stageSaveTbl(stage);
 }
 
+namespace {
+nlohmann::json sRemap;
+std::string sRemapStage;
+}  // namespace
+
+void remapStageRequest(const char*& stage, int16_t& point, int8_t& room, int8_t& layer) {
+    if (sRemap.is_null() || stage == nullptr) {
+        return;
+    }
+    const nlohmann::json& from = sRemap["from"];
+    const nlohmann::json& to = sRemap["to"];
+    if (std::strncmp(stage, from.value("stage", std::string{}).c_str(), 8) != 0 ||
+        (from.contains("room") && room != from.value("room", -1)) ||
+        (from.contains("point") && point != from.value("point", -1)))
+    {
+        return;
+    }
+    TwiliLog.info("[autotest] remapping {}/{}/{} -> {}/{}/{}", stage, room, point,
+        to.value("stage", std::string{}), to.value("room", 0), to.value("point", 0));
+    sRemapStage = to.value("stage", std::string{});
+    stage = sRemapStage.c_str();
+    room = static_cast<int8_t>(to.value("room", 0));
+    point = static_cast<int16_t>(to.value("point", 0));
+    layer = static_cast<int8_t>(to.value("layer", -1));
+}
+
 // The story fields of `start`, applied after dComIfGs_init and before the first load.
 void applyStoryStart(const nlohmann::json& start) {
     using nlohmann::json;
@@ -1085,6 +1111,12 @@ std::optional<bool> storySteps(const std::string& op, StepContext& ctx) {
                 story::storylog::learnedCount(), want));
         }
         return false;
+    }
+
+    // from {stage, room?, point?} -> to {stage, room, point, layer?}, like a shuffled entrance.
+    if (op == "testRemap") {
+        sRemap = step.contains("from") ? json{{"from", step["from"]}, {"to", step["to"]}} : json();
+        return true;
     }
 
     if (op == "forgetLearned") {

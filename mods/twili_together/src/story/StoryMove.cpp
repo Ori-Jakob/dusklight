@@ -322,6 +322,8 @@ bool startLoad(const Entrance& e, int8_t layerArg, Form form, const std::string&
 // A real start point for dStage_playerInit; room param 0 keeps the entry's start mode.
 void requestEntranceLoad(const LoadState& l) {
     dComIfGs_setRestartRoomParam(0);
+    const local::OwnStageRequest own(
+        l.entrance.stage, l.entrance.point, l.entrance.room, l.layerArg);
     dComIfGp_setNextStage(
         l.entrance.stage, l.entrance.point, l.entrance.room, l.layerArg, 0.0f, 0, 1, 0, 0, 1, 0);
 }
@@ -488,6 +490,26 @@ void offerTeamMove() {
         placeName(team.move)));
 }
 
+// A level or a segment's story bit dropped on our side: that segment was left on purpose.
+void leaveSegment(const char* why) {
+    if (!s_state.lastSegment.empty() && s_state.leftSegments.insert(s_state.lastSegment).second) {
+        TwiliLog.info("[story] segment {} left ({}): catch-up stays a menu row",
+            s_state.lastSegment, why);
+    }
+}
+
+void tickLeftSegments() {
+    const uint8_t tlv = transformLevels();
+    const uint8_t dcl = darkClearLevels();
+    if ((s_state.lastTlv & ~tlv) != 0 || (s_state.lastDcl & ~dcl) != 0) {
+        leaveSegment("a level was cleared");
+    }
+    s_state.lastTlv = tlv;
+    s_state.lastDcl = dcl;
+    const StorySegment* seg = activeSegment();
+    s_state.lastSegment = seg != nullptr ? seg->id : "";
+}
+
 void checkConsistency() {
     PromptState& pr = s_state.prompt;
     const CatchUpPlan& plan = s_state.plan;
@@ -497,6 +519,10 @@ void checkConsistency() {
     TwiliLog.info("[story] inconsistent: segment {} does not allow {} (plan {} - {})", plan.segment,
         currentStage(), catchUpKindName(plan.kind), plan.reason);
     if (!sync::enabled() || pr.kind != PromptKind::None || plan.kind == CatchUpPlan::Kind::None) {
+        return;
+    }
+    if (s_state.leftSegments.count(plan.segment) != 0) {
+        TwiliLog.info("[story] catch-up not offered (segment {} was left)", plan.segment);
         return;
     }
     if (pr.inconsistentDeclines >= kMaxInconsistentDeclines) {
@@ -992,6 +1018,14 @@ void noteLocalEventBit(uint16_t no) {
     tracker().noteLocalEventBit(no);
 }
 
+void noteLocalEventBitCleared(uint16_t no) {
+    if (no == dSv_event_flag_c::M_014 || no == dSv_event_flag_c::F_0630 ||
+        no == dSv_event_flag_c::M_071 || no == dSv_event_flag_c::F_0250)
+    {
+        leaveSegment("a story bit was cleared");
+    }
+}
+
 bool handlePacket(const std::string& type, const nlohmann::json& packet) {
     if (type == "STORY_MOVE") {
         handleStoryMove(packet);
@@ -1015,7 +1049,12 @@ void tick() {
         s_state.plan = CatchUpPlan{};
         return;
     }
+    if (!s_state.hadSave) {
+        s_state.lastTlv = transformLevels();
+        s_state.lastDcl = darkClearLevels();
+    }
     s_state.hadSave = true;
+    tickLeftSegments();
     tickLoad();
     tickJoin();
     computeCatchUpPlan();

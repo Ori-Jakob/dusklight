@@ -16,6 +16,8 @@ void onEventAccepted(const dEvt_order_c& order);
 void onStageSaveTableLoaded();
 // We set one of our synced event bits.
 void noteLocalEventBit(uint16_t no);
+// Something on our side (not a teammate) cleared a synced event bit.
+void noteLocalEventBitCleared(uint16_t no);
 
 bool handlePacket(const std::string& type, const nlohmann::json& packet);
 // Every Session::update, after teleport::tick, connected or not.
