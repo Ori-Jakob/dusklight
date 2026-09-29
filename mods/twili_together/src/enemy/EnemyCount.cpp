@@ -21,7 +21,6 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
-#include <cstring>
 #include <deque>
 #include <unordered_map>
 #include <unordered_set>
@@ -92,7 +91,6 @@ std::unordered_set<fpc_ProcID> s_placed;
 std::deque<fpc_ProcID> s_placedOrder;
 std::unordered_map<fpc_ProcID, Job> s_jobs;
 std::unordered_map<fpc_ProcID, Extra> s_extras;
-char s_stage[8] = {};
 
 const DupSpec* findSpec(s16 procName, u32 params) {
     for (const DupSpec& s : kDupSpecs) {
@@ -279,7 +277,7 @@ void onPlacedRequested(fpc_ProcID id) {
     if (id == fpcM_ERROR_PROCESS_ID_e || !s_placed.insert(id).second) {
         return;
     }
-    // A request cancelled before its create never reaches onActorCreated.
+    // A request cancelled before its create never reaches onActorCreated; the oldest go first.
     s_placedOrder.push_back(id);
     if (s_placedOrder.size() > kMaxPlaced) {
         s_placed.erase(s_placedOrder.front());
@@ -349,13 +347,6 @@ bool extraSpawn(fpc_ProcID id, ExtraSpawn& out) {
 }
 
 void tick() {
-    if (const char* stage = dComIfGp_getStartStageName();
-        stage != nullptr && std::strncmp(stage, s_stage, sizeof(s_stage)) != 0)
-    {
-        std::strncpy(s_stage, stage, sizeof(s_stage) - 1);
-        s_placed.clear();
-        s_placedOrder.clear();
-    }
     tickStuck();
     if (s_jobs.empty()) {
         return;
