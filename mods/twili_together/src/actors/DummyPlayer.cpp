@@ -3060,6 +3060,10 @@ void daDummyPlayer_c::playQueuedSfx(const twili::Client& client, double shownSeq
     static constexpr int32_t kMaxLateTicks = 6;
     static constexpr int32_t kMaxAheadTicks = 90;
     const twili::RemoteSfxQueue& queue = client.sfx;
+    // A rebuilt client entry (ALL_CLIENT_STATE) counts its arrivals from 1 again.
+    if (static_cast<int32_t>(queue.lastIndex() - mDummySfxDone) < 0) {
+        mDummySfxDone = 0;
+    }
     if (!mDummySfxPrimed) {
         mDummySfxDone = queue.lastIndex();
         mDummySfxPrimed = true;
