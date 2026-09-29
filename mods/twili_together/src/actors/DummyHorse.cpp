@@ -29,9 +29,10 @@ namespace twili {
 namespace {
 
 constexpr const char* kHorseArcPath = "/res/Object/Horse.arc";
-// Horse.arc decompressed is about 0x59000; the heap is trimmed to what createHeap used.
+// Both heaps are trimmed to what they use; Horse.arc decompressed is about 0x59000.
 constexpr u32 kDummyHorseHeapSize = 0x60000;
 constexpr u32 kDummyHorseHeapFlags = 0x80000000 | 0x20000000;
+constexpr u32 kHorseArcHeapSize = 0x100000;
 constexpr u16 kJointNum = 38;
 constexpr u16 kWaitAnm = dRes_ID_HORSE_BCK_HS_WAIT_01_e;
 // Clip changes blend in like the dummy's Link packs: the sender's morph lengths are not sent.
@@ -137,22 +138,20 @@ daDummyHorse_c* FindDummyHorse(uint32_t clientId) {
     return static_cast<daDummyHorse_c*>(actor);
 }
 
-// A failed attempt's heap dies without unlinking what was mounted into it from the volume list.
+// The loaders swap the raw files in place, so the archive backs one attempt only.
 int daDummyHorse_c::createHeap() {
-    const int result = createHeapImpl();
-    if (!result && mpArchive != nullptr) {
-        mpArchive->unmount();
-        mpArchive = nullptr;
+    if (mArchiveUsed) {
+        return 0;
     }
-    return result;
+    mArchiveUsed = true;
+    return createHeapImpl();
 }
 
 int daDummyHorse_c::createHeapImpl() {
     mpArchive = nullptr;
     std::fill(std::begin(mBck), std::end(mBck), nullptr);
     mRecolor = HorseRecolor{};
-    mpArchive = JKRArchive::mount(kHorseArcPath, JKRArchive::MOUNT_MEM, mDoExt_getCurrentHeap(),
-        JKRArchive::MOUNT_DIRECTION_HEAD);
+    mpArchive = mArchives.get(0);
     if (mpArchive == nullptr) {
         TwiliLog.warn("[horse {}] createHeap: {} mount failed", mClientId, kHorseArcPath);
         return 0;
@@ -236,6 +235,18 @@ cPhs_Step daDummyHorse_c::create() {
     // daHorse_c's member constructors only set fields; nothing registers a horse here.
     fopAcM_ct(this, daDummyHorse_c);
     mClientId = static_cast<uint32_t>(fopAcM_GetParam(this));
+    switch (mArchives.update(this, &kHorseArcPath, 1, kHorseArcHeapSize)) {
+    case PrivateArchives::State::Idle:
+        if (mArchives.failed()) {
+            TwiliLog.warn("[horse {}] create: no heap for {}", mClientId, kHorseArcPath);
+            return cPhs_ERROR_e;
+        }
+        return cPhs_INIT_e;
+    case PrivateArchives::State::Loading:
+        return cPhs_INIT_e;
+    case PrivateArchives::State::Ready:
+        break;
+    }
     mBlinkRng.seed(mClientId + 1);
     fopAcM_setStageLayer(this);
     if (!fopAcM_entrySolidHeap(
@@ -693,10 +704,8 @@ int daDummyHorse_c::draw() {
 void daDummyHorse_c::destroy() {
     // Never ~daHorse_c: it would drop the resident "Horse" archive our own Epona uses.
     m_sound.deleteObject();
-    if (mpArchive != nullptr) {
-        mpArchive->unmount();
-        mpArchive = nullptr;
-    }
+    mpArchive = nullptr;
+    mArchives.release();
     TwiliLog.info("[horse {}] destroyed", mClientId);
 }
 
@@ -752,8 +761,8 @@ int daDummyHorse_execute(void* i_this) {
     return static_cast<daDummyHorse_c*>(i_this)->execute();
 }
 
-int daDummyHorse_isDelete(void*) {
-    return TRUE;
+int daDummyHorse_isDelete(void* i_this) {
+    return !static_cast<daDummyHorse_c*>(i_this)->archiveBusy();
 }
 
 int daDummyHorse_draw(void* i_this) {

@@ -2,6 +2,7 @@
 
 #include "actors/DummyItemFx.hpp"
 #include "actors/DummyMidna.hpp"
+#include "actors/PrivateArchives.hpp"
 #include "fx/PlayerRecolor.hpp"
 #include "fx/RemoteTransformFx.hpp"
 
@@ -140,7 +141,10 @@ public:
     void getRecolorProbe(twili::RecolorProbe& out) const;
     void onPvpTgHit(dCcD_GObjInf* tg, fopAc_ac_c* atActor, dCcD_GObjInf* at);
 
+    bool privateArchivesBusy() const { return mDummyArchives.busy(); }
+
 private:
+    cPhs_Step loadPrivateArchives();
     int createHeapImpl();
     void clearPrivateModelPointers();
     void unmountPrivateArchives();
@@ -366,6 +370,8 @@ private:
     uint32_t mDummyLockDashes = 0;       // autotest
     // Zero until create() constructed the actor; a force-delete may come before.
     bool mDummyConstructed = true;
+    twili::PrivateArchives mDummyArchives;
+    bool mDummyArchivesUsed = false;
 };
 
 // ActorService profile "TTlink".

@@ -33,6 +33,7 @@ set(TWILI_SOURCES
     src/actors/DummyMidna.cpp
     src/actors/DummyPlayer.cpp
     src/actors/DummyWolfFx.cpp
+    src/actors/PrivateArchives.cpp
     src/actors/Profiles.cpp
     src/core/Base64.cpp
     src/core/ClientState.cpp

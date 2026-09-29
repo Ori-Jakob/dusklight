@@ -439,10 +439,16 @@ static J3DModelData* loadPrivateBmd(JKRArchive* archive, u16 bmdIndex, u32* outT
     return data;
 }
 
-static JKRArchive* mountPrivateArchive(const char* path) {
-    return JKRArchive::mount(path, JKRArchive::MOUNT_MEM, mDoExt_getCurrentHeap(),
-                             JKRArchive::MOUNT_DIRECTION_HEAD);
-}
+enum PrivateArc {
+    kArcKmdl, kArcMmdl, kArcZmdl, kArcBmdl, kArcAlink, kArcHyShd, kArcCWShd, kArcSWShd, kArcWmdl,
+    kArcCount,
+};
+constexpr const char* kPrivateArcPaths[kArcCount] = {
+    kLinkArcPath, kMagicArmorArcPath, kZoraArcPath, kCasualArcPath, kAlinkArcPath,
+    kHylianShieldArcPath, kOrdonShieldArcPath, kWoodShieldArcPath, kWolfArcPath,
+};
+// About 0x270000 decompressed; trimmed once they are mounted.
+constexpr u32 kPrivateArcHeapSize = 0x400000;
 
 static J3DModel* makeModelEx(JKRArchive* archive, u16 bmdId, u32 modelFlags, u32 diffFlags) {
     u32 tag = 'BMDR';
@@ -927,13 +933,31 @@ static int daDummyPlayer_createHeap(fopAc_ac_c* i_this) {
 }
 
 int daDummyPlayer_c::createHeap() {
+    // The loaders swap the raw files in place, so the archives back one attempt only.
+    if (mDummyArchivesUsed) {
+        return FALSE;
+    }
+    mDummyArchivesUsed = true;
     resetPrivateBmdCache();
     const int result = createHeapImpl();
     resetPrivateBmdCache();
-    if (!result) {
-        unmountPrivateArchives();
-    }
     return result;
+}
+
+cPhs_Step daDummyPlayer_c::loadPrivateArchives() {
+    switch (mDummyArchives.update(this, kPrivateArcPaths, kArcCount, kPrivateArcHeapSize)) {
+    case twili::PrivateArchives::State::Idle:
+        if (mDummyArchives.failed()) {
+            TwiliLog.warn("[dummy {}] create: no heap for the private archives", mDummyClientId);
+            return cPhs_ERROR_e;
+        }
+        return cPhs_INIT_e;
+    case twili::PrivateArchives::State::Loading:
+        return cPhs_INIT_e;
+    case twili::PrivateArchives::State::Ready:
+        break;
+    }
+    return cPhs_COMPLEATE_e;
 }
 
 void daDummyPlayer_c::clearPrivateModelPointers() {
@@ -976,7 +1000,7 @@ int daDummyPlayer_c::createHeapImpl() {
         return FALSE;
     }
 
-    mpDummyKmdlArchive = mountPrivateArchive(kLinkArcPath);
+    mpDummyKmdlArchive = mDummyArchives.get(kArcKmdl);
     if (!mpDummyKmdlArchive) {
         TwiliLog.warn("[dummy {}] createHeap: private {} mount failed",
                      mDummyClientId, kLinkArcPath);
@@ -1011,7 +1035,7 @@ int daDummyPlayer_c::createHeapImpl() {
     }
     clearEyeTextureMaxLod(mpDummyKokiriFaceModel);
 
-    mpDummyMmdlArchive = mountPrivateArchive(kMagicArmorArcPath);
+    mpDummyMmdlArchive = mDummyArchives.get(kArcMmdl);
     if (mpDummyMmdlArchive) {
         mpDummyMagicLinkModel = makeModelEx(mpDummyMmdlArchive, kMmdlBmdMl, 0x1000000, 0);
         mpDummyMagicFaceModel = makeModelEx(mpDummyMmdlArchive, kMmdlBmdAlFace,
@@ -1040,7 +1064,7 @@ int daDummyPlayer_c::createHeapImpl() {
                      mDummyClientId, kMagicArmorArcPath);
     }
 
-    mpDummyZmdlArchive = mountPrivateArchive(kZoraArcPath);
+    mpDummyZmdlArchive = mDummyArchives.get(kArcZmdl);
     if (mpDummyZmdlArchive) {
         mpDummyZoraLinkModel = makeModel(mpDummyZmdlArchive, kZmdlBmdZl);
         mpDummyZoraFaceModel = makeModelEx(mpDummyZmdlArchive, kZmdlBmdZlFace,
@@ -1058,7 +1082,7 @@ int daDummyPlayer_c::createHeapImpl() {
     }
 
     // The Ordon clothes.
-    mpDummyBmdlArchive = mountPrivateArchive(kCasualArcPath);
+    mpDummyBmdlArchive = mDummyArchives.get(kArcBmdl);
     if (mpDummyBmdlArchive) {
         mpDummyCasualLinkModel = makeModel(mpDummyBmdlArchive, kBmdlBmdBl);
         mpDummyCasualFaceModel = makeModelEx(mpDummyBmdlArchive, kBmdlBmdAlFace,
@@ -1081,7 +1105,7 @@ int daDummyPlayer_c::createHeapImpl() {
     mpLinkHandModel = mpDummyKokiriHandModel;
     mWoodSwordModel = mpDummyKokiriWoodSwordModel;
 
-    mpDummyAlinkArchive = mountPrivateArchive(kAlinkArcPath);
+    mpDummyAlinkArchive = mDummyArchives.get(kArcAlink);
     if (!mpDummyAlinkArchive) {
         TwiliLog.warn("[dummy {}] createHeap: private {} mount failed",
                      mDummyClientId, kAlinkArcPath);
@@ -1152,7 +1176,7 @@ int daDummyPlayer_c::createHeapImpl() {
     m_mSwordBrk = loadPrivateBrk(mpDummyAlinkArchive, dRes_ID_ALINK_BRK_AL_SWM_e);
     bindTevRegAnm(mpSwMModel, m_mSwordBrk);
 
-    mpDummyHylianShieldArchive = mountPrivateArchive(kHylianShieldArcPath);
+    mpDummyHylianShieldArchive = mDummyArchives.get(kArcHyShd);
     if (mpDummyHylianShieldArchive) {
         mpDummyHylianShieldModel =
             makeModel(mpDummyHylianShieldArchive, dRes_ID_HYSHD_BMD_AL_SHA_e);
@@ -1161,7 +1185,7 @@ int daDummyPlayer_c::createHeapImpl() {
                      mDummyClientId, kHylianShieldArcPath);
     }
 
-    mpDummyOrdonShieldArchive = mountPrivateArchive(kOrdonShieldArcPath);
+    mpDummyOrdonShieldArchive = mDummyArchives.get(kArcCWShd);
     if (mpDummyOrdonShieldArchive) {
         mpDummyOrdonShieldModel =
             makeModel(mpDummyOrdonShieldArchive, dRes_ID_CWSHD_BMD_AL_SHB_e);
@@ -1170,7 +1194,7 @@ int daDummyPlayer_c::createHeapImpl() {
                      mDummyClientId, kOrdonShieldArcPath);
     }
 
-    mpDummyWoodShieldArchive = mountPrivateArchive(kWoodShieldArcPath);
+    mpDummyWoodShieldArchive = mDummyArchives.get(kArcSWShd);
     if (mpDummyWoodShieldArchive) {
         mpDummyWoodShieldModel =
             makeModel(mpDummyWoodShieldArchive, dRes_ID_SWSHD_BMD_AL_SHC_e);
@@ -1180,7 +1204,7 @@ int daDummyPlayer_c::createHeapImpl() {
     }
 
     // The player's own Wmdl is only resident while it is a wolf itself (loadModelDVD).
-    mpDummyWmdlArchive = mountPrivateArchive(kWolfArcPath);
+    mpDummyWmdlArchive = mDummyArchives.get(kArcWmdl);
     if (mpDummyWmdlArchive) {
         // Flags as changeWolf.
         mpDummyWolfModel =
@@ -3869,6 +3893,9 @@ cPhs_Step daDummyPlayer_c::create() {
     fopAcM_ct(this, daDummyPlayer_c);
     mDummyClientId = (uint32_t)fopAcM_GetParam(this);
     restoreLocalLinkAudioPtr();
+    if (const cPhs_Step step = loadPrivateArchives(); step != cPhs_COMPLEATE_e) {
+        return step;
+    }
     TwiliLog.info("[dummy {}] create begin", mDummyClientId);
     fopAcM_setStageLayer(this);
 
@@ -4130,13 +4157,6 @@ void daDummyPlayer_c::drawRemoteShadow() {
     }
 }
 
-static void unmountArchive(JKRArchive*& archive) {
-    if (archive) {
-        archive->unmount();
-        archive = nullptr;
-    }
-}
-
 void daDummyPlayer_c::destroy() {
     if (!mDummyConstructed) {
         return;
@@ -4186,15 +4206,10 @@ void daDummyPlayer_c::destroyDummyAnmHeaps() {
 }
 
 void daDummyPlayer_c::unmountPrivateArchives() {
-    unmountArchive(mpDummyWmdlArchive);
-    unmountArchive(mpDummyWoodShieldArchive);
-    unmountArchive(mpDummyOrdonShieldArchive);
-    unmountArchive(mpDummyHylianShieldArchive);
-    unmountArchive(mpDummyAlinkArchive);
-    unmountArchive(mpDummyBmdlArchive);
-    unmountArchive(mpDummyZmdlArchive);
-    unmountArchive(mpDummyMmdlArchive);
-    unmountArchive(mpDummyKmdlArchive);
+    mpDummyKmdlArchive = mpDummyMmdlArchive = mpDummyZmdlArchive = mpDummyBmdlArchive = nullptr;
+    mpDummyAlinkArchive = mpDummyHylianShieldArchive = mpDummyOrdonShieldArchive = nullptr;
+    mpDummyWoodShieldArchive = mpDummyWmdlArchive = nullptr;
+    mDummyArchives.release();
 }
 
 namespace {
@@ -4212,8 +4227,8 @@ int daDummyPlayer_execute(void* i_this) {
     return static_cast<daDummyPlayer_c*>(i_this)->execute();
 }
 
-int daDummyPlayer_isDelete(void*) {
-    return TRUE;
+int daDummyPlayer_isDelete(void* i_this) {
+    return !static_cast<daDummyPlayer_c*>(i_this)->privateArchivesBusy();
 }
 
 int daDummyPlayer_draw(void* i_this) {

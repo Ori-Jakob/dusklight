@@ -2,6 +2,7 @@
 
 // A remote player's Epona: daHorse_c pose members on a private Horse.arc, never the game's horse.
 
+#include "actors/PrivateArchives.hpp"
 #include "fx/PlayerRecolor.hpp"
 #include "presence/RemotePose.hpp"
 
@@ -65,6 +66,7 @@ public:
     bool isRidden() const { return mRidden && isShown(); }
     uint32_t clientId() const { return mClientId; }
     void getDebugInfo(DummyHorseDebugInfo& out) const;
+    bool archiveBusy() const { return mArchives.busy(); }
 
 private:
     int createHeapImpl();
@@ -80,6 +82,8 @@ private:
     void copyReinsToLine();
 
     JKRArchive* mpArchive = nullptr;
+    PrivateArchives mArchives;
+    bool mArchiveUsed = false;
     // Every Horse.arc BCK with its BAS, loaded in createHeap before the heap is trimmed.
     mDoExt_transAnmBas* mBck[kHorseLastAnm + 1] = {};
     HorseRecolor mRecolor;
