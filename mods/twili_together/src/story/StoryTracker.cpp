@@ -98,6 +98,17 @@ const char* tableName(EventTable t) {
     }
 }
 
+// What the saved flags pick for a stage: temp bits (King Bulblin's field layers) left out.
+int savedFlagLayer(const char* stage, int room) {
+    dSv_event_c& tmp = dComIfGs_getSaveInfo()->getTmp();
+    uint8_t saved[sizeof(tmp.mEvent)];
+    std::memcpy(saved, tmp.mEvent, sizeof(saved));
+    std::memset(tmp.mEvent, 0, sizeof(tmp.mEvent));
+    const int layer = dComIfG_play_c::getLayerNo_common(stage, room, -1);
+    std::memcpy(tmp.mEvent, saved, sizeof(saved));
+    return layer;
+}
+
 std::string entranceText(const Entrance& e) {
     return fmt::format(
         "{} room {} point {} layer {}/{}", e.stage, e.room, e.point, e.layerArg, e.layer);
@@ -314,6 +325,7 @@ bool Tracker::captureDeparture(PendingMove& out) {
     m.event.listType = m.event.eventId == -1 ?
                            0 :
                            static_cast<uint8_t>(static_cast<uint16_t>(m.event.eventId) >> 8);
+    m.bossDefeated = bossStageDungeon(m.from.stage) != nullptr && dComIfGs_isStageBossEnemy();
     if (last != nullptr) {
         m.event.name = last->name;
         m.event.mapType = last->mapType;
@@ -339,15 +351,25 @@ bool Tracker::captureDeparture(PendingMove& out) {
         m.event.reqKind = reqKindOf(req);
         out.bitsAtAccept = mLocalEventBitsSet;
     }
+    collectBits(out);
     m.curated = matchCuratedMove(m);
 
     const char* why = nullptr;
+    std::string notStory;
     if (!teleport::idle() || loadActive()) {
         why = "twili-load";  // a follow never produces another move
+    } else if (isNotStoryRequester(m.event.requester)) {
+        notStory = fmt::format("not-story: profile {}", m.event.requester);
+        why = notStory.c_str();
     } else if (m.curated < 0) {
+        // Potential events (kytag04, bosses, King Bulblin) have no event id, and common events
+        // (the boss warp's BOSS_WARPIN) a shared one, but both have an actor requester.
+        const bool actor = m.event.reqKind == ReqKind::Actor;
         if (m.event.mode != dEvt_mode_DEMO_e || (eventFlag & 0x44) != 0) {
             why = "not-a-cutscene";  // talk, door or chest
-        } else if (m.event.eventId == -1 || m.event.listType == dEvent_manager_c::BASE_KEEP) {
+        } else if (!actor && (m.event.eventId == -1 ||
+                                 m.event.listType == dEvent_manager_c::BASE_KEEP))
+        {
             why = "default-event";  // warps, returns, DEFAULT_START
         } else if (point < 0 || dComIfGs_getLife() <= 0) {
             why = "restart";  // void-out, game over, world change
@@ -420,12 +442,9 @@ void Tracker::recordArrival() {
         arrivalDt != nullptr ? static_cast<int>(arrivalDt->switch_no) : 0xFF);
 }
 
-void Tracker::settle() {
-    PendingMove p = std::move(*mMove);
-    mMove.reset();
+uint32_t Tracker::collectBits(PendingMove& p) const {
     MoveRecord& m = p.move;
-    const uint32_t sinceAccept = mLocalEventBitsSet - p.bitsAtAccept;
-    // Bits of the departure stage's earlier story events count too (BOSSCLEAR before WARPHOLE).
+    m.bits.clear();
     uint32_t sinceVisit = 0;
     for (const BitNote& note : mBitLog) {
         if (note.index <= p.bitsAtVisit || (note.index <= p.bitsAtAccept && !note.story)) {
@@ -438,17 +457,28 @@ void Tracker::settle() {
             m.bits.push_back(note.no);
         }
     }
-    m.transientHint =
-        m.to.layerArg >= 0 &&
-        m.to.layerArg != dComIfG_play_c::getLayerNo_common(m.to.stage, m.to.room, -1);
+    return sinceVisit;
+}
+
+void Tracker::settle() {
+    PendingMove p = std::move(*mMove);
+    mMove.reset();
+    MoveRecord& m = p.move;
+    const uint32_t sinceAccept = mLocalEventBitsSet - p.bitsAtAccept;
+    // Bits of the departure stage's earlier story events count too (BOSSCLEAR before WARPHOLE).
+    const uint32_t sinceVisit = collectBits(p);
+    m.curated = matchCuratedMove(m);
+    // A cutscene or battle layer: what we loaded is not what our saved flags pick there.
+    m.transientHint = m.to.layer >= 0 && m.to.layer != savedFlagLayer(m.to.stage, m.to.room);
     m.key = moveKey(m);
     std::string bitText;
     for (const uint16_t no : m.bits) {
         bitText += fmt::format("{}{:04X}", bitText.empty() ? "" : " ", no);
     }
-    TwiliLog.info("[story] settle key '{}' hops {} bits {}/{} [{}]{}", m.key, m.hopList.size(),
-        sinceAccept, sinceVisit, bitText, m.transientHint ? " transient layer" : "");
-    detail::onOwnMoveSettled(std::move(p.move), sinceAccept, p.copyOf);
+    TwiliLog.info("[story] settle key '{}' hops {} bits {}/{} [{}]{}{}", m.key, m.hopList.size(),
+        sinceAccept, sinceVisit, bitText, m.transientHint ? " transient layer" : "",
+        m.bossDefeated ? " boss defeated" : "");
+    detail::onOwnMoveSettled(std::move(p.move), std::max(sinceAccept, sinceVisit), p.copyOf);
 }
 
 void Tracker::tick() {
@@ -497,6 +527,8 @@ void Tracker::tick() {
                 m.to = dep.move.to;
                 m.hops++;
                 mMove->sawUnload = mMove->leftOld = mMove->arrived = false;
+                // Each hop gets its own arrival timeout: arrival scenes can run a minute.
+                mMove->departedAt = dep.departedAt;
                 TwiliLog.info("[story] move continues ({} hops) to {}", m.hops, entranceText(m.to));
             } else {
                 dep.move.id = newMoveId();

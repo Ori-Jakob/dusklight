@@ -4,6 +4,9 @@
 
 #include "core/LocalPlayer.hpp"
 
+#include "f_pc/f_pc_name.h"
+
+#include <algorithm>
 #include <cstring>
 #include <type_traits>
 
@@ -16,13 +19,48 @@ const StoryMoveDef kStoryMoves[] = {
         "R_SP107", 0, nullptr, 24, Form::Wolf, false, true},
     // Midna warps Link from the castle to twilight Ordon (M_014).
     {"castle-escape", "{name} escaped Hyrule Castle with Midna", "Ordon", "R_SP107", -1, nullptr,
-        -1, nullptr, -1, Form::Wolf, false, false},
+        -1, nullptr, -1, Form::Wolf, false, false, -1, -1, 0x0502},
     // Twilight gate: F_SP108 point 23 room 0 layer 10.
     {"faron-gate", "{name} passed the twilight gate with Midna", "Faron Woods in twilight",
         "F_SP108", -1, "F_SP108", 0, "TW_GATE_FILONE", 23, Form::Wolf, true, false},
-    // Arriving at F_SP108 room 1 point 3 clears twilight level 0 and gives the clothes.
+    // kytag04's warp to the Faron Spring (room 1 point 3 clears twilight level 0).
     {"faron-light", "{name} restored the Faron Spring", "the Faron Spring", nullptr, -1, "F_SP108",
-        1, nullptr, 3, Form::Human, false, false},
+        1, nullptr, -1, Form::Human, false, false, -1, fpcNm_KYTAG04_e},
+    // Twilight walls: the arrival at point 10 plays the transformation unless its switch is on.
+    {"eldin-gate", "{name} passed the Eldin twilight wall with Midna", "Eldin in twilight",
+        nullptr, -1, "F_SP121", 2, nullptr, 10, Form::Any, false, false},
+    {"lanayru-gate", "{name} passed the Lanayru twilight wall with Midna", "Lanayru in twilight",
+        nullptr, -1, "F_SP121", 9, nullptr, 10, Form::Any, false, false},
+    // The last tear: kytag04's warp to the spring (point 30, layer 8), whose arrival clears the
+    // twilight; its scenes end on another point of the natural layer, where followers load.
+    {"eldin-light", "{name} restored the Eldin Spring", "Kakariko Village", nullptr, -1, "F_SP109",
+        -1, nullptr, -1, Form::Human, false, false, -1, fpcNm_KYTAG04_e},
+    {"lanayru-light", "{name} restored the Lanayru Spring", "Lake Hylia", nullptr, -1, "F_SP115",
+        -1, nullptr, -1, Form::Human, false, false, -1, fpcNm_KYTAG04_e},
+    // After the Lakebed, Zant: Hyrule Field room 10, transform level 3.
+    {"mdh-start", "{name} was cursed by Zant", "Hyrule Field", nullptr, -1, "F_SP121", 10,
+        nullptr, -1, Form::Wolf, false, false, 20},
+    {"mdh-start", "{name} was cursed by Zant", "Hyrule Field", nullptr, -1, "F_SP121", 10,
+        nullptr, -1, Form::Wolf, false, false, 23},
+    // Zelda heals Midna in the castle tower (F_0250).
+    {"mdh-zelda", "{name}'s Midna was healed by Zelda", "Faron Woods", "R_SP107", -1, nullptr, -1,
+        nullptr, -1, Form::Wolf, false, false, -1, -1, 0x1E08},
+    // Arriving at the Sacred Grove point 99 clears twilight level 3.
+    {"master-sword", "{name} drew the Master Sword", "the Sacred Grove", nullptr, -1, "F_SP117",
+        1, nullptr, 99, Form::Human, false, false},
+    {"palace-entry", "{name} entered the Palace of Twilight", "the Palace of Twilight", "F_SP125",
+        -1, "D_MN08", -1, nullptr, -1, Form::Any, false, false},
+    // b_zant loads the throne room on cutscene layer 9.
+    {"zant-defeated", "{name} defeated Zant", "the Palace of Twilight", nullptr, -1, "D_MN08A", 10,
+        nullptr, -1, Form::Any, false, false, 25},
+    {"castle-barrier", "{name} shattered the barrier around Hyrule Castle", "Hyrule Castle",
+        "F_SP116", -1, nullptr, -1, nullptr, -1, Form::Any, false, false, -1, -1, 0x4208},
+    {"final-battle", "{name} went on to face Ganondorf", "Hyrule Castle", nullptr, -1, "D_MN09A",
+        -1, nullptr, -1, Form::Any, false, false},
+    {"final-battle", "{name} went on to face Ganondorf", "Hyrule Field", nullptr, -1, "D_MN09B",
+        -1, nullptr, -1, Form::Any, false, false},
+    {"final-battle", "{name} went on to face Ganondorf", "Hyrule Field", nullptr, -1, "D_MN09C",
+        -1, nullptr, -1, Form::Any, false, false},
 };
 const int kStoryMoveCount = static_cast<int>(sizeof(kStoryMoves) / sizeof(kStoryMoves[0]));
 
@@ -47,6 +85,35 @@ constexpr SidePoint kSideEffectPoints[] = {
     {"F_SP121", 10, 20},
     {"F_SP121", 10, 23},
     {"F_SP104", 1, 23},
+    {"D_MN08D", 50, 20},
+};
+
+// Event requesters whose relocations are transports, minigames or repeatable rides.
+constexpr int16_t kNotStoryRequesters[] = {
+    fpcNm_NPC_GWOLF_e,  // golden wolf
+    fpcNm_NPC_KN_e,     // Hero's Shade
+    fpcNm_NPC_FAIRY_e,  // Cave of Ordeals
+    fpcNm_MG_ROD_e,     // fishing
+    fpcNm_NPC_HENNA_e,  // fishing hole
+    fpcNm_NPC_YKW_e,    // Yeto's snowboard race
+    fpcNm_NPC_TARO_e,   // Talo sends Link back
+};
+
+struct BossStage {
+    const char* stage;
+    const char* dungeon;
+};
+
+// daObjBossWarp_c's levels.
+constexpr BossStage kBossStages[] = {
+    {"D_MN05A", "the Forest Temple"},
+    {"D_MN04A", "the Goron Mines"},
+    {"D_MN01A", "the Lakebed Temple"},
+    {"D_MN10A", "the Arbiter's Grounds"},
+    {"D_MN11A", "the Snowpeak Ruins"},
+    {"D_MN06A", "the Temple of Time"},
+    {"D_MN07A", "the City in the Sky"},
+    {"D_MN08A", "the Palace of Twilight"},
 };
 
 // Event names whose relocation is never story; grows from logs.
@@ -177,6 +244,7 @@ nlohmann::json MoveRecord::toJson() const {
         {"bits", bits},
         {"key", key},
         {"th", transientHint},
+        {"boss", bossDefeated},
     };
 }
 
@@ -240,6 +308,7 @@ MoveRecord MoveRecord::fromJson(const nlohmann::json& j) {
     }
     m.key = j.value("key", std::string{}).substr(0, 96);
     m.transientHint = j.value("th", false);
+    m.bossDefeated = j.value("boss", false);
     return m;
 }
 
@@ -334,6 +403,12 @@ int matchCuratedMove(const MoveRecord& m) {
         {
             continue;
         }
+        if ((d.toPoint >= 0 && m.to.point != d.toPoint) ||
+            (d.requester >= 0 && m.event.requester != d.requester) ||
+            (d.bit != 0 && std::find(m.bits.begin(), m.bits.end(), d.bit) == m.bits.end()))
+        {
+            continue;
+        }
         return i;
     }
     return -1;
@@ -369,8 +444,22 @@ bool isNotStory(const std::string& eventName) {
     return false;
 }
 
+bool isNotStoryRequester(int16_t profile) {
+    return profile >= 0 && std::find(std::begin(kNotStoryRequesters),
+                               std::end(kNotStoryRequesters), profile) != std::end(kNotStoryRequesters);
+}
+
+const char* bossStageDungeon(const char* stage) {
+    for (const BossStage& b : kBossStages) {
+        if (std::strncmp(b.stage, stage, 8) == 0) {
+            return b.dungeon;
+        }
+    }
+    return nullptr;
+}
+
 uint32_t qualify(const MoveRecord& m, uint32_t localBitsDuring) {
-    if (isNotStory(m.event.name)) {
+    if (isNotStory(m.event.name) || isNotStoryRequester(m.event.requester)) {
         return 0;
     }
     uint32_t q = 0;
@@ -391,6 +480,11 @@ uint32_t qualify(const MoveRecord& m, uint32_t localBitsDuring) {
     }
     if (localBitsDuring > 0) {
         q |= kQualStoryBits;
+    }
+    if (m.bossDefeated && bossStageDungeon(m.from.stage) != nullptr &&
+        std::strncmp(m.from.stage, m.to.stage, 8) != 0)
+    {
+        q |= kQualBoss;
     }
     return q;
 }

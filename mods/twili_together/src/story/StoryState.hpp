@@ -25,6 +25,10 @@ struct TeamMove {
     // Its pop-up or toast went out.
     bool offered = false;
     bool fromCache = false;
+    // Its originator is still on a cutscene or battle layer we would not load.
+    bool transient = false;
+    bool transientExpired = false;
+    Clock::time_point transientSince{};
 };
 
 struct LoadState {

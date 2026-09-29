@@ -107,6 +107,8 @@ private:
     bool captureDeparture(PendingMove& out);
     void recordArrival();
     void settle();
+    // The move's bits so far; returns how many story bits since the departure stage loaded.
+    uint32_t collectBits(PendingMove& p) const;
 
     std::deque<Instance> mInstances;
     uint32_t mNextInstanceId = 1;

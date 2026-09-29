@@ -41,6 +41,8 @@ constexpr auto kMergeWait = std::chrono::seconds(10);
 constexpr auto kExplicitLayerFresh = std::chrono::seconds(120);
 // A move replayed from the server cache older than this is a menu row, not a pop-up.
 constexpr auto kCachedMovePromptAge = std::chrono::minutes(10);
+// A transient move is offered as a menu row once its originator stayed that long.
+constexpr auto kTransientGiveUp = std::chrono::minutes(10);
 // The consistency check waits this long after a stage load, with no event running.
 constexpr uint32_t kConsistencySettleTicks = 150;
 constexpr int kMaxInconsistentDeclines = 3;
@@ -98,7 +100,10 @@ CatchUpPlan followPlan(const MoveRecord& m) {
             p.layerArg = m.to.layerArg;
         }
     }
+    // Once transforming is unlocked the form is each player's own choice.
+    const bool ownForm = dComIfGs_isEventBit(dSv_event_flag_c::M_077) != FALSE;
     p.form = def != nullptr && def->form != Form::Any ? def->form :
+             ownForm                                  ? Form::Any :
              m.wolfAfter                              ? Form::Wolf :
                                                         Form::Human;
     const std::string name = m.originName.empty() ? std::string("A teammate") : m.originName;
@@ -128,13 +133,59 @@ bool stageIsDungeon() {
 std::string movePromptText(const MoveRecord& m, bool title) {
     const std::string name = m.originName.empty() ? std::string("A teammate") : m.originName;
     const StoryMoveDef* def = curatedMove(m.curated);
+    const char* dungeon = (m.qual & kQualBoss) != 0 ? bossStageDungeon(m.from.stage) : nullptr;
     if (title) {
-        return def != nullptr ? withName(def->prompt, name) :
-                                fmt::format("{} was moved by a story event", name);
+        return def != nullptr     ? withName(def->prompt, name) :
+               dungeon != nullptr ? fmt::format("{} cleared {}", name, dungeon) :
+                                    fmt::format("{} was moved by a story event", name);
     }
     const CatchUpPlan f = followPlan(m);
-    return fmt::format("{} was taken to {} by a story event.\nFollow? You will arrive as a {}.",
-        name, f.place, formName(f.form));
+    const std::string form =
+        f.form == Form::Any ? std::string{} : fmt::format(" You will arrive as a {}.", formName(f.form));
+    return fmt::format(
+        "{} was taken to {} by a story event.\nFollow?{}", name, f.place, form);
+}
+
+// The originator still stands in the move's destination stage and layer.
+bool originStillThere(const MoveRecord& m) {
+    const auto& clients = Session::instance().clients();
+    const auto it = clients.find(m.originClientId);
+    return it != clients.end() && it->second.online &&
+           std::strncmp(it->second.stageName, m.to.stage, sizeof(m.to.stage)) == 0 &&
+           it->second.layerNo == m.to.layer;
+}
+
+// The originator is still on the cutscene or battle layer the move ended on, which we would
+// not load (our flags pick the stage's normal layer).
+bool moveTransient(const MoveRecord& m) {
+    const StoryMoveDef* def = curatedMove(m.curated);
+    if (!m.transientHint || (def != nullptr && def->keepExplicitLayer)) {
+        return false;
+    }
+    return dComIfG_play_c::getLayerNo_common(m.to.stage, m.to.room, -1) != m.to.layer &&
+           originStillThere(m);
+}
+
+void updateTransient() {
+    TeamMove& team = s_state.team;
+    const bool transient = team.valid && !team.satisfied && moveTransient(team.move);
+    if (transient && team.transientSince == Clock::time_point{}) {
+        team.transientSince = Clock::now();
+        TwiliLog.info("[story] move {} is transient: {} is still in a story event in {} layer {}",
+            team.move.id, team.move.originName, team.move.to.stage, team.move.to.layer);
+        toast(fmt::format("{} is in a story event in {}. You can follow when it ends.",
+            team.move.originName, placeName(team.move)));
+    }
+    if (transient && !team.transientExpired && Clock::now() - team.transientSince > kTransientGiveUp)
+    {
+        team.transientExpired = true;
+        TwiliLog.info("[story] move {} stayed transient too long; offered as a menu row",
+            team.move.id);
+    }
+    if (team.transient && !transient) {
+        TwiliLog.info("[story] move {} is no longer transient", team.move.id);
+    }
+    team.transient = transient && !team.transientExpired;
 }
 
 void finishLoad(LoadPhase phase, std::string reason, std::string message) {
@@ -331,7 +382,8 @@ void offerTeamMove() {
     team.offered = true;
     const auto own = tracker().lastOwnStoryArrival();
     const bool nearOwn = own && team.move.at < *own + kOwnArrivalGrace;
-    const bool stale = team.fromCache && Clock::now() - team.move.at > kCachedMovePromptAge;
+    const bool stale = (team.fromCache && Clock::now() - team.move.at > kCachedMovePromptAge) ||
+                       team.transientExpired;
     const std::string title = movePromptText(team.move, true);
     if (team.move.strong() && config::getBool(config::Var::StoryPrompts) && !nearOwn && !stale &&
         pr.kind == PromptKind::None)
@@ -631,8 +683,14 @@ void computeCatchUpPlan() {
     // 1. The team's latest move, if our own story has not moved on since.
     const TeamMove& team = s_state.team;
     const auto own = tracker().lastOwnStoryArrival();
-    if (sync::enabled() && team.valid && !team.satisfied && (!own || team.move.at > *own) &&
-        (seg == nullptr || segmentAllows(*seg, team.move.to.stage)))
+    if (sync::enabled() && team.valid && team.transient && !p.inconsistent) {
+        p.reason = fmt::format("{} is in a story event in {}. You can follow when it ends.",
+            team.move.originName, placeName(team.move));
+        s_state.plan = std::move(p);
+        return;
+    }
+    if (sync::enabled() && team.valid && !team.satisfied && !team.transient &&
+        (!own || team.move.at > *own) && (seg == nullptr || segmentAllows(*seg, team.move.to.stage)))
     {
         CatchUpPlan f = followPlan(team.move);
         f.segment = p.segment;
@@ -767,7 +825,10 @@ void tickPrompt() {
         closePrompt();
     }
 
-    if (team.valid && !team.offered && !team.satisfied && !team.declined && syncing) {
+    updateTransient();
+    if (team.valid && !team.offered && !team.satisfied && !team.declined && syncing &&
+        !team.transient)
+    {
         offerTeamMove();
     }
 
@@ -803,14 +864,14 @@ std::string debugText() {
     const TeamMove& team = s_state.team;
     return fmt::format(
         "tracker [{}] plan {} '{}' seg {} inconsistent {} | team {} {} sat {} decl {} off {} | "
-        "prompt {} showing {} waiting {} declines {} | load {} {} | join {} {} | sent {} recv {}",
+        "prompt {} showing {} waiting {} declines {} | load {} {} | join {} {} | sent {} recv {}{}",
         tracker().describe(), catchUpKindName(s_state.plan.kind), s_state.plan.title,
         s_state.plan.segment, s_state.plan.inconsistent, team.valid ? team.move.id : "-",
         team.valid ? team.move.to.stage : "", team.satisfied, team.declined, team.offered,
         promptKindName(s_state.prompt.kind), s_state.prompt.showing, s_state.prompt.waitingCalm,
         s_state.prompt.inconsistentDeclines, loadPhaseName(s_state.load.phase), s_state.load.reason,
         joinStateName(s_state.join.state), s_state.join.reason, s_state.movesSent,
-        s_state.movesReceived);
+        s_state.movesReceived, team.transient ? " | transient" : "");
 }
 
 }  // namespace detail

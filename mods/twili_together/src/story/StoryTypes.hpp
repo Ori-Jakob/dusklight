@@ -101,6 +101,8 @@ struct MoveRecord {
     std::string key;
     // The request's explicit layer differs from what the originator's flags pick there.
     bool transientHint = false;
+    // Left a boss room whose boss is defeated.
+    bool bossDefeated = false;
     // Local clock; minus the server's ageMs if cached.
     Clock::time_point at{};
 
@@ -126,6 +128,10 @@ struct StoryMoveDef {
     // Honour an explicit layer arg while the move is fresh.
     bool keepExplicitLayer;
     bool verified;
+    // Also required to match; -1 / 0 = any.
+    int16_t toPoint = -1;
+    int16_t requester = -1;  // the event's requester profile (potential events have no name)
+    uint16_t bit = 0;        // an event bit the move set
 };
 
 extern const StoryMoveDef kStoryMoves[];
@@ -140,6 +146,10 @@ bool isSideEffectPoint(const char* stage, int room, int point);
 // kQual* bits of an arrived move; `localBitsDuring` synced event bits we set meanwhile.
 uint32_t qualify(const MoveRecord& m, uint32_t localBitsDuring);
 bool isNotStory(const std::string& eventName);
+// Transports, minigames and repeatable rides: their relocations are never story.
+bool isNotStoryRequester(int16_t profile);
+// A dungeon's boss room (daObjBossWarp_c's levels), or nullptr; the name is the dungeon's.
+const char* bossStageDungeon(const char* stage);
 std::string placeName(const MoveRecord& m);
 
 // A stretch of the story whose places cannot be reached from anywhere else.

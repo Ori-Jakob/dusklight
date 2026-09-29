@@ -14,6 +14,7 @@
 #include "sync/RemoteApplyGuard.hpp"
 
 #include "d/actor/d_a_alink.h"
+#include "d/actor/d_a_midna.h"
 #include "d/actor/d_a_obj_bosswarp.h"
 #include "d/actor/d_a_tag_event.h"
 #include "d/d_com_inf_game.h"
@@ -135,6 +136,7 @@ namespace {
 using nlohmann::json;
 namespace sd = story::detail;
 
+json sForcedMove;
 bool sSaveReqSeen = false;
 int sSavePulse = 0;
 int sSavePulseTick = 0;
@@ -196,9 +198,32 @@ std::string selfTest() {
         "F_SP108 -> R_SP107 room 0 is not faron-capture");
     m.to = entrance("F_SP108", 1, 3);
     m.from = entrance("F_SP117", 3, 0);
+    check(story::matchCuratedMove(m) < 0, "faron-light matched without kytag04");
+    m.event.requester = fpcNm_KYTAG04_e;
+    m.event.reqKind = story::ReqKind::Actor;
     const int light = story::matchCuratedMove(m);
     check(light >= 0 && std::strcmp(story::kStoryMoves[light].id, "faron-light") == 0,
-        "-> F_SP108 room 1 point 3 is not faron-light");
+        "kytag04 -> F_SP108 room 1 is not faron-light");
+    m.from = entrance("F_SP109", 0, 0);
+    m.to = entrance("F_SP109", 0, 33);
+    const int eldin = story::matchCuratedMove(m);
+    check(eldin >= 0 && std::strcmp(story::kStoryMoves[eldin].id, "eldin-light") == 0,
+        "kytag04 -> F_SP109 is not eldin-light");
+    m.event.requester = -1;
+    m.event.reqKind = story::ReqKind::None;
+    m.from = entrance("D_MN01A", 50, 0);
+    m.to = entrance("F_SP121", 10, 20);
+    const int mdh = story::matchCuratedMove(m);
+    check(mdh >= 0 && std::strcmp(story::kStoryMoves[mdh].id, "mdh-start") == 0,
+        "-> F_SP121 room 10 point 20 is not mdh-start");
+    m.from = entrance("R_SP107", 3, 0);
+    m.to = entrance("F_SP103", 0, 0);
+    check(story::matchCuratedMove(m) < 0, "castle-escape matched without M_014");
+    m.bits = {0x0502};
+    const int escape = story::matchCuratedMove(m);
+    check(escape >= 0 && std::strcmp(story::kStoryMoves[escape].id, "castle-escape") == 0,
+        "R_SP107 -> Ordon with M_014 is not castle-escape");
+    m.bits.clear();
     m.from = entrance("F_SP121", 6, 0);
     m.to = entrance("D_MN05", 0, 0);
     check(story::matchCuratedMove(m) < 0, "field -> forest temple matched a curated move");
@@ -216,6 +241,17 @@ std::string selfTest() {
     m.tlvAfter = 1;
     check((story::qualify(m, 0) & story::kQualLevels) != 0, "a level change did not qualify");
     m.tlvAfter = 0;
+    m.from = entrance("D_MN05A", 50, 0);
+    m.to = entrance("F_SP108", 1, 0);
+    m.bossDefeated = true;
+    check(story::qualify(m, 0) == story::kQualBoss, "a boss room exit did not qualify as a boss");
+    m.bossDefeated = false;
+    check(story::qualify(m, 0) == 0, "a boss room exit qualified before the boss fell");
+    m.event.requester = fpcNm_NPC_GWOLF_e;
+    check(story::qualify(m, 1) == 0, "a golden wolf relocation qualified");
+    m.event.requester = -1;
+    check(story::isSideEffectPoint("D_MN08D", 50, 20), "Zant's arena is no side point");
+    m.from = entrance("F_SP108", 0, 0);
     m.to = entrance("R_SP107", 0, 24);
     check((story::qualify(m, 0) & story::kQualSidePoint) != 0, "R_SP107 p24 is no side point");
     m.curated = story::matchCuratedMove(m);
@@ -368,6 +404,19 @@ std::optional<bool> triggerStory(StepContext& ctx) {
             static_cast<s8>(dComIfGp_roomControl_getStayNo()), -1, 0.0f, 0, 1, 0, 0, 1, 0);
         TwiliLog.info("[autotest] triggerStory: area {} tears set to {}, reloading {}", area, num,
             currentStage());
+        return true;
+    }
+    // A story event of our own: Midna requests a potential event and, once it runs, the stage
+    // loads `stage`/`room`/`point` on `layer` (and `bit` is set meanwhile).
+    if (via == "forcedMove") {
+        fopAc_ac_c* midna = daPy_py_c::getMidnaActor();
+        if (midna == nullptr) {
+            ctx.fail("triggerStory forcedMove: no Midna");
+            return false;
+        }
+        fopAcM_orderPotentialEvent(midna, 0, 0xFFFF, 0);
+        sForcedMove = step;
+        TwiliLog.info("[autotest] triggerStory: Midna ordered a potential event");
         return true;
     }
     if (via == "actor") {
@@ -532,9 +581,31 @@ std::optional<bool> dismissSaveRequest(StepContext& ctx) {
     return false;
 }
 
+// The stage change of a forcedMove, once its event runs.
+void tickForcedMove() {
+    if (sForcedMove.is_null() || !dComIfGp_event_runCheck() ||
+        dComIfGp_getEvent()->getPt1() != daPy_py_c::getMidnaActor())
+    {
+        return;
+    }
+    const json step = std::move(sForcedMove);
+    sForcedMove = json();
+    if (step.contains("bit")) {
+        dComIfGs_onEventBit(static_cast<u16>(step.value("bit", 0)));
+    }
+    const std::string stage = step.value("stage", std::string(currentStage()));
+    dComIfGs_setRestartRoomParam(0);
+    dComIfGp_setNextStage(stage.c_str(), static_cast<s16>(step.value("point", 0)),
+        static_cast<s8>(step.value("room", 0)), static_cast<s8>(step.value("layer", -1)), 0.0f, 0,
+        1, 0, 0, 1, 0);
+    TwiliLog.info("[autotest] forced move to {} room {} point {} layer {}", stage,
+        step.value("room", 0), step.value("point", 0), step.value("layer", -1));
+}
+
 std::optional<bool> storySteps(const std::string& op, StepContext& ctx) {
     const json& step = ctx.step;
     sd::State& st = sd::state();
+    tickForcedMove();
 
     if (op == "storySelfTest") {
         const std::string failure = selfTest();
@@ -576,8 +647,16 @@ std::optional<bool> storySteps(const std::string& op, StepContext& ctx) {
 
     if (op == "expectPrompt") {
         const std::string kind = step.value("kind", std::string("move"));
+        // titleHas: text the move prompt's title must contain.
+        const std::string title =
+            st.team.valid ? sd::moveTitle(st.team.move) : std::string{};
+        const std::string want = step.value("titleHas", std::string{});
         if (st.prompt.showing && kind == story::promptKindName(st.prompt.kind)) {
-            TwiliLog.info("[autotest] story prompt {} is showing", kind);
+            if (!want.empty() && title.find(want) == std::string::npos) {
+                ctx.fail(fmt::format("expectPrompt: title '{}' lacks '{}'", title, want));
+                return false;
+            }
+            TwiliLog.info("[autotest] story prompt {} is showing: '{}'", kind, title);
             return true;
         }
         if (ctx.seconds > ctx.timeout(60.0)) {
@@ -754,6 +833,18 @@ std::optional<bool> storySteps(const std::string& op, StepContext& ctx) {
         }
         TwiliLog.info("[autotest] fixture '{}' saved in {}", name, dir.string());
         return true;
+    }
+
+    if (op == "expectTransient") {
+        const bool want = step.value("value", true);
+        if (st.team.transient == want) {
+            TwiliLog.info("[autotest] team move transient {}", want);
+            return true;
+        }
+        if (ctx.seconds > ctx.timeout(30.0)) {
+            ctx.fail(fmt::format("expectTransient: {} ({})", st.team.transient, sd::debugText()));
+        }
+        return false;
     }
 
     if (op == "expectLightDrops") {
