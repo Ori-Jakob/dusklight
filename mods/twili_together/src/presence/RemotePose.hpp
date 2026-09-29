@@ -249,12 +249,32 @@ struct RemoteHeldExtra {
     float bottleBtpFrame = 0.0f;  // field_0x072c: the contents' pattern (milk half gone...)
 };
 
+// PLAYER_UPDATE "fr": the bobber rod (dmg_rod_class) the sender holds
+inline constexpr int kFishingLinePoints = 8;
+struct RemoteFishing {
+    bool active = false;
+    uint8_t action = 0;         // mg_rod_uki_action: 0 in hand, 1 line out, 5 bite, 6 landing
+    uint8_t hookKind = 0;       // 1: the coral earring
+    uint8_t esaKind = 0;        // 1 bee larva, 2 worm
+    bool aimDown = false;       // rod_control aims by rod_angle_y (line out, rod not raised)
+    float bobber[3] = {};       // hook_pos
+    int16_t bobberAng[6] = {};  // field_0x10a0, 10a2, 1084.y, 1084.x, 108e, 108a
+    float hook[3] = {};         // actor.current.pos
+    int16_t hookAng[3] = {};
+    float bendTarget[3] = {};   // mg_line.pos[70]
+    float extend = 1.0f;        // field_0x6a4
+    float bend = 0.0f;          // field_0x6f8
+    int16_t arm1[3] = {}, arm2[3] = {};  // Link's mFishingArm1Angle, field_0x3160
+    float line[kFishingLinePoints][3] = {};  // mg_line.pos samples, tip to hook
+};
+
 struct RemoteItemFx {
     ItemFxSlot slots[kItemFxSlots];
     RemoteHookshot hk;
     RemoteIronBall bc;
     RemoteLevelSfx ls[kItemFxLevelSfx];
     RemoteHeldExtra hx;
+    RemoteFishing fr;
 };
 
 // PLAYER_UPDATE "xe"
@@ -514,7 +534,7 @@ struct WirePose {
     // Item slots "x0".."x7" (ItemFxSlot, ItemFx.hpp)
     int32_t x[kItemFxSlots][9]{};
     // The clawshot (RemoteHookshot)
-    int32_t hk[11]{}, bc[7]{}, ls[8]{}, hx[4]{};
+    int32_t hk[11]{}, bc[7]{}, ls[8]{}, hx[4]{}, fr[27 + 3 * kFishingLinePoints]{};
     int32_t hsx[6]{}, hsp[3]{}, hss[3]{}, hsa[3]{}, hsf[3]{}, hsw[2]{}, hsk[16]{}, hsr[7]{};
     int32_t hsz[8]{};
 };

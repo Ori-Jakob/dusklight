@@ -190,6 +190,28 @@ void blendPose(const LinkPuppetState& a, const LinkPuppetState& b, float t, Link
             bo.ballAng[k] = lerpAngle(ba.ballAng[k], bb.ballAng[k], t);
         }
     }
+    // The rod's line and bobber, while it does the same thing
+    const RemoteFishing& fa = a.itemFx.fr;
+    const RemoteFishing& fb = b.itemFx.fr;
+    if (fa.active && fb.active && fa.action == fb.action) {
+        RemoteFishing& fo = out.itemFx.fr;
+        for (int k = 0; k < 3; k++) {
+            fo.bobber[k] = lerp(fa.bobber[k], fb.bobber[k], t);
+            fo.hook[k] = lerp(fa.hook[k], fb.hook[k], t);
+            fo.bendTarget[k] = lerp(fa.bendTarget[k], fb.bendTarget[k], t);
+            for (int i = 0; i < kFishingLinePoints; i++) {
+                fo.line[i][k] = lerp(fa.line[i][k], fb.line[i][k], t);
+            }
+            fo.hookAng[k] = lerpAngle(fa.hookAng[k], fb.hookAng[k], t);
+            fo.arm1[k] = lerpAngle(fa.arm1[k], fb.arm1[k], t);
+            fo.arm2[k] = lerpAngle(fa.arm2[k], fb.arm2[k], t);
+        }
+        for (int k = 0; k < 6; k++) {
+            fo.bobberAng[k] = lerpAngle(fa.bobberAng[k], fb.bobberAng[k], t);
+        }
+        fo.extend = lerp(fa.extend, fb.extend, t);
+        fo.bend = lerp(fa.bend, fb.bend, t);
+    }
     blendHorse(a.horse, b.horse, t, out.horse);
     out.frameAlpha = t;
 }

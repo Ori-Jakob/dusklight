@@ -28,6 +28,7 @@ endif ()
 set(TWILI_SOURCES
     src/mod.cpp
     src/actors/DummyActors.cpp
+    src/actors/DummyFishing.cpp
     src/actors/DummyHoZelda.cpp
     src/actors/DummyHorse.cpp
     src/actors/DummyItemFx.cpp
@@ -53,6 +54,7 @@ set(TWILI_SOURCES
     src/enemy/EnemyDefeated.cpp
     src/enemy/EnemyScaling.cpp
     src/enemy/EnemySync.cpp
+    src/fx/Fishing.cpp
     src/fx/ItemFx.cpp
     src/fx/PlayerRecolor.cpp
     src/fx/RemoteTransformFx.cpp

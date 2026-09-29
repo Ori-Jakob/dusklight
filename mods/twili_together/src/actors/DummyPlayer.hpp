@@ -1,5 +1,6 @@
 #pragma once
 
+#include "actors/DummyFishing.hpp"
 #include "actors/DummyItemFx.hpp"
 #include "actors/DummyMidna.hpp"
 #include "actors/PrivateArchives.hpp"
@@ -139,6 +140,7 @@ struct DummyPlayerDebugInfo {
     uint32_t sfxDropped = 0;  // late, too far ahead, or across a snap
     uint32_t midnaSfx = 0;    // Midna's sounds played (from the wire and her clips)
     DummySfxPlayed sfxRecent[16];  // the latest first
+    DummyFishingDebug fishing;
     // A rider aiming the bow: ticks jointControll turned joint 5, and by how much last time
     uint32_t bowTiltTicks = 0;
     float bowTiltDeg = 0.0f;
@@ -287,6 +289,7 @@ private:
     J3DModel* mpDummyWolfChainModels[4] = {};
     twili::DummyMidna mDummyMidna;
     twili::DummyItemFx mDummyItemFx;
+    twili::DummyFishing mDummyFishing;
     uint32_t mDummyHeapUsed = 0;
     uint32_t mDummyClientId = 0;
     twili::RemotePlayout mDummyPlayout;

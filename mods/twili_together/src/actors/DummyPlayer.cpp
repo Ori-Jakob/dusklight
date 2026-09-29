@@ -987,6 +987,7 @@ void daDummyPlayer_c::clearPrivateModelPointers() {
     }
     mDummyMidna.clearPointers();
     mDummyItemFx.clearPointers();
+    mDummyFishing.clearPointers();
     for (twili::RecolorSet& set : mDummyRecolor) {
         set.reset();
     }
@@ -1162,6 +1163,25 @@ int daDummyPlayer_c::createHeapImpl() {
         items.crodAimBck =
             loadPrivateBck(mpDummyAlinkArchive, dRes_ID_ALINK_BCK_CROD_BALL_WAIT_A_T_e);
         mDummyItemFx.createHeap(items);
+    }
+    {
+        // dmg_rod_class::useHeapInit's uki models
+        twili::DummyFishing::Models rod;
+        for (int i = 0; i < twili::DummyFishing::kSegments; i++) {
+            const u16 id = i == 0 ? dRes_ID_ALINK_BMD_ROD_UKIA_e
+                         : (i == 3 || i == 6 || i == 9 || i >= 12) ? dRes_ID_ALINK_BMD_ROD_UKIC_e
+                                                                     : dRes_ID_ALINK_BMD_ROD_UKIB_e;
+            rod.rod[i] = makeModel(mpDummyAlinkArchive, id);
+        }
+        rod.uki = makeModel(mpDummyAlinkArchive, dRes_ID_ALINK_BMD_UKI_e);
+        rod.ukiSaki = makeModel(mpDummyAlinkArchive, dRes_ID_ALINK_BMD_UKI_SAKI_e);
+        rod.hook[0] = makeModel(mpDummyAlinkArchive, dRes_ID_ALINK_BMD_SFOOK_e);
+        rod.hook[1] = makeModel(mpDummyAlinkArchive, dRes_ID_ALINK_BMD_SANGO_FOOK_e);
+        rod.esa[0] = makeModel(mpDummyAlinkArchive, dRes_ID_ALINK_BMD_HK_e);
+        rod.esa[1] = makeModel(mpDummyAlinkArchive, dRes_ID_ALINK_BMD_WORM_e);
+        if (!mDummyFishing.createHeap(rod)) {
+            TwiliLog.warn("[dummy {}] createHeap: fishing rod models failed", mDummyClientId);
+        }
     }
     if (!mpSwAModel || !mpSwASheathModel || !mpSwMModel || !mpSwMSheathModel) {
         TwiliLog.warn("[dummy {}] createHeap: private sword model create failed",
@@ -3333,6 +3353,7 @@ void daDummyPlayer_c::getDebugInfo(twili::DummyPlayerDebugInfo& out) const {
     out.sfxPlayed = mDummySfxPlayed;
     out.sfxDropped = mDummySfxDropped;
     out.midnaSfx = mDummyMidna.sfxPlayed();
+    out.fishing = mDummyFishing.debug();
     out.bowTiltTicks = mDummyBowTiltTicks;
     out.bowTiltDeg = mDummyBowTiltDeg;
     std::copy(std::begin(mDummySfxRecent), std::end(mDummySfxRecent), std::begin(out.sfxRecent));
@@ -4160,6 +4181,10 @@ int daDummyPlayer_c::execute() {
         return TRUE;
     }
 
+    // Link's arms follow the rod (jointControll, joints 12 and 13 while it is cast)
+    const twili::RemoteFishing& fr = state.itemFx.fr;
+    mFishingArm1Angle.set(fr.arm1[0], fr.arm1[1], fr.arm1[2]);
+    field_0x3160.set(fr.arm2[0], fr.arm2[1], fr.arm2[2]);
     const bool applied = applyRemoteState(state);
     updateRemoteTransformFx(client, state, shownSeq);
     if (applied) {
@@ -4172,6 +4197,7 @@ int daDummyPlayer_c::execute() {
     }
     // Whatever the remote's body does
     mDummyItemFx.update(*this, state, shownSeq, client.itemFxEvents, ev.snapped, !isHidden());
+    mDummyFishing.update(*this, fr, applied && isBodyShown() && !checkWolf(), ev.snapped);
     playQueuedSfx(client, shownSeq, ev.snapped);
     if (ev.snapped) {
         // Nothing may streak across the jump
@@ -4249,6 +4275,7 @@ int daDummyPlayer_c::draw() {
         mDummyMidna.draw(tevStr, checkFreezeDamage() || mIceDamageWaitTimer != 0);
     }
     drawRemoteLoadedAmmo();
+    mDummyFishing.draw(tevStr);
     drawRemoteShadow();
     return result;
 }

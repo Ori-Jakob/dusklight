@@ -4,6 +4,7 @@
 #include "core/SaveGate.hpp"
 #include "core/Session.hpp"
 #include "core/Visibility.hpp"
+#include "fx/Fishing.hpp"
 #include "fx/ItemFx.hpp"
 #include "fx/RemoteTransformFx.hpp"
 #include "fx/StatusFx.hpp"
@@ -606,6 +607,8 @@ void Session::sendPlayerUpdate(float posX, float posY, float posZ,
     itemfx::encodeIronBall(itemFx.bc, cur.bc);
     itemfx::encodeLevelSfx(itemFx.ls, cur.ls);
     itemfx::encodeHeldExtra(itemFx.hx, cur.hx);
+    fishing::captureLocal(daAlink_getAlinkActorClass(), itemFx.fr);
+    fishing::encode(itemFx.fr, cur.fr);
     RemoteHorsePose horsePose;
     horse::captureLocal(horsePose);
     horse::encode(horsePose, cur);
@@ -694,6 +697,9 @@ void Session::sendPlayerUpdate(float posX, float posY, float posZ,
     }
     if (!keyframe || anyNonZero(cur.hx)) {
         putField(packet, "hx", cur.hx, o.hx, keyframe, changed);
+    }
+    if (!keyframe || anyNonZero(cur.fr)) {
+        putField(packet, "fr", cur.fr, o.fr, keyframe, changed);
     }
     // And for a player without a horse in sight.
     if (!keyframe || cur.hsx[0] != 0) {
@@ -966,6 +972,7 @@ void Session::handlePlayerUpdate(const nlohmann::json& packet) {
     takeItemGroup("bc", w.bc);
     takeItemGroup("ls", w.ls);
     takeItemGroup("hx", w.hx);
+    takeItemGroup("fr", w.fr);
     takeItemGroup("ox", w.hsx);
     takeItemGroup("op", w.hsp);
     takeItemGroup("os", w.hss);
@@ -1057,6 +1064,7 @@ void Session::handlePlayerUpdate(const nlohmann::json& packet) {
     c.itemFx.bc = itemfx::decodeIronBall(w.bc);
     itemfx::decodeLevelSfx(w.ls, c.itemFx.ls);
     c.itemFx.hx = itemfx::decodeHeldExtra(w.hx);
+    c.itemFx.fr = fishing::decode(w.fr);
     c.horse = horse::decode(w);
     c.hasPlayerUpdate = true;
 
