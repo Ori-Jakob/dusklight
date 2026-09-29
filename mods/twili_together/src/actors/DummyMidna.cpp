@@ -7,6 +7,7 @@
 #include "d/actor/d_a_midna.h"
 #include "d/d_com_inf_game.h"
 #include "d/d_kankyo.h"
+#include "d/d_stage.h"
 #include "JSystem/J3DGraphAnimator/J3DAnimation.h"
 #include "JSystem/J3DGraphAnimator/J3DJoint.h"
 #include "JSystem/J3DGraphAnimator/J3DModel.h"
@@ -18,6 +19,7 @@
 #include "res/Object/Wmdl.h"
 #include "SSystem/SComponent/c_lib.h"
 #include "SSystem/SComponent/c_math.h"
+#include "Z2AudioLib/Z2SeMgr.h"
 
 #include <algorithm>
 
@@ -37,6 +39,8 @@ constexpr u16 kBlinkBtk = dRes_ID_ALANM_BTK_MD_MABA01_e;
 constexpr f32 kBlinkChance = 0.012f;  // allAnimePlay
 constexpr s32 kKindTexPattern = 2;
 constexpr s32 kKindTexSrt = 4;
+// Her sounds are only started this near the local player (the dummy's own limit).
+constexpr f32 kAudibleDistanceSq = 3500.0f * 3500.0f;
 
 // File statics of d_a_midna.cpp
 const cXyz kHairScale[5] = {
@@ -153,6 +157,29 @@ int DummyMidnaHairCB::execute(u16 jnt, J3DTransformInfo* info) {
     return 1;
 }
 
+// daMidna_matAnm_c::calc
+void DummyMidnaEyeAnm::calc(J3DMaterial* material) const {
+    J3DMaterialAnm::calc(material);
+    const uint8_t flags = mFlags != nullptr ? *mFlags : 0;
+    const uint8_t morf = (flags >> kMidnaEyeMorfShift) & 7;
+    for (u32 i = 0; i < 8; i++) {
+        if (!getTexMtxAnm(i).getAnmFlag()) {
+            continue;
+        }
+        J3DTexMtxInfo& info = material->getTexGenBlock()->getTexMtx(i)->getTexMtxInfo();
+        if (morf != 0) {
+            const f32 t = 1.0f / (morf + 1);
+            info.mSRT.mTranslationX = mOldX * (1.0f - t) + info.mSRT.mTranslationX * t;
+            info.mSRT.mTranslationY = mOldY * (1.0f - t) + info.mSRT.mTranslationY * t;
+        } else if (flags & kMidnaEyeMove) {
+            info.mSRT.mTranslationX = mNowX;
+            info.mSRT.mTranslationY = mNowY;
+        }
+        mOldX = info.mSRT.mTranslationX;
+        mOldY = info.mSRT.mTranslationY;
+    }
+}
+
 J3DModel* DummyMidna::bodyModel() const {
     return mpMorf != nullptr ? mpMorf->getModel() : nullptr;
 }
@@ -161,6 +188,9 @@ void DummyMidna::clearPointers() {
     mpMorf = nullptr;
     mHairCB.mScale = nullptr;
     mpMask = mpHands = mpHairHand = nullptr;
+    mEyeAnm[0] = mEyeAnm[1] = nullptr;
+    mEyeFlags = 0;
+    mBasBound = false;
     for (J3DAnmTevRegKey*& brk : mTiredBrk) {
         brk = nullptr;
     }
@@ -218,6 +248,16 @@ bool DummyMidna::createHeap(const Models& models) {
         data->getJointNodePointer(jnt)->setCallBack(dummyMidnaJointCallBack);
     }
 
+    // initMidnaModel: her eyes follow the sender's offsets, not the local Midna's statics.
+    for (int i = 0; i < 2; i++) {
+        mEyeAnm[i] = JKR_NEW DummyMidnaEyeAnm();
+        if (mEyeAnm[i] == nullptr) {
+            return false;
+        }
+        mEyeAnm[i]->mFlags = &mEyeFlags;
+        data->getMaterialNodePointer(static_cast<u16>(2 + i))->setMaterialAnm(mEyeAnm[i]);
+    }
+
     mpMask = models.mask;
     mpHands = models.hands;
     mpHairHand = models.hairHand;
@@ -265,6 +305,10 @@ void DummyMidna::initHeaps() {
     bindTexture(false, kBlinkBtk);
     dKy_tevstr_init(&mTevStr, -1, 0xFF);
     initHairColours();
+    if (!mSoundReady) {
+        mSound.init(&mPos, &mEyePos, 3, 1);
+        mSoundReady = true;
+    }
     mReady = mBodyBck != nullptr && mpBtp != nullptr && mpBtk != nullptr;
     if (!mReady) {
         TwiliLog.warn("[dummy] Midna: idle clip or blinking face failed to load");
@@ -272,10 +316,22 @@ void DummyMidna::initHeaps() {
 }
 
 void DummyMidna::destroyHeaps() {
+    if (mSoundReady) {
+        mSound.deleteObject();
+        mSoundReady = false;
+    }
+    mBasBound = false;
     for (daPy_anmHeap_c* heap : {&mBodyHeap, &mUpperHeap, &mFaceHeap, &mBtpHeap, &mBtkHeap}) {
         destroyAnmHeap(*heap);
     }
     mReady = mActive = false;
+}
+
+void DummyMidna::deactivate() {
+    mActive = false;
+    if (mSoundReady) {
+        mSound.framework(0, dComIfGp_getReverb(dComIfGp_roomControl_getStayNo()));
+    }
 }
 
 bool DummyMidna::accept(uint16_t id, bool allowed, uint16_t& refused) {
@@ -316,6 +372,67 @@ bool DummyMidna::bindBody(uint16_t id, bool fresh) {
     mBodyId = bck != nullptr ? id : 0;
     mpMorf->setAnm(bck, -1, fresh ? 0.0f : kMorfFrames, 1.0f, 0.0f, -1.0f);
     return true;
+}
+
+// setBckAnime: the body clip's BAS, read from the heap's copy of the file
+void DummyMidna::bindSound() {
+    mBasBound = false;
+    u8* buf = mBodyHeap.getBuffer();
+    if (!mSoundReady || mBodyBck == nullptr || buf == nullptr) {
+        return;
+    }
+    const u32 offset = *reinterpret_cast<BE(u32)*>(buf + 0x1C);
+    if (offset == 0xFFFFFFFF || offset >= kBodyBufferSize) {
+        return;
+    }
+    mSoundFrame = mpMorf->getFrame();
+    mSound.initAnime(buf + offset, true, 0.0f, mSoundFrame);
+    mBasBound = true;
+}
+
+// setSound's clip sounds and the tired sigh; the rest arrives as PLAYER_SFX.
+void DummyMidna::updateSound(const RemoteMidnaPose& pose, bool shown) {
+    if (!mSoundReady) {
+        return;
+    }
+    const s8 reverb = dComIfGp_getReverb(dComIfGp_roomControl_getStayNo());
+    fopAc_ac_c* player = dComIfGp_getPlayer(0);
+    const bool heard = shown && (mMode == kMidnaDrawn || mMode == kMidnaApart) &&
+                       player != nullptr && player->current.pos.abs2XZ(mPos) <= kAudibleDistanceSq;
+    mSound.framework(0, reverb);
+    if (!heard) {
+        return;
+    }
+    if (mBasBound) {
+        const f32 frame = mpMorf->getFrame();
+        f32 rate = frame - mSoundFrame;
+        if (rate < 0.0f && mBodyBck->getAttribute() == J3DFrameCtrl::EMode_LOOP) {
+            rate += mBodyBck->getFrameMax();
+        }
+        mSoundFrame = frame;
+        mSound.updateAnime(frame, std::clamp(rate, 0.0f, 4.0f));
+    }
+    if ((pose.flags & kMidnaTired) && mMode == kMidnaDrawn) {
+        mSound.startCreatureVoiceLevel(Z2SE_MDN_V_WAITD, reverb);
+    }
+}
+
+void DummyMidna::playSfx(uint32_t id, bool voice, uint32_t mapInfo, const cXyz& fallback) {
+    if (!mSoundReady) {
+        return;
+    }
+    if (!mActive) {
+        mPos = fallback;
+        mEyePos = fallback;
+        mEyePos.y += 100.0f;
+    }
+    const s8 reverb = dComIfGp_getReverb(dComIfGp_roomControl_getStayNo());
+    if (voice) {
+        mSound.startCreatureVoice(id, reverb);
+    } else {
+        mSound.startCreatureSound(id, mapInfo, reverb);
+    }
+    mSfxPlayed++;
 }
 
 J3DAnmTransform* DummyMidna::bindLayer(daPy_anmHeap_c& heap, uint16_t id, bool face,
@@ -442,9 +559,11 @@ void DummyMidna::jointCallBack(u16 jnt) {
     }
 }
 
-void DummyMidna::update(const RemoteMidnaPose& pose, J3DModel* wolf, float frameAlpha) {
-    if (!mReady || wolf == nullptr || pose.mode == kMidnaNone) {
-        mActive = false;
+void DummyMidna::update(const RemoteMidnaPose& pose, J3DModel* wolf, float frameAlpha,
+                        bool shown) {
+    const bool apart = pose.mode == kMidnaApart;
+    if (!mReady || (wolf == nullptr && !apart) || pose.mode == kMidnaNone) {
+        deactivate();
         return;
     }
     const bool fresh = !mActive || mFresh;  // no morph from a pose of before
@@ -452,6 +571,10 @@ void DummyMidna::update(const RemoteMidnaPose& pose, J3DModel* wolf, float frame
     mFresh = false;
     mMode = pose.mode;
     mNoShadow = (pose.flags & kMidnaNoShadow) != 0;
+    mSilhouette = apart && (pose.flags & kMidnaSilhouette) != 0;
+    if (shown && (mMode == kMidnaDrawn || apart)) {
+        mShownTicks++;
+    }
 
     const bool bodyChanged = bindBody(pose.bodyBck, fresh);
     if (mBodyBck == nullptr) {
@@ -474,6 +597,9 @@ void DummyMidna::update(const RemoteMidnaPose& pose, J3DModel* wolf, float frame
     mpMorf->play(0, 0);  // steps the morph; the frame is the sender's
     mpMorf->setFrameF(normalizeFrame(
         mBodyBck, blendRemoteFrame(mBodyBck, pose.bodyFrame, pose.bodyFrameNext, frameAlpha)));
+    if (bodyChanged || fresh) {
+        bindSound();
+    }
     float animFrame = mpMorf->getFrame();
     if (upper != nullptr) {
         animFrame = normalizeFrame(
@@ -497,6 +623,27 @@ void DummyMidna::update(const RemoteMidnaPose& pose, J3DModel* wolf, float frame
     mNeckX = pose.neckX;
     mNeckY = pose.neckY;
     mBackboneZ = pose.backboneZ;
+    mEyeFlags = pose.eyeFlags;
+    for (int i = 0; i < 2; i++) {
+        if (mEyeAnm[i] != nullptr) {
+            mEyeAnm[i]->mNowX = pose.eyeOffset[i * 2];
+            mEyeAnm[i]->mNowY = pose.eyeOffset[i * 2 + 1];
+        }
+    }
+
+    if (apart) {
+        // setMatrix's WOLF_NO_POS branch: where the sender's Midna stands
+        mPos.set(pose.worldPos[0], pose.worldPos[1], pose.worldPos[2]);
+        mDoMtx_stack_c::transS(mPos);
+        mDoMtx_stack_c::ZXYrotM(pose.worldAngle[0], pose.worldAngle[1], pose.worldAngle[2]);
+        mpMorf->getModel()->setBaseTRMtx(mDoMtx_stack_c::get());
+        mBackDist = 0.0f;
+        mApartTicks++;
+        mpMorf->modelCalc();
+        updateParts(pose);
+        updateSound(pose, shown);
+        return;
+    }
 
     // setMatrix, the branch for her place on the wolf's back (daAlink_c::getWolfMidnaMatrix).
     mDoMtx_stack_c::copy(wolf->getAnmMtx(WL_JNT_MD_e));
@@ -518,11 +665,13 @@ void DummyMidna::update(const RemoteMidnaPose& pose, J3DModel* wolf, float frame
 
     mpMorf->modelCalc();
     updateParts(pose);
+    updateSound(pose, shown);
 }
 
 // setBodyPartMatrix for the models drawn with md.bmd.
 void DummyMidna::updateParts(const RemoteMidnaPose& pose) {
     J3DModel* md = mpMorf->getModel();
+    mDoMtx_multVecZero(md->getAnmMtx(MD_JNT_HEAD_e), &mEyePos);
     mpHands->setBaseTRMtx(md->getBaseTRMtx());
     mpHands->calc();
     mpHands->setAnmMtx(1, md->getAnmMtx(MD_JNT_HAND_L_e));
@@ -632,7 +781,7 @@ void DummyMidna::chaseHairColours(bool big) {
 
 // daMidna_c::draw's md.bmd branch.
 void DummyMidna::draw(const dKy_tevstr_c& owner, bool ownerTinted) {
-    if (!mActive || mMode != kMidnaDrawn) {
+    if (!mActive || (mMode != kMidnaDrawn && mMode != kMidnaApart)) {
         return;
     }
     J3DModel* md = mpMorf->getModel();
@@ -640,8 +789,11 @@ void DummyMidna::draw(const dKy_tevstr_c& owner, bool ownerTinted) {
     mTevStr.room_no = owner.room_no;
     mTevStr.YukaCol = owner.YukaCol;
     g_env_light.settingTevStruct(3, &mPos, &mTevStr);
-    // MD_RETURN fades her into the wolf's shadow.
-    if (mBodyId == dRes_ID_ALANM_BCK_MD_RETURN_e && mpMorf->getEndFrame() > 0.0f) {
+    // Off the back as her shadow: the gokou/inv branch's dark figure, here from md.bmd.
+    if (mSilhouette) {
+        mTevStr.TevColor.r = mTevStr.TevColor.g = mTevStr.TevColor.b = -220;
+    } else if (mBodyId == dRes_ID_ALANM_BCK_MD_RETURN_e && mpMorf->getEndFrame() > 0.0f) {
+        // MD_RETURN fades her into the wolf's shadow.
         const s16 fade = static_cast<s16>(mpMorf->getFrame() / mpMorf->getEndFrame() * -32.0f);
         mTevStr.TevColor.r = mTevStr.TevColor.g = mTevStr.TevColor.b = fade;
     } else if (ownerTinted) {

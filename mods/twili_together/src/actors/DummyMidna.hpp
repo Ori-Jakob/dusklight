@@ -4,8 +4,10 @@
 
 #include "d/actor/d_a_player.h"
 #include "d/d_kankyo_tev_str.h"
+#include "JSystem/J3DGraphAnimator/J3DMaterialAnm.h"
 #include "JSystem/J3DGraphBase/J3DMatBlock.h"
 #include "m_Do/m_Do_ext.h"
+#include "Z2AudioLib/Z2Creature.h"
 
 class J3DAnmTevRegKey;
 class J3DAnmTexPattern;
@@ -21,6 +23,15 @@ class DummyMidnaHairCB : public mDoExt_McaMorfCallBack1_c {
 public:
     int execute(u16 jnt, J3DTransformInfo* info) override;
     const cXyz* mScale = nullptr;  // nullptr: FLG0_NO_HAIR_SCALE on the sender
+};
+
+// daMidna_matAnm_c with the sender's eye state instead of its statics.
+class DummyMidnaEyeAnm : public J3DMaterialAnm {
+public:
+    void calc(J3DMaterial* material) const override;
+    const uint8_t* mFlags = nullptr;  // RemoteMidnaPose::eyeFlags shown
+    float mNowX = 0.0f, mNowY = 0.0f;
+    mutable float mOldX = 0.0f, mOldY = 0.0f;
 };
 
 class DummyMidna {
@@ -41,13 +52,19 @@ public:
     // initializeShell
     void initHeaps();
     void destroyHeaps();
-    void deactivate() { mActive = false; }
+    void deactivate();
     // No morph from the pose shown before (a snap or a form change).
     void resetContinuity() { mFresh = true; }
-    // Once per tick after the wolf body's calc
-    void update(const RemoteMidnaPose& pose, J3DModel* wolf, float frameAlpha);
+    // Once per tick after the wolf body's calc; `wolf` may be null while she is apart.
+    void update(const RemoteMidnaPose& pose, J3DModel* wolf, float frameAlpha, bool shown);
     void draw(const dKy_tevstr_c& owner, bool ownerTinted);
     void addRealShadow(u32 shadowId);
+    // One of her sounds from the wire, at her place or at `fallback` while she is not posed.
+    void playSfx(uint32_t id, bool voice, uint32_t mapInfo, const cXyz& fallback);
+    uint32_t sfxPlayed() const { return mSfxPlayed; }
+    uint32_t apartTicks() const { return mApartTicks; }
+    uint32_t shownTicks() const { return mShownTicks; }
+    bool eyeMoving() const { return mActive && (mEyeFlags & kMidnaEyeMove) != 0; }
     // daMidna_c::baseModelCallBack for md.bmd's joints (calc timing 0).
     void jointCallBack(u16 jnt);
 
@@ -84,6 +101,8 @@ private:
     void setTired(bool tired);
     void initHairColours();
     void chaseHairColours(bool big);
+    void bindSound();
+    void updateSound(const RemoteMidnaPose& pose, bool shown);
 
     mDoExt_McaMorfSO* mpMorf = nullptr;
     DummyMidnaHairCB mHairCB;
@@ -130,6 +149,18 @@ private:
     bool mReady = false;
     bool mActive = false;
     bool mFresh = true;
+    DummyMidnaEyeAnm* mEyeAnm[2] = {};
+    uint8_t mEyeFlags = 0;
+    // daMidna_c::mSound: her voices from the wire, her clips' own sounds replayed here
+    Z2Creature mSound;
+    cXyz mEyePos = cXyz::Zero;
+    bool mSoundReady = false;
+    bool mBasBound = false;
+    float mSoundFrame = 0.0f;
+    uint32_t mSfxPlayed = 0;
+    uint32_t mApartTicks = 0;
+    uint32_t mShownTicks = 0;
+    bool mSilhouette = false;
 };
 
 }  // namespace twili

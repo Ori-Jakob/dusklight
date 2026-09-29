@@ -2953,6 +2953,55 @@ void daDummyPlayer_c::playRemotePlayerSfx(uint32_t soundId, uint8_t kind, uint32
     case twili::PlayerSfxKind::MapInfoLevel:
         mZ2Link.startLinkSoundLevel(soundId, mapInfo, mVoiceReverbIntensity);
         break;
+    case twili::PlayerSfxKind::MidnaVoice:
+    case twili::PlayerSfxKind::MidnaSound:
+        break;
+    }
+}
+
+void daDummyPlayer_c::playRemoteSfx(uint32_t soundId, uint8_t kind, uint32_t mapInfo) {
+    if (kind == static_cast<uint8_t>(twili::PlayerSfxKind::MidnaVoice) ||
+        kind == static_cast<uint8_t>(twili::PlayerSfxKind::MidnaSound))
+    {
+        if (isRemotePlayerAudioAudible(this) && !isHidden()) {
+            mDummyMidna.playSfx(soundId, kind == static_cast<uint8_t>(twili::PlayerSfxKind::MidnaVoice),
+                mapInfo, current.pos);
+        }
+        return;
+    }
+    playRemotePlayerSfx(soundId, kind, mapInfo);
+}
+
+// Each queued PLAYER_SFX once the pose shown reaches the tick it was made in.
+void daDummyPlayer_c::playQueuedSfx(const twili::Client& client, double shownSeq, bool snapped) {
+    static constexpr int32_t kMaxLateTicks = 6;
+    static constexpr int32_t kMaxAheadTicks = 90;
+    const twili::RemoteSfxQueue& queue = client.sfx;
+    if (!mDummySfxPrimed) {
+        mDummySfxDone = queue.lastIndex();
+        mDummySfxPrimed = true;
+        return;
+    }
+    const uint32_t shownTick = static_cast<uint32_t>((std::max)(0.0, std::floor(shownSeq)));
+    for (size_t i = 0; i < queue.size(); i++) {
+        const twili::RemoteSfx& s = queue.at(i);
+        if (static_cast<int32_t>(s.index - mDummySfxDone) <= 0) {
+            continue;
+        }
+        const int32_t ahead = static_cast<int32_t>(s.seq - shownTick);
+        if (ahead > 0 && ahead <= kMaxAheadTicks) {
+            break;
+        }
+        mDummySfxDone = s.index;
+        if (ahead > 0 || ahead < -kMaxLateTicks || snapped) {
+            mDummySfxDropped++;
+            continue;
+        }
+        playRemoteSfx(s.id, s.kind, s.mapInfo);
+        mDummySfxPlayed++;
+        std::copy_backward(std::begin(mDummySfxRecent), std::end(mDummySfxRecent) - 1,
+            std::end(mDummySfxRecent));
+        mDummySfxRecent[0] = {s.id, s.seq, shownSeq, s.kind};
     }
 }
 
@@ -3144,7 +3193,11 @@ void daDummyPlayer_c::getDebugInfo(twili::DummyPlayerDebugInfo& out) const {
     out.ground = mDummyGroundY > -G_CM3D_F_INF;
     out.midnaReady = mDummyMidna.ready();
     out.midnaMode = mDummyMidna.mode();
-    out.midnaShown = isBodyShown() && checkWolf() && out.midnaMode == twili::kMidnaDrawn;
+    out.midnaShown = isBodyShown() && ((checkWolf() && out.midnaMode == twili::kMidnaDrawn) ||
+                                       out.midnaMode == twili::kMidnaApart);
+    out.midnaApartTicks = mDummyMidna.apartTicks();
+    out.midnaShownTicks = mDummyMidna.shownTicks();
+    out.midnaEyeMove = mDummyMidna.eyeMoving();
     out.midnaBodyAnm = mDummyMidna.bodyId();
     out.midnaUpperAnm = mDummyMidna.upperId();
     out.midnaHairHand = mDummyMidna.hairHand();
@@ -3214,6 +3267,10 @@ void daDummyPlayer_c::getDebugInfo(twili::DummyPlayerDebugInfo& out) const {
     out.ironBallDist = ironBall ? mDummyIronBallDist : 0.0f;
     out.lanternFlame = mDummyLanternFlame && checkNoResetFlg2(FLG2_UNK_1) && !checkWolf();
     out.lanternGlow = checkNoResetFlg2(FLG2_UNK_1) ? field_0x3448 : 0.0f;
+    out.sfxPlayed = mDummySfxPlayed;
+    out.sfxDropped = mDummySfxDropped;
+    out.midnaSfx = mDummyMidna.sfxPlayed();
+    std::copy(std::begin(mDummySfxRecent), std::end(mDummySfxRecent), std::begin(out.sfxRecent));
 }
 
 bool daDummyPlayer_c::isHidden() const {
@@ -3813,9 +3870,14 @@ bool daDummyPlayer_c::applyRemoteState(const LinkPuppetState& state) {
                                : 0.0f;
         setWolfItemMatrix();
         // After modelCalcRemoteBody
-        mDummyMidna.update(state.midna, mpLinkModel, state.frameAlpha);
+        mDummyMidna.update(state.midna, mpLinkModel, state.frameAlpha, isBodyShown());
     } else {
-        mDummyMidna.deactivate();
+        // Off the wolf's back she outlasts the wolf body (a transformation back to human).
+        if (state.midna.mode == twili::kMidnaApart) {
+            mDummyMidna.update(state.midna, nullptr, state.frameAlpha, isBodyShown());
+        } else {
+            mDummyMidna.deactivate();
+        }
         updateRemoteItemMatrices(state);
     }
     traceInitialApply(mDummyClientId, trace, "applyRemoteState setAttentionPos");
@@ -4029,6 +4091,7 @@ int daDummyPlayer_c::execute() {
         clearRemoteStatus();
         clearRemoteWolfFx();
         mDummyItemFx.update(*this, state, shownSeq, client.itemFxEvents, ev.snapped, false);
+        playQueuedSfx(client, shownSeq, ev.snapped);
         return TRUE;
     }
 
@@ -4044,6 +4107,7 @@ int daDummyPlayer_c::execute() {
     }
     // Whatever the remote's body does
     mDummyItemFx.update(*this, state, shownSeq, client.itemFxEvents, ev.snapped, !isHidden());
+    playQueuedSfx(client, shownSeq, ev.snapped);
     if (ev.snapped) {
         // Nothing may streak across the jump
         old.pos = current.pos;
@@ -4115,7 +4179,7 @@ int daDummyPlayer_c::draw() {
                                               field_0x347c);
         result = daAlink_c::draw();
     }
-    if (checkWolf()) {
+    if (checkWolf() || mDummyMidna.mode() == twili::kMidnaApart) {
         // daMidna_c::draw takes Link's colour while he is frozen or chilled.
         mDummyMidna.draw(tevStr, checkFreezeDamage() || mIceDamageWaitTimer != 0);
     }

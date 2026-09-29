@@ -35,6 +35,14 @@ struct DummyTransformFxTrace {
     uint16_t count = 0;  // transformations replayed
 };
 
+// One PLAYER_SFX a dummy played on its playout clock (autotest).
+struct DummySfxPlayed {
+    uint32_t id = 0;
+    uint32_t seq = 0;     // the sender tick it was stamped with
+    double shown = 0.0;   // the sender tick shown when it played
+    uint8_t kind = 0;
+};
+
 // What the autotest checks about a dummy (GetDummyPlayerDebugInfo).
 struct DummyPlayerDebugInfo {
     bool shellReady = false;
@@ -76,6 +84,9 @@ struct DummyPlayerDebugInfo {
     bool midnaTired = false;       // tired colours bound
     uint32_t midnaRefused = 0;     // Midna clip and texture ids refused
     float midnaBackDist = 0.0f;    // her root from the wolf's joint WL_JNT_MD
+    uint32_t midnaApartTicks = 0;  // ticks posed off the wolf's back (kMidnaApart)
+    uint32_t midnaShownTicks = 0;  // ticks she was drawn, on the back or off it
+    bool midnaEyeMove = false;     // her eyes follow the sender's offsets this tick
     // PvP (pvp/)
     bool hurtbox = false;
     bool hurtboxGuard = false;
@@ -123,6 +134,11 @@ struct DummyPlayerDebugInfo {
     float ironBallDist = 0.0f;
     bool lanternFlame = false;
     float lanternGlow = 0.0f;
+    // PLAYER_SFX played on the playout clock (playQueuedSfx)
+    uint32_t sfxPlayed = 0;
+    uint32_t sfxDropped = 0;  // late, too far ahead, or across a snap
+    uint32_t midnaSfx = 0;    // Midna's sounds played (from the wire and her clips)
+    DummySfxPlayed sfxRecent[16];  // the latest first
 };
 
 // A remote player: a daAlink_c posed from the received stream, never controlled.
@@ -134,6 +150,8 @@ public:
     void destroy();
     int createHeap();
     void playRemotePlayerSfx(uint32_t soundId, uint8_t kind, uint32_t mapInfo);
+    // Link's or Midna's, by kind
+    void playRemoteSfx(uint32_t soundId, uint8_t kind, uint32_t mapInfo);
     // Not drawn, heard or given effects
     bool isHidden() const;
     bool isBodyShown() const;
@@ -215,6 +233,7 @@ private:
     void updateRemoteWolfLockBlur(bool active);
     void clearRemoteWolfFx();
     void updateRemoteAudio(const twili::LinkPuppetState& state);
+    void playQueuedSfx(const twili::Client& client, double shownSeq, bool snapped);
     void drawRemoteLoadedAmmo();
 
     JKRArchive* mpDummyKmdlArchive = nullptr;
@@ -373,6 +392,12 @@ private:
     bool mDummyConstructed = true;
     twili::PrivateArchives mDummyArchives;
     bool mDummyArchivesUsed = false;
+    // The last queued PLAYER_SFX handled (RemoteSfx::index)
+    uint32_t mDummySfxDone = 0;
+    bool mDummySfxPrimed = false;
+    uint32_t mDummySfxPlayed = 0;
+    uint32_t mDummySfxDropped = 0;
+    twili::DummySfxPlayed mDummySfxRecent[16];
 };
 
 // ActorService profile "TTlink".

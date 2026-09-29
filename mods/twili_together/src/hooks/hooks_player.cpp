@@ -6,7 +6,9 @@
 #include "fx/ItemFx.hpp"
 #include "presence/Presence.hpp"
 
+#include "Z2AudioLib/Z2Creature.h"
 #include "d/actor/d_a_alink.h"
+#include "d/actor/d_a_midna.h"
 #include "f_op/f_op_actor_mng.h"
 
 namespace twili::hooks {
@@ -19,6 +21,8 @@ DEFINE_HOOK(&daAlink_c::seStartOnlyReverb, LinkSeStartOnlyReverb);
 DEFINE_HOOK(&daAlink_c::seStartOnlyReverbLevel, LinkSeStartOnlyReverbLevel);
 DEFINE_HOOK(&daAlink_c::seStartMapInfo, LinkSeStartMapInfo);
 DEFINE_HOOK(&daAlink_c::seStartMapInfoLevel, LinkSeStartMapInfoLevel);
+DEFINE_HOOK(&Z2Creature::startCreatureVoice, CreatureVoice);
+DEFINE_HOOK(&Z2Creature::startCreatureSound, CreatureSound);
 
 namespace {
 
@@ -62,6 +66,21 @@ void onLinkLevelSfxPost(ModContext*, void* args, void*, void*) {
         mods::arg<u32>(args, 1), static_cast<uint8_t>(Kind), WithMapInfo ? link->mPolySound : 0);
 }
 
+// Midna's one-shots (her voices, jumps, warps); her clips' own sounds replay on the dummy.
+template <PlayerSfxKind Kind>
+void onCreatureSfxPost(ModContext*, void* args, void*, void*) {
+    const auto* creature = mods::arg<Z2Creature*>(args, 0);
+    const daMidna_c* midna = daPy_py_c::getMidnaActor();
+    if (midna == nullptr || creature != &midna->mSound || !Session::active() ||
+        !Session::instance().isConnected())
+    {
+        return;
+    }
+    const u32 id = mods::arg<JAISoundID>(args, 1);
+    const u32 mapInfo = Kind == PlayerSfxKind::MidnaSound ? mods::arg<u32>(args, 2) : 0;
+    Session::instance().sendPlayerSfx(id, Kind, mapInfo);
+}
+
 void onLinkExecutePost(ModContext*, void* args, void*, void*) {
     perf::count(perf::Target::LinkExecute);
     auto* link = mods::arg<daAlink_c*>(args, 0);
@@ -100,6 +119,10 @@ ModResult installPlayer(std::string& error) {
             onLinkSfxPost<PlayerSfxKind::MapInfo, true>, "seStartMapInfo", error),
         addSfx<LinkSeStartMapInfoLevel>(onLinkLevelSfxPost<PlayerSfxKind::MapInfoLevel, true>,
             "seStartMapInfoLevel", error),
+        addPost<CreatureVoice>(onCreatureSfxPost<PlayerSfxKind::MidnaVoice>, kDefault,
+            "Z2Creature::startCreatureVoice", error),
+        addPost<CreatureSound>(onCreatureSfxPost<PlayerSfxKind::MidnaSound>, kDefault,
+            "Z2Creature::startCreatureSound", error),
     };
     for (const ModResult r : results) {
         if (r != MOD_OK) {

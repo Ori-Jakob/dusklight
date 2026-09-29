@@ -140,6 +140,15 @@ void blendPose(const LinkPuppetState& a, const LinkPuppetState& b, float t, Link
         if (am.hairAimValid && bm.hairAimValid) {
             om.hairAim = lerpAngle(am.hairAim, bm.hairAim, t);
         }
+        for (int k = 0; k < 4; k++) {
+            om.eyeOffset[k] = lerp(am.eyeOffset[k], bm.eyeOffset[k], t);
+        }
+        if (am.mode == kMidnaApart) {
+            for (int k = 0; k < 3; k++) {
+                om.worldPos[k] = lerp(am.worldPos[k], bm.worldPos[k], t);
+                om.worldAngle[k] = lerpAngle(am.worldAngle[k], bm.worldAngle[k], t);
+            }
+        }
     }
     // Midna's dome grows 25 units a tick
     if ((a.wolfFx.flags & kWolfFxDome) && (b.wolfFx.flags & kWolfFxDome)) {

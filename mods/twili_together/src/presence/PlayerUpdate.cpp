@@ -196,35 +196,65 @@ bool Session::captureLocalMidna(bool inCutscene, RemoteMidnaPose& out) {
     out = RemoteMidnaPose{};
     daAlink_c* link = daAlink_getAlinkActorClass();
     daMidna_c* m = daPy_py_c::getMidnaActor();
-    if (link == nullptr || m == nullptr || inCutscene || !link->checkWolf() ||
-        link->getClothesChangeWaitTimer() != 0 || !link->checkMidnaRide() ||
-        !m->checkDemoTypeNone())
-    {
+    if (link == nullptr || m == nullptr || link->getClothesChangeWaitTimer() != 0) {
         return false;
     }
     const u32 demoMode = m->mDemoMode;
-    if (m->checkWolfNoPos() || demoMode == 9 || demoMode == 0x200 || (m->mpKago != nullptr) ||
-        m->checkShadowModelDrawSmode())
-    {
+    // setMatrix's getWolfMidnaMatrix branch (a transformation's demo leaves her there a while)
+    const bool onBack = link->checkWolf() && !m->checkWolfNoPos() && demoMode != 9 &&
+                        demoMode != 0x200 && m->mpKago == nullptr &&
+                        !m->checkShadowModelDrawSmode();
+    if (onBack && (inCutscene || !link->checkMidnaRide())) {
         return false;
     }
-    // Posing the wolf's own md.bmd (initMidnaModel), not a demo body, with an AlAnm clip.
+    if (!onBack && (m->mpKago != nullptr || demoMode == 0x200 || m->checkShadowModelDrawSmode())) {
+        return false;
+    }
+    // An AlAnm clip, on the wolf's own md.bmd (initMidnaModel) or, off the back, on her shadow
     const uint16_t body = midnaAnmId(m->mBckHeap[0]);
     J3DModel* md = m->mpModel;
-    if (md == nullptr || md != link->getMidnaModel() || body == 0) {
+    const bool realBody = md != nullptr && md == link->getMidnaModel() && !m->checkNoDraw() &&
+                          !m->checkShadowModelDrawDemoForce();
+    if (body == 0 || (onBack && (md == nullptr || md != link->getMidnaModel()))) {
         return false;
     }
     // daMidna_c::draw's md.bmd branch, and the wolf's real shadow in daAlink_c::draw.
-    const bool drawn = !m->checkNoDrawState() && !m->checkNoDraw() && !link->checkPlayerNoDraw();
+    const bool visible = !m->checkNoDrawState() && !link->checkPlayerNoDraw();
+    const bool drawn = visible && realBody;
     const bool shadow = !daAlink_c::checkCloudSea() && !m->checkShadowNoDraw() &&
                         !m->checkShadowModelDraw();
-    if (!drawn && !shadow) {
+    if (onBack ? !drawn && !shadow : !visible) {
         return false;
     }
 
-    out.mode = drawn ? kMidnaDrawn : kMidnaShadowOnly;
-    if (!shadow) {
+    out.mode = !onBack ? kMidnaApart : drawn ? kMidnaDrawn : kMidnaShadowOnly;
+    if (!shadow || !onBack) {
         out.flags |= kMidnaNoShadow;
+    }
+    if (!onBack && !realBody) {
+        out.flags |= kMidnaSilhouette;
+    }
+    if (!onBack) {
+        MtxP base = m->mpShadowModel->getBaseTRMtx();
+        csXyz rot;
+        mDoMtx_MtxToRot(base, &rot);
+        for (int i = 0; i < 3; i++) {
+            out.worldPos[i] = base[i][3];
+        }
+        out.worldAngle[0] = rot.x;
+        out.worldAngle[1] = rot.y;
+        out.worldAngle[2] = rot.z;
+    }
+    // setEyeMove's offsets, as daMidna_matAnm_c::calc applies them
+    if (daMidna_matAnm_c::getEyeMoveFlg()) {
+        out.eyeFlags |= kMidnaEyeMove;
+    }
+    out.eyeFlags |= (std::min<u8>(daMidna_matAnm_c::getMorfFrame(), 7) << kMidnaEyeMorfShift);
+    for (int i = 0; i < 2; i++) {
+        if (m->mpEyeMatAnm[i] != nullptr) {
+            out.eyeOffset[i * 2] = m->mpEyeMatAnm[i]->mNowOffsetX;
+            out.eyeOffset[i * 2 + 1] = m->mpEyeMatAnm[i]->mNowOffsetY;
+        }
     }
     out.bodyBck = body;
     out.bodyFrame = m->mpMorf->getFrame();
@@ -395,6 +425,16 @@ static void encodeMidna(const RemoteMidnaPose& m, WirePose& w) {
     w.ma[2] = m.backboneZ;
     w.ma[3] = m.hairTipY;
     w.ma[4] = m.hairTipZ;
+    w.me[0] = m.eyeFlags;
+    for (int i = 0; i < 4; i++) {
+        w.me[1 + i] = quantize(m.eyeOffset[i], kRatioScale);
+    }
+    if (m.mode == kMidnaApart) {
+        for (int i = 0; i < 3; i++) {
+            w.mw[i] = quantize(m.worldPos[i], kPosScale);
+            w.mw[3 + i] = m.worldAngle[i];
+        }
+    }
 }
 
 void Session::sendPlayerUpdate(float posX, float posY, float posZ,
@@ -620,6 +660,12 @@ void Session::sendPlayerUpdate(float posX, float posY, float posZ,
         putField(packet, "mf", cur.mf, o.mf, keyframe, changed);
         putField(packet, "ma", cur.ma, o.ma, keyframe, changed);
     }
+    if (!keyframe || anyNonZero(cur.me)) {
+        putField(packet, "me", cur.me, o.me, keyframe, changed);
+    }
+    if (!keyframe || anyNonZero(cur.mw)) {
+        putField(packet, "mw", cur.mw, o.mw, keyframe, changed);
+    }
     // The same for a player nothing is wrong with.
     if (!keyframe || anyNonZero(cur.sx)) {
         putField(packet, "sx", cur.sx, o.sx, keyframe, changed);
@@ -730,12 +776,30 @@ static void decodeMidna(const WirePose& w, RemoteMidnaPose& m) {
     m = RemoteMidnaPose{};  // nothing stale survives mode 0
     const uint32_t head = static_cast<uint32_t>(w.md[0]);
     const uint8_t mode = head & 3;
-    if (mode == kMidnaNone || mode > kMidnaShadowOnly) {
+    if (mode == kMidnaNone) {
         return;
     }
+    if (mode == kMidnaApart) {
+        // Off the back she stays near her wolf; anything else is junk.
+        float distSq = 0.0f;
+        for (int i = 0; i < 3; i++) {
+            m.worldPos[i] = w.mw[i] / kPosScale;
+            m.worldAngle[i] = static_cast<int16_t>(w.mw[3 + i]);
+            const float d = m.worldPos[i] - w.p[i] / kPosScale;
+            distSq += d * d;
+        }
+        if (!(distSq <= kMaxMidnaApartDist * kMaxMidnaApartDist)) {
+            m = RemoteMidnaPose{};
+            return;
+        }
+    }
     m.mode = mode;
+    m.eyeFlags = static_cast<uint8_t>(w.me[0] & 0x0F);
+    for (int i = 0; i < 4; i++) {
+        m.eyeOffset[i] = std::clamp(w.me[1 + i] / kRatioScale, -1.0f, 1.0f);
+    }
     m.hairHand = (std::min)(static_cast<uint8_t>((head >> 2) & 3), static_cast<uint8_t>(2));
-    m.flags = (head >> 4) & 0x1F;
+    m.flags = (head >> 4) & 0x3F;
     m.bodyBck = static_cast<uint16_t>(w.md[1]);
     m.upperBck = static_cast<uint16_t>(w.md[2]);
     m.faceBck = static_cast<uint16_t>(w.md[3]);
@@ -845,6 +909,16 @@ void Session::handlePlayerUpdate(const nlohmann::json& packet) {
         takeField(packet, "md", w.md);
         takeField(packet, "mf", w.mf);
         takeField(packet, "ma", w.ma);
+    }
+    if (keyframe && packet.find("me") == packet.end()) {
+        std::fill(std::begin(w.me), std::end(w.me), 0);
+    } else {
+        takeField(packet, "me", w.me);
+    }
+    if (keyframe && packet.find("mw") == packet.end()) {
+        std::fill(std::begin(w.mw), std::end(w.mw), 0);
+    } else {
+        takeField(packet, "mw", w.mw);
     }
     // Every keyframe of a build that replays transformations carries "tf".
     const bool hasTf = packet.find("tf") != packet.end();

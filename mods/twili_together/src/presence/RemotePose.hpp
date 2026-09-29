@@ -16,15 +16,26 @@ enum MidnaRideMode : uint8_t {
     kMidnaNone = 0,        // not on the back of the sender's wolf, or hidden by its game
     kMidnaDrawn = 1,       // daMidna_c::draw's md.bmd branch
     kMidnaShadowOnly = 2,
+    kMidnaApart = 3,       // drawn off the wolf's back (a transformation, a warp): "mw" places her
 };
 
-// "md"[0] bits 4-8.
+// Farther than this from the sender, a kMidnaApart place is dropped.
+inline constexpr float kMaxMidnaApartDist = 600.0f;
+
+// "me"[0] bits.
+enum MidnaEyeFlag : uint8_t {
+    kMidnaEyeMove = 1 << 0,  // daMidna_matAnm_c::sEyeMoveFlg: the offsets replace the BTK's
+    kMidnaEyeMorfShift = 1,  // bits 1-3: sMorfFrame, the ease back to the BTK
+};
+
+// "md"[0] bits 4-9.
 enum MidnaPoseFlag : uint8_t {
     kMidnaTired = 1 << 0,         // Link binds the tired colour BRKs (d_a_alink.cpp execute)
     kMidnaFaceFromChin = 1 << 1,  // the face layer starts after CHIN, not HEAD (mJntNo)
     kMidnaNoHairScale = 1 << 2,   // FLG0_NO_HAIR_SCALE
     kMidnaHairFromBck = 1 << 3,   // FLG0_UNK_200000 / 10000000: the hair tip does not swing
     kMidnaNoShadow = 1 << 4,      // drawn, but the wolf's real shadow leaves her out (Cloud Sea)
+    kMidnaSilhouette = 1 << 5,    // apart, drawn as her shadow (draw's gokou/inv branch)
 };
 
 // Midna on the sender wolf's back
@@ -39,6 +50,12 @@ struct RemoteMidnaPose {
     // The hair hand turned toward the remote's lock target (setBodyPartMatrix).
     bool hairAimValid = false;
     int16_t hairAim = 0;
+    // Eye texture offsets, left x, left y, right x, right y (setEyeMove)
+    uint8_t eyeFlags = 0;
+    float eyeOffset[4] = {};
+    // kMidnaApart: her body's base matrix (setMatrix's WOLF_NO_POS branch)
+    float worldPos[3] = {};
+    int16_t worldAngle[3] = {};
 };
 
 // PLAYER_UPDATE "wx"[0] bits
@@ -283,6 +300,37 @@ private:
     size_t mCount = 0;
 };
 
+// PLAYER_SFX with the sender's pose tick ("sq"): a dummy plays it when it shows that tick.
+struct RemoteSfx {
+    uint32_t index = 0;  // arrival order, from 1
+    uint32_t seq = 0;
+    uint32_t id = 0;
+    uint32_t mapInfo = 0;
+    uint8_t kind = 0;    // PlayerSfxKind
+};
+
+class RemoteSfxQueue {
+public:
+    static constexpr size_t kCapacity = 32;
+    void push(uint32_t seq, uint32_t id, uint8_t kind, uint32_t mapInfo) {
+        if (mCount == kCapacity) {
+            mHead = (mHead + 1) % kCapacity;
+            mCount--;
+        }
+        mRing[(mHead + mCount) % kCapacity] = {++mLastIndex, seq, id, mapInfo, kind};
+        mCount++;
+    }
+    size_t size() const { return mCount; }
+    const RemoteSfx& at(size_t i) const { return mRing[(mHead + i) % kCapacity]; }
+    uint32_t lastIndex() const { return mLastIndex; }
+
+private:
+    std::array<RemoteSfx, kCapacity> mRing{};
+    size_t mHead = 0;
+    size_t mCount = 0;
+    uint32_t mLastIndex = 0;
+};
+
 struct TransformFxTrace {
     uint32_t startSeq = 0;  // first sample with kTfActive
     uint32_t clipSeq = 0;
@@ -442,8 +490,8 @@ struct WirePose {
     int32_t la[3]{}, ua[3]{}, lf[3]{}, uf[3]{}, lr[3]{}, ur[3]{};
     int32_t wd[8]{}, su[8]{}, eq[4]{}, ub[2]{}, ct = 0, bl = 0, hi[6]{}, ij[2]{}, ib[2]{},
         pr[2]{}, cf = 0, vf = 0;
-    // Midna on the back (RemoteMidnaPose)
-    int32_t md[7]{}, mf[3]{}, ma[5]{};
+    // Midna on the back (RemoteMidnaPose), her eyes and her place off the back
+    int32_t md[7]{}, mf[3]{}, ma[5]{}, me[5]{}, mw[6]{};
     // The transformation (RemoteTransformFx)
     int32_t tf[6]{};
     // Status effects (RemoteStatusFx, StatusFx.hpp)

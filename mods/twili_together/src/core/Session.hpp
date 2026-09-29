@@ -34,6 +34,9 @@ enum class PlayerSfxKind : uint8_t {
     SoundLevel = 4,
     MapInfo = 5,
     MapInfoLevel = 6,
+    // Midna's Z2Creature (older receivers ignore these)
+    MidnaVoice = 7,
+    MidnaSound = 8,
 };
 
 struct ConnectParams {

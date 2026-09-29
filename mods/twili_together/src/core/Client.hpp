@@ -94,6 +94,7 @@ struct Client {
     // Deltas apply on top of `wire`.
     WirePose wire;
     RemotePoseBuffer pose;
+    RemoteSfxQueue sfx;
 };
 
 }  // namespace twili
