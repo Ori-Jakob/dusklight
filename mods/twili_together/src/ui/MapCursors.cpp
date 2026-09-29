@@ -3,6 +3,7 @@
 #include "core/Config.hpp"
 #include "core/Session.hpp"
 #include "core/Visibility.hpp"
+#include "horse/HorsePuppet.hpp"
 
 #include "JSystem/J2DGraph/J2DGrafContext.h"
 #include "JSystem/J2DGraph/J2DPicture.h"
@@ -12,6 +13,7 @@
 #include "d/d_com_inf_game.h"
 #include "d/d_map.h"
 #include "d/d_map_path_dmap.h"
+#include "d/d_menu_fmap2D.h"
 #include "d/d_menu_map_common.h"
 #include "d/d_stage.h"
 #include "m_Do/m_Do_graphic.h"
@@ -42,6 +44,11 @@ constexpr f32 kOtherFloorAlpha = 0.55f;
 constexpr f32 kPauseArrow = 22.0f;
 // Palette group of the local cursor.
 constexpr int kLocalCursorGroup = 0x1E;
+// A remote Epona's horseshoe: outer radius against the remote arrow, inner, the gap at the top.
+constexpr f32 kHorseSize = 0.5f;
+constexpr f32 kHorseInner = 0.52f;
+constexpr int kHorseSegments = 10;
+constexpr f32 kHorseGapDeg = 70.0f;
 
 Frame sFrames[size_t(Surface::Count)];
 std::vector<TestClient> sTestClients;
@@ -293,6 +300,84 @@ void drawLocalOnTop(Frame& f) {
     f.localRedrawn = true;
 }
 
+// A horseshoe in `fill` over a ring `outline` wider on every side (the fill is opaque enough).
+void drawHorseshoe(Vec2 c, f32 outer, const u8 fill[4], const u8 outline[4]) {
+    const auto ring = [&](f32 ro, f32 ri, f32 gapDeg, const u8 col[4]) {
+        const f32 start = (90.0f + gapDeg * 0.5f) * 3.14159265f / 180.0f;
+        const f32 sweep = (360.0f - gapDeg) * 3.14159265f / 180.0f;
+        GXBegin(GX_TRIANGLES, GX_VTXFMT0, kHorseSegments * 6);
+        for (int i = 0; i < kHorseSegments; i++) {
+            const f32 a0 = start + sweep * i / kHorseSegments;
+            const f32 a1 = start + sweep * (i + 1) / kHorseSegments;
+            // Screen y grows down: the gap at -y is the shoe's open top.
+            const Vec2 d0 = {std::cos(a0), -std::sin(a0)};
+            const Vec2 d1 = {std::cos(a1), -std::sin(a1)};
+            const Vec2 o0 = c + d0 * ro, o1 = c + d1 * ro, i0 = c + d0 * ri, i1 = c + d1 * ri;
+            emit(o0, col);
+            emit(o1, col);
+            emit(i1, col);
+            emit(o0, col);
+            emit(i1, col);
+            emit(i0, col);
+        }
+        GXEnd();
+    };
+    const f32 inner = outer * kHorseInner;
+    ring(outer + kOutline, std::max(inner - kOutline, 0.0f), kHorseGapDeg - 16.0f, outline);
+    ring(outer, inner, kHorseGapDeg, fill);
+}
+
+// Every remote Epona shown here, on the minimap under the players' arrows.
+void gatherHorses(Frame& f, const MinimapXform& t, u8 alpha) {
+    f.horses.clear();
+    if (!Session::active()) {
+        return;
+    }
+    const char* stage = dComIfGp_getStartStageName();
+    const int8_t layer = static_cast<int8_t>(dComIfG_play_c::getLayerNo(0));
+    const f32 unitsPerTexel = t.rectW / t.texW;
+    const f32 size =
+        std::max(t.cursorSize * unitsPerTexel * kRemoteScale, kMinArrow) * kHorseSize;
+    for (const auto& [id, c] : Session::instance().clients()) {
+        horse::TagInfo info;
+        if (c.self || !horse::tagInfo(id, info)) {
+            continue;
+        }
+        const bool ownerHere = stage != nullptr &&
+                               std::strncmp(c.stageName, stage, sizeof(c.stageName)) == 0 &&
+                               c.layerNo == layer && c.hasPlayerUpdate;
+        const int8_t room = ownerHere ? c.roomNo : c.horsePlace.room;
+        BE(Vec) pos;
+        pos.x = info.pos[0];
+        pos.y = info.pos[1];
+        pos.z = info.pos[2];
+        if (room >= 0 && room < 64) {
+            dMapInfo_n::correctionOriginPos(room, &pos);
+        }
+        const Vec v = pos;
+        HorseIcon h;
+        h.clientId = id;
+        h.anchor = projectMinimap(t, v.x, v.z);
+        if (h.anchor.x < t.rectX || h.anchor.x > t.rectX + t.rectW || h.anchor.y < t.rectY ||
+            h.anchor.y > t.rectY + t.rectH)
+        {
+            continue;  // no pin: at the edge it would pass for its rider
+        }
+        h.size = size;
+        h.ridden = info.ridden;
+        h.ownerAway = !ownerHere;
+        Source s;
+        s.r = c.colorR;
+        s.g = c.colorG;
+        s.b = c.colorB;
+        Drawn d;
+        pickColours(s, alpha, false, d);
+        std::copy(std::begin(d.fill), std::end(d.fill), h.fill);
+        std::copy(std::begin(d.outline), std::end(d.outline), h.outline);
+        f.horses.push_back(h);
+    }
+}
+
 // Once per game tick; the painter may run several times per tick with frame interpolation.
 uint32_t nowTick() {
     return g_Counter.mCounter0;
@@ -306,6 +391,8 @@ void beginFrame(Frame& f, Surface s) {
     f.localRedrawn = false;
     f.cursors.clear();
     f.skipped.clear();
+    f.horses.clear();
+    f.linkIconValid = false;
 }
 
 std::vector<Source> sSources;
@@ -323,8 +410,11 @@ struct PauseList {
     std::vector<Source> sources;
     std::vector<Skipped> skipped;
     std::vector<PauseEntry> entries;
+    Vec2 local;  // the local player, placed the same way (field map)
 };
 PauseList sPause;
+// The same for the field map (collectPauseFmap, drawPauseFmap).
+PauseList sFmap;
 
 }  // namespace
 
@@ -336,6 +426,8 @@ const char* gateName(Gate g) {
     case Gate::LocationsOff: return "locationsOff";
     case Gate::CutsceneHidden: return "cutscene";
     case Gate::NoStage: return "noStage";
+    case Gate::NotInField: return "notInField";
+    case Gate::OtherRegion: return "otherRegion";
     }
     return "?";
 }
@@ -436,12 +528,16 @@ void drawMinimap(dMap_c& map, f32 x, f32 y, f32 w, f32 h, u8 alpha) {
         pickColours(s, alpha, d.floorDelta != 0, d);
         f.cursors.push_back(d);
     }
-    if (f.cursors.empty()) {
+    gatherHorses(f, t, alpha);
+    if (f.cursors.empty() && f.horses.empty()) {
         return;
     }
 
     GXPushDebugGroup("twili map cursors");
     beginPrims();
+    for (const HorseIcon& h : f.horses) {
+        drawHorseshoe(h.anchor, h.size, h.fill, h.outline);
+    }
     for (const Drawn& d : f.cursors) {
         drawMarker(d);
     }
@@ -555,6 +651,113 @@ void drawPauseDmap(dMenuMapCommon_c& common, f32 originX, f32 originY, f32 alpha
     GXPopDebugGroup();
 }
 
+void collectPauseFmap(dMenu_Fmap2DBack_c& back, const char* stageName) {
+    const uint32_t tick = nowTick();
+    sFmap.valid = true;
+    sFmap.tick = tick;
+    sFmap.entries.clear();
+    gatherSources(sFmap.sources, sFmap.skipped, sFmap.gate);
+    if (sFmap.gate != Gate::Drawn) {
+        return;
+    }
+    // Remote players are only known in our own stage: in the field, on our province's map.
+    if (stageName == nullptr || !dComIfGs_isPlayerFieldLastStayFieldDataExistFlag()) {
+        sFmap.gate = Gate::NotInField;
+        return;
+    }
+    if (back.getRegionCursor() + 1 != dComIfGp_getNowLevel()) {
+        sFmap.gate = Gate::OtherRegion;
+        return;
+    }
+    f32 ox = 0.0f, oz = 0.0f;
+    back.calcOffset(back.getRegionCursor(), stageName, &ox, &oz);
+    const auto project = [&](f32 x, f32 z) {
+        Vec2 p;
+        back.calcAllMapPos2D(x + ox - back.mStageTransX, z + oz - back.mStageTransZ, &p.x, &p.y);
+        return p;
+    };
+    for (const Source& s : sFmap.sources) {
+        PauseEntry e;
+        e.drawn.clientId = s.clientId;
+        e.drawn.pose = s.pose;
+        e.drawn.injected = s.injected;
+        e.drawn.fill[0] = s.r;
+        e.drawn.fill[1] = s.g;
+        e.drawn.fill[2] = s.b;
+        e.alphaRate = 1.0f;
+        e.pos = project(s.pose.x, s.pose.z);
+        const Vec2 ahead = project(s.pose.x + cM_ssin(s.pose.angle) * 1000.0f,
+                                   s.pose.z + cM_scos(s.pose.angle) * 1000.0f);
+        e.drawn.dir = normalized(ahead - e.pos);
+        sFmap.entries.push_back(e);
+    }
+    if (daPy_getPlayerActorClass() != nullptr) {
+        const Vec local = dMapInfo_n::getMapPlayerPos();
+        sFmap.local = project(local.x, local.z);
+    }
+}
+
+void drawPauseFmap(dMenuMapCommon_c& common, f32 originX, f32 originY, f32 alpha) {
+    Frame& f = sFrames[size_t(Surface::PauseFmap)];
+    beginFrame(f, Surface::PauseFmap);
+    alpha = std::clamp(alpha, 0.0f, 1.0f);
+    f.mapAlpha = scaled(255, alpha);
+    f.rectOnScreen = true;
+    if (!sFmap.valid || nowTick() - sFmap.tick > 1) {
+        f.valid = false;
+        return;
+    }
+    f.gate = sFmap.gate;
+    if (f.gate == Gate::Drawn && alpha <= 0.0f) {
+        f.gate = Gate::AlphaZero;
+    }
+    if (f.gate != Gate::Drawn) {
+        return;
+    }
+    f.skipped = sFmap.skipped;
+    f.localAnchor = {originX + sFmap.local.x, originY + sFmap.local.y};
+    f.linkIconValid = false;
+    for (const dMenuMapCommon_c::IconInfo_s& icon : common.mIconInfo) {
+        if (icon.icon_no == ICON_LINK_e && icon._15 != 0) {
+            f.linkIcon = {originX + icon.pos_x, originY + icon.pos_y};
+            f.linkIconValid = true;
+        }
+    }
+    f32 iconScale = 1.0f;
+    if (J2DPicture* link = common.mPictures[ICON_LINK_e]) {
+        iconScale = link->getScaleX();
+    }
+    const f32 height = std::max(kPauseArrow * iconScale * kRemoteScale, kMinArrow);
+    const bool mirror = mirrorMode();
+    for (const PauseEntry& e : sFmap.entries) {
+        Drawn d = e.drawn;
+        d.anchor = {originX + e.pos.x, originY + e.pos.y};
+        // drawIcon's own mirror step (the field map passes no mirrored angle to its icons).
+        if (mirror) {
+            d.anchor.x = common.getMirrorCenterPosX(d.anchor.x, 0.0f);
+            d.dir.x = -d.dir.x;
+        }
+        d.height = height;
+        d.tip = d.anchor + d.dir * (kTip * d.height);
+        Source s;
+        s.r = e.drawn.fill[0];
+        s.g = e.drawn.fill[1];
+        s.b = e.drawn.fill[2];
+        pickColours(s, scaled(255, alpha), false, d);
+        f.cursors.push_back(d);
+    }
+    if (f.cursors.empty()) {
+        return;
+    }
+    GXPushDebugGroup("twili field map cursors");
+    beginPrims();
+    for (const Drawn& d : f.cursors) {
+        drawMarker(d);
+    }
+    endPrims();
+    GXPopDebugGroup();
+}
+
 const Frame& lastFrame(Surface s) {
     return sFrames[size_t(s)];
 }
@@ -566,6 +769,7 @@ void setTestClients(std::vector<TestClient> clients) {
 void reset() {
     sTestClients.clear();
     sPause = {};
+    sFmap = {};
     for (Frame& f : sFrames) {
         f = {};
     }

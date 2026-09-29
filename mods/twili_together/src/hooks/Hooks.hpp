@@ -64,6 +64,7 @@ enum class ScopeKind : uint8_t {
     EnemyDamage,
     StagePlaced,
     DmapDraw,
+    FmapDraw,
 };
 
 struct ScopeEntry {

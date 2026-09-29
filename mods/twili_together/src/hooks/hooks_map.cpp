@@ -6,7 +6,10 @@
 #include "d/d_map.h"
 #include "d/d_menu_dmap.h"
 #include "d/d_menu_dmap_map.h"
+#include "d/d_menu_fmap.h"
+#include "d/d_menu_fmap2D.h"
 #include "d/d_menu_map_common.h"
+#include "d/d_com_inf_game.h"
 #include "d/d_meter_map.h"
 #include "m_Do/m_Do_graphic.h"
 
@@ -20,6 +23,10 @@ DEFINE_HOOK_SYMBOL("dMenu_DmapBg_c::draw", void(dMenu_DmapBg_c*), DmapBgDraw);
 static_assert(std::is_same_v<decltype(&dMenu_DmapBg_c::draw), void (dMenu_DmapBg_c::*)()>);
 DEFINE_HOOK(&dMenuMapCommon_c::drawIcon, MapCommonDrawIcon);
 DEFINE_HOOK(&dMenu_Dmap_c::getIconPos, DmapGetIconPos);
+// The same for the field map's background screen.
+DEFINE_HOOK_SYMBOL("dMenu_Fmap2DBack_c::draw", void(dMenu_Fmap2DBack_c*), FmapBackDraw);
+static_assert(std::is_same_v<decltype(&dMenu_Fmap2DBack_c::draw), void (dMenu_Fmap2DBack_c::*)()>);
+DEFINE_HOOK(static_cast<void (dMenu_Fmap_c::*)(f32, bool)>(&dMenu_Fmap_c::drawIcon), FmapDrawIcon);
 
 namespace {
 
@@ -50,16 +57,47 @@ void onDmapBgDrawPost(ModContext*, void* args, void*, void*) {
     }
 }
 
+HookAction onFmapBackDrawPre(ModContext*, void* args, void*, void*) {
+    Scope::push(ScopeKind::FmapDraw, mods::arg<dMenu_Fmap2DBack_c*>(args, 0));
+    return HOOK_CONTINUE;
+}
+
+void onFmapBackDrawPost(ModContext*, void* args, void*, void*) {
+    auto* back = mods::arg<dMenu_Fmap2DBack_c*>(args, 0);
+    if (Scope::owner(ScopeKind::FmapDraw) == back) {
+        Scope::pop(ScopeKind::FmapDraw, back);
+    }
+}
+
 // The call right after the map pane: remote players go under the icons, so Link stays on top.
 HookAction onDrawIconPre(ModContext*, void* args, void*, void*) {
-    const auto* bg = static_cast<const dMenu_DmapBg_c*>(Scope::owner(ScopeKind::DmapDraw));
     auto* common = mods::arg<dMenuMapCommon_c*>(args, 0);
-    if (bg == nullptr || common != static_cast<const dMenuMapCommon_c*>(bg)) {
+    const f32 x = mods::arg<f32>(args, 1);
+    const f32 y = mods::arg<f32>(args, 2);
+    const auto* bg = static_cast<const dMenu_DmapBg_c*>(Scope::owner(ScopeKind::DmapDraw));
+    if (bg != nullptr && common == static_cast<const dMenuMapCommon_c*>(bg)) {
+        ui::map_cursor::drawPauseDmap(*common, x, y, mods::arg<f32>(args, 3));
         return HOOK_CONTINUE;
     }
-    ui::map_cursor::drawPauseDmap(
-        *common, mods::arg<f32>(args, 1), mods::arg<f32>(args, 2), mods::arg<f32>(args, 3));
+    const auto* back = static_cast<const dMenu_Fmap2DBack_c*>(Scope::owner(ScopeKind::FmapDraw));
+    if (back != nullptr && common == static_cast<const dMenuMapCommon_c*>(back)) {
+        // Its pictures fade with both of drawIcon's alphas.
+        ui::map_cursor::drawPauseFmap(
+            *common, x, y, mods::arg<f32>(args, 3) * mods::arg<f32>(args, 4));
+    }
     return HOOK_CONTINUE;
+}
+
+// The Link icon is placed: remote players the same way, in the stage name it used.
+void onFmapDrawIconPost(ModContext*, void* args, void*, void*) {
+    auto* fmap = mods::arg<dMenu_Fmap_c*>(args, 0);
+    if (fmap == nullptr || fmap->mpDraw2DBack == nullptr) {
+        return;
+    }
+    const char* stage = dComIfGs_isPlayerFieldLastStayFieldDataExistFlag()
+                            ? dMenuFmap_getStartStageName(fmap->mpFieldDat)
+                            : nullptr;
+    ui::map_cursor::collectPauseFmap(*fmap->mpDraw2DBack, stage);
 }
 
 void cnvPauseDmap(const void* ctx, f32 x, f32 z, f32* px, f32* py) {
@@ -85,6 +123,9 @@ ModResult installMap(std::string& error) {
         addPost<DmapBgDraw>(onDmapBgDrawPost, kObserve, "dMenu_DmapBg_c::draw", error),
         addPre<MapCommonDrawIcon>(onDrawIconPre, kDefault, "dMenuMapCommon_c::drawIcon", error),
         addPost<DmapGetIconPos>(onGetIconPosPost, kDefault, "dMenu_Dmap_c::getIconPos", error),
+        addPre<FmapBackDraw>(onFmapBackDrawPre, kObserve, "dMenu_Fmap2DBack_c::draw", error),
+        addPost<FmapBackDraw>(onFmapBackDrawPost, kObserve, "dMenu_Fmap2DBack_c::draw", error),
+        addPost<FmapDrawIcon>(onFmapDrawIconPost, kDefault, "dMenu_Fmap_c::drawIcon", error),
     };
     for (const ModResult r : results) {
         if (r != MOD_OK) {

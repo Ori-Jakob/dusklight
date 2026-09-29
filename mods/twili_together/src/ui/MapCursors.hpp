@@ -8,11 +8,12 @@
 
 class dMap_c;
 class dMenuMapCommon_c;
+class dMenu_Fmap2DBack_c;
 
 // Remote players on the maps, as direct-colour triangles over the finished picture.
 namespace twili::ui::map_cursor {
 
-enum class Surface : uint8_t { Minimap = 0, PauseDmap = 1, Count };
+enum class Surface : uint8_t { Minimap = 0, PauseDmap = 1, PauseFmap = 2, Count };
 
 // Why a frame drew no marker at all. Only Drawn ran the per-client filters.
 enum class Gate : uint8_t {
@@ -22,6 +23,8 @@ enum class Gate : uint8_t {
     LocationsOff,
     CutsceneHidden,
     NoStage,
+    NotInField,    // the field map shows where we last were, not where we are
+    OtherRegion,   // the field map shows another province
 };
 
 // Why a known client got no marker in a frame that ran the filters.
@@ -66,6 +69,17 @@ struct Drawn {
     bool injected = false;  // an autotest client
 };
 
+// A remote player's Epona on the minimap, ridden or parked.
+struct HorseIcon {
+    uint32_t clientId = 0;
+    Vec2 anchor;
+    f32 size = 0.0f;  // outer radius, J2D units
+    u8 fill[4] = {};
+    u8 outline[4] = {};
+    bool ridden = false;
+    bool ownerAway = false;  // left here while its owner is in another stage
+};
+
 struct Skipped {
     uint32_t clientId = 0;
     Skip reason = Skip::NoSave;
@@ -86,6 +100,10 @@ struct Frame {
     bool rectOnScreen = false;
     std::vector<Drawn> cursors;
     std::vector<Skipped> skipped;
+    std::vector<HorseIcon> horses;  // minimap only
+    // Field map: where the menu drew its Link icon, for localAnchor (placed the remotes' way)
+    Vec2 linkIcon;
+    bool linkIconValid = false;
 };
 
 // After the minimap picture, with its rect and alpha.
@@ -96,6 +114,10 @@ using PauseCnvFn = void (*)(const void* ctx, f32 x, f32 z, f32* px, f32* py);
 void collectPauseDmap(s8 floorNo, f32 alphaRate, PauseCnvFn cnv, const void* ctx);
 // Just before the menu's own icons, with drawIcon's arguments.
 void drawPauseDmap(dMenuMapCommon_c& common, f32 originX, f32 originY, f32 alpha);
+
+// Pause field map: after dMenu_Fmap_c placed its Link icon, placed the same way.
+void collectPauseFmap(dMenu_Fmap2DBack_c& back, const char* stageName);
+void drawPauseFmap(dMenuMapCommon_c& common, f32 originX, f32 originY, f32 alpha);
 
 const Frame& lastFrame(Surface s);
 
