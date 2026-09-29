@@ -23,7 +23,6 @@ namespace twili::team_game {
 namespace {
 
 // Base64 has no break opportunities; the window wraps these chunks instead.
-constexpr size_t kPermalinkChunk = 24;
 constexpr auto kTeamColorPushInterval = std::chrono::milliseconds(250);
 
 struct Conflict {
@@ -89,6 +88,14 @@ std::string teamTitle(const std::string& id) {
     return id.empty() ? std::string("Players without a team") : "Team " + id;
 }
 
+// The team in a sentence: players without one share the room's game.
+std::string teamRef(const std::string& id, bool capital) {
+    if (!id.empty()) {
+        return "Team " + id;
+    }
+    return capital ? "The room" : "the room";
+}
+
 std::string clientName(uint32_t id) {
     const auto& clients = Session::instance().clients();
     const auto it = clients.find(id);
@@ -130,13 +137,15 @@ void onOwnTeam(const Team& team) {
     const std::string title = teamTitle(team.id);
     const std::string gameKey = team.game.set ? team.game.key : std::string{};
     if (!first && !gameKey.empty() && !st.ownGameKey.empty() && gameKey != st.ownGameKey) {
-        ui::toast("Twili-Together", fmt::format("{} now plays {}.", title, gameLabel(team.game)));
+        ui::toast("Twili-Together",
+            fmt::format("{} now plays {}.", teamRef(team.id, true), gameLabel(team.game)));
     }
     if (!first && team.ownerClientId != 0 && team.ownerClientId != st.ownOwner) {
         ui::toast("Twili-Together",
             team.ownerClientId == self ?
-                fmt::format("You now lead {}.", title) :
-                fmt::format("{} now leads {}.", clientName(team.ownerClientId), title));
+                fmt::format("You now lead {}.", teamRef(team.id, false)) :
+                fmt::format("{} now leads {}.", clientName(team.ownerClientId),
+                    teamRef(team.id, false)));
     }
     if (gameKey != st.ownGameKey) {
         TwiliLog.info("[game] {} plays {}", title, gameKey.empty() ? "nothing yet" : gameKey);
@@ -153,19 +162,23 @@ void onOwnTeam(const Team& team) {
         sync::requestExchange();
         st.conflict.open = false;
         if (before == Sync::Mismatch || before == Sync::Unverified) {
-            ui::toast(
-                "Twili-Together", fmt::format("Synced with {} ({}).", title, gameLabel(team.game)));
+            ui::toast("Twili-Together",
+                fmt::format("Synced with {} ({}).", teamRef(team.id, false), gameLabel(team.game)));
         }
     }
     if (now == Sync::Mismatch) {
         const std::string key = gameKey + "|" + game_identity::current().key;
         if (key != st.toastedMismatch) {
             st.toastedMismatch = key;
-            ui::toastRml("Twili-Together",
-                fmt::format(
-                    "World sync is off: {} plays <b>{}</b>. The Room tab tells you how to join.",
-                    ui::escapeRml(title), ui::escapeRml(gameLabel(team.game))),
-                ui::kToastWarning, 8000);
+            const std::string body =
+                team.game.kind == "randomizer" && !team.game.name.empty() ?
+                    fmt::format("World sync is off: {}'s seed is <b>{}</b>. Copy its permalink on "
+                                "the Room tab to join.",
+                        ui::escapeRml(teamRef(team.id, false)), ui::escapeRml(team.game.name)) :
+                    fmt::format("World sync is off: {} plays <b>{}</b>.",
+                        ui::escapeRml(teamRef(team.id, false)),
+                        ui::escapeRml(gameLabel(team.game)));
+            ui::toastInline("Twili-Together", body, ui::kToastWarning, 8000);
         }
     }
 }
@@ -265,17 +278,6 @@ void showUnverifiedPrompt() {
         .declineLabel = "Not Now",
         .onAccept = [] { allowUnverified(); },
     });
-}
-
-std::string chunked(const std::string& text) {
-    std::string out;
-    for (size_t i = 0; i < text.size(); i += kPermalinkChunk) {
-        if (i != 0) {
-            out += "<br/>";
-        }
-        out += ui::escapeRml(text.substr(i, kPermalinkChunk));
-    }
-    return out;
 }
 
 }  // namespace
@@ -517,6 +519,14 @@ std::string memberBadge(const Member& m) {
     }
 }
 
+// The seed's name for a randomizer game, the game's label otherwise.
+std::string gameLineRml(const Game& game) {
+    if (game.kind == "randomizer" && !game.name.empty()) {
+        return "<p>Seed: <b>" + ui::escapeRml(game.name) + "</b></p>";
+    }
+    return "<p>Game: <b>" + ui::escapeRml(gameLabel(game)) + "</b></p>";
+}
+
 std::string statusRml() {
     const Session& session = Session::instance();
     if (!session.isConnected()) {
@@ -532,14 +542,16 @@ std::string statusRml() {
             isTeamOwner() ? " · you lead it" : " · leader " + clientName(team->ownerClientId));
     }
     rml += "</p>";
-    rml += "<p>Team game: <b>" +
-           ui::escapeRml(team != nullptr ? gameLabel(team->game) : std::string("unknown")) +
-           "</b></p>";
-    rml += "<p>Your game: " + ui::escapeRml(localLabel()) +
-           (local.inGame && !local.verified ? " (unverified)" : "") + "</p>";
+    const Game* teamGame = team != nullptr && team->game.set ? &team->game : nullptr;
+    if (teamGame != nullptr) {
+        rml += gameLineRml(*teamGame);
+    }
+    if (s_state.localSync != Sync::Ok && local.inGame) {
+        rml += "<p>Yours: " + ui::escapeRml(localLabel()) + (!local.verified ? " (unverified)" : "") +
+               "</p>";
+    }
 
     std::string why;
-    const Game* teamGame = team != nullptr ? &team->game : nullptr;
     switch (s_state.localSync) {
     case Sync::Ok:
         why = "World sync is on.";
@@ -548,33 +560,23 @@ std::string statusRml() {
         }
         break;
     case Sync::Unverified:
-        why = "Your randomizer game matches the team's by item probes only: no generated seed here "
-              "matches it. Press Sync Unverified Match to sync anyway.";
+        why = "Your seed matches the team's by item checks only. Press Sync Unverified Match to "
+              "sync anyway.";
         break;
     case Sync::Mismatch:
-        if (teamGame != nullptr && teamGame->kind == "randomizer" && local.kind == "vanilla") {
-            why = "Your vanilla save won't sync. Start the team's seed (steps below) to join.";
+        if (teamGame != nullptr && teamGame->kind == "randomizer") {
+            why = "World sync is off: copy the team's permalink to start its seed.";
         } else if (teamGame != nullptr && teamGame->kind == "vanilla" && local.kind == "randomizer")
         {
-            why =
-                "Your randomizer save won't sync with a vanilla team. Load a vanilla save to sync.";
-        } else if (teamGame != nullptr && teamGame->kind == "randomizer" &&
-                   local.kind == "randomizer")
-        {
-            why = "You play a different seed than your team: world sync is off. Start the team's "
-                  "seed (steps below) to join.";
+            why = "World sync is off: load a vanilla save to sync.";
         } else {
-            why = "Your game differs from the team's: world sync is off.";
-        }
-        if (isTeamOwner()) {
-            why += " As the team leader you can make your game the team's game.";
+            why = "World sync is off: your game differs from the team's.";
         }
         break;
     default:
-        why = !local.inGame ? "Load a save to sync with your team." :
-              teamGame == nullptr || !teamGame->set ?
-                              "The first player in game sets the team's game." :
-                              "Waiting for the server.";
+        why = !local.inGame        ? "Load a save to sync with your team." :
+              teamGame == nullptr ? "The first player in game sets the team's game." :
+                                    "Waiting for the server.";
         break;
     }
     rml += "<p>" + ui::escapeRml(why) + "</p>";
@@ -583,27 +585,12 @@ std::string statusRml() {
 
 std::string permalinkRml() {
     const Team* team = ownTeam();
-    if (team == nullptr || !team->game.set || team->game.kind != "randomizer") {
+    if (team == nullptr || !team->game.set || team->game.kind != "randomizer" ||
+        !team->game.permalink.empty())
+    {
         return {};
     }
-    if (team->game.permalink.empty()) {
-        return "<p>The team's seed has no permalink to share: the leader's randomizer has no "
-               "anti-spoiler log for it, or the seed could not be identified.</p>";
-    }
-    std::string rml =
-        "<p>Seed permalink (your team only):</p><p>" + chunked(team->game.permalink) + "</p>";
-    rml += fmt::format(
-        "<p>To join this seed:</p>"
-        "<p>1. Press Copy Permalink.</p>"
-        "<p>2. Not in the randomizer yet? Reset from the menu bar and pick Randomizer in the "
-        "launcher.</p>"
-        "<p>3. In the Randomizer tab, Seed Management: press Paste Permalink (it replaces your "
-        "randomizer settings), then Generate Seed.</p>"
-        "<p>4. On file select choose an empty file, pick the seed <b>{}</b> under Play and press "
-        "Start Randomizer.</p>",
-        ui::escapeRml(
-            team->game.name.empty() ? std::string("that was generated") : team->game.name));
-    return rml;
+    return "<p>The leader's seed has no permalink to share.</p>";
 }
 
 const std::string& ownPermalink() {

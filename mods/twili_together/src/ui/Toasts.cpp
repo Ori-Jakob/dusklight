@@ -34,15 +34,19 @@ void toastRml(const std::string& titleRml, const std::string& bodyRml, const cha
     }
 }
 
-void toast(std::string_view title, std::string_view body, const char* type,
+void toastInline(std::string_view title, const std::string& bodyRml, const char* type,
     uint32_t durationMs) {
     // Text starting with '<' is RML to the host: always send RML, in its plain toast elements.
     const std::string titleRml =
         title.empty() ? std::string{} : "<toast-title>" + escapeRml(title) + "</toast-title>";
-    const std::string bodyRml = body.empty() ? std::string{}
-                                             : "<toast-message-text>" + escapeRml(body) +
-                                                   "</toast-message-text>";
-    toastRml(titleRml, bodyRml, type, durationMs);
+    toastRml(titleRml,
+        bodyRml.empty() ? std::string{} : "<toast-message-text>" + bodyRml + "</toast-message-text>",
+        type, durationMs);
+}
+
+void toast(std::string_view title, std::string_view body, const char* type,
+    uint32_t durationMs) {
+    toastInline(title, escapeRml(body), type, durationMs);
 }
 
 }  // namespace twili::ui

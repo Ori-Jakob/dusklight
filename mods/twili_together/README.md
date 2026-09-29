@@ -64,9 +64,8 @@ can switch it ("Make My Game the Team's Game" on the Room tab).
 To get everyone on the leader's seed:
 
 1. The leader generates a seed in the randomizer and starts it, then connects.
-2. Teammates connect with the same room and team. The Room tab shows the team's seed, its
-   permalink and these steps:
-3. Press **Copy Permalink**.
+2. Teammates connect with the same room and team. The Room tab shows the team's seed name.
+3. Press **Copy Seed Permalink** (its tooltip repeats these steps).
 4. Not in the randomizer yet? Reset from the menu bar and pick Randomizer in the launcher.
 5. In the Randomizer tab, under Seed Management, press **Paste Permalink** (it replaces your
    randomizer settings), then **Generate Seed**.

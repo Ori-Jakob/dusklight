@@ -33,7 +33,7 @@ void warnLayoutMismatch(uint32_t clientId, const std::string& name, const std::s
     TwiliLog.warn(
         "[sync] {} (client {}) uses save layout {}, we use {}: world sync with them is off", shown,
         clientId, layout.empty() ? "?" : layout, localLayout());
-    ui::toastRml("Twili-Together",
+    ui::toastInline("Twili-Together",
         fmt::format("<b>{}</b> runs a different game version. World sync with them is off.",
             ui::escapeRml(shown)),
         ui::kToastWarning, 8000);

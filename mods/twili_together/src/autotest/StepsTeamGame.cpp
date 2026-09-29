@@ -188,7 +188,7 @@ std::optional<bool> teamGameSteps(const std::string& op, StepContext& ctx) {
         return waitFor(ctx, ok, 60.0, "team game is " + describeTeam(team));
     }
 
-    // What Copy Permalink puts on the clipboard (the clipboard itself is left alone).
+    // What Copy Seed Permalink puts on the clipboard (the clipboard itself is left alone).
     if (op == "expectCopyText") {
         const std::string want = step.value("text", std::string{});
         const std::string& got = team_game::ownPermalink();

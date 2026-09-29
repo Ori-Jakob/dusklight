@@ -37,6 +37,12 @@ constexpr size_t kTeleportSlots = 12;
 UiMenuTabHandle s_menuTab = 0;
 UiWindowHandle s_window = 0;
 
+// A control shown only while it applies.
+struct Shown {
+    UiElementHandle elem = 0;
+    bool visible = true;
+};
+
 // Elements of the tab on screen; a tab switch destroys them.
 struct Live {
     UiElementHandle status = 0;
@@ -45,8 +51,10 @@ struct Live {
     UiElementHandle roomInfo = 0;
     UiElementHandle teamInfo = 0;
     UiElementHandle teamPermalink = 0;
-    UiElementHandle teamColor = 0;
-    bool teamColorShown = false;
+    Shown copyPermalink;
+    Shown claimGame;
+    Shown confirmMatch;
+    Shown teamColor;
     UiElementHandle players = 0;
     std::array<UiElementHandle, kTeleportSlots> teleport{};
     std::array<uint32_t, kTeleportSlots> teleportIds{};
@@ -476,6 +484,20 @@ bool nothingToConfirm(ModContext*, void*) {
     return team_game::localSync() != team_game::Sync::Unverified || team_game::unverifiedAllowed();
 }
 
+void setShown(Shown& control, bool want) {
+    if (control.elem != 0 && control.visible != want) {
+        control.visible = want;
+        svc_ui->elem_set_visible(mod_ctx, control.elem, want);
+    }
+}
+
+void updateTeamControls() {
+    setShown(s_live.copyPermalink, !team_game::ownPermalink().empty());
+    setShown(s_live.claimGame, team_game::conflictOpen());
+    setShown(s_live.confirmMatch, !nothingToConfirm(nullptr, nullptr));
+    setShown(s_live.teamColor, team_game::canSetTeamColor());
+}
+
 // Hidden while empty.
 void setOptionalRml(UiElementHandle elem, std::string& last, const std::string& rml) {
     const std::string shown = rml.empty() ? std::string(" ") : rml;
@@ -498,12 +520,15 @@ void addTeamSection(UiElementHandle left) {
 
     UiControlDesc copy = UI_CONTROL_DESC_INIT;
     copy.kind = UI_CONTROL_BUTTON;
-    copy.label = "Copy Permalink";
-    copy.help_rml = "<p>Copy your team's randomizer seed permalink, to paste it in the "
-                    "Randomizer tab and generate the same seed.</p>";
+    copy.label = "Copy Seed Permalink";
+    copy.help_rml = "<p>Copies your team's seed permalink. To start that seed: not in the "
+                    "randomizer yet? Reset from the menu bar and pick Randomizer in the launcher. "
+                    "In the Randomizer tab, Seed Management, press Paste Permalink (it replaces "
+                    "your randomizer settings) and Generate Seed, then pick the seed under Play "
+                    "on an empty file and press Start Randomizer.</p>";
     copy.on_pressed = onCopyPermalink;
     copy.is_disabled = noPermalink;
-    addControl(left, copy);
+    addControl(left, copy, &s_live.copyPermalink.elem);
 
     UiControlDesc claim = UI_CONTROL_DESC_INIT;
     claim.kind = UI_CONTROL_BUTTON;
@@ -512,7 +537,7 @@ void addTeamSection(UiElementHandle left) {
                      "stop syncing until they load it too.</p>";
     claim.on_pressed = onClaimTeamGame;
     claim.is_disabled = cannotClaim;
-    addControl(left, claim);
+    addControl(left, claim, &s_live.claimGame.elem);
 
     UiControlDesc confirm = UI_CONTROL_DESC_INIT;
     confirm.kind = UI_CONTROL_BUTTON;
@@ -522,7 +547,7 @@ void addTeamSection(UiElementHandle left) {
         "for this session.</p>";
     confirm.on_pressed = onAllowUnverified;
     confirm.is_disabled = nothingToConfirm;
-    addControl(left, confirm);
+    addControl(left, confirm, &s_live.confirmMatch.elem);
 
     UiControlDesc teamColor = UI_CONTROL_DESC_INIT;
     teamColor.kind = UI_CONTROL_COLOR;
@@ -535,11 +560,8 @@ void addTeamSection(UiElementHandle left) {
     teamColor.is_disabled = cannotSetTeamColor;
     teamColor.color_presets = kColorPresets;
     teamColor.color_preset_count = std::size(kColorPresets);
-    addControl(left, teamColor, &s_live.teamColor);
-    s_live.teamColorShown = team_game::canSetTeamColor();
-    if (s_live.teamColor != 0 && !s_live.teamColorShown) {
-        svc_ui->elem_set_visible(mod_ctx, s_live.teamColor, false);
-    }
+    addControl(left, teamColor, &s_live.teamColor.elem);
+    updateTeamControls();
 
     addToggle(left, Var::RandoAllowUnverified, "Always Sync Unverified Randomizer Games",
         "<p>Sync with teammates whose randomizer game can only be compared by probing item checks "
@@ -580,12 +602,7 @@ ModResult updateRoomTab(ModContext*, void*, ModError*) {
     setRml(s_live.roomInfo, s_live.lastRoomInfo, roomInfoRml());
     setRml(s_live.teamInfo, s_live.lastTeamInfo, team_game::statusRml());
     setOptionalRml(s_live.teamPermalink, s_live.lastTeamPermalink, team_game::permalinkRml());
-    if (const bool leader = team_game::canSetTeamColor();
-        s_live.teamColor != 0 && leader != s_live.teamColorShown)
-    {
-        s_live.teamColorShown = leader;
-        svc_ui->elem_set_visible(mod_ctx, s_live.teamColor, leader);
-    }
+    updateTeamControls();
     return MOD_OK;
 }
 

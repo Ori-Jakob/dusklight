@@ -312,7 +312,7 @@ the randomizer seed a player runs is found among the generated seeds on disk:
 | `expectSyncState` | `state` (`ok`, `pending`, `unverified`, `mismatch`), `timeoutSec` | until the server reports that state for us |
 | `expectMemberSync` | `peer`, `state`, `timeoutSec` | the same for a teammate |
 | `expectTeamGame` | `team` (default ours), `key`, `keyPrefix`, `kind`, `name`, `permalink`, `noPermalink`, `noKey`, `sameGame`, `owner` (peer name or `self`), `timeoutSec` | until the team's state matches every field given |
-| `expectCopyText` | `text`, `timeoutSec` | what Copy Permalink would put on the clipboard (the clipboard is left alone) |
+| `expectCopyText` | `text`, `timeoutSec` | what Copy Seed Permalink would put on the clipboard (the clipboard is left alone) |
 | `claimTeamGame` / `confirmUnverified` | | the Room tab's "Make My Game the Team's Game" / "Sync Unverified Match" |
 | `promote` | `peer`, `role` (`room`, `team`) | the Players tab's "Make ... Room Owner" / "Make ... Team Leader", confirmed |
 | `expectRoomOwner` | `owner` (peer name or `self`), `timeoutSec` | until the room state names that owner |
