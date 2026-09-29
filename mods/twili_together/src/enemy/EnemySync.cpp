@@ -92,7 +92,6 @@ void logKill(const char* what, const Kill& k) {
 bool isKillSyncable(s16 procName, u32 params) {
     switch (procName) {
     case fpcNm_E_OC_e:   // Bokoblin (its fall death has no puff: markDefeated)
-    case fpcNm_E_RDY_e:  // Shadow Bulblin
     case fpcNm_E_MF_e:   // Dynalfos
     case fpcNm_E_DN_e:   // Lizalfos
     case fpcNm_E_KR_e:   // Kargorok
@@ -119,6 +118,9 @@ bool isKillSyncable(s16 procName, u32 params) {
         const u8 arg0 = params & 0xFF;
         return arg0 != 4 && arg0 != 5 && arg0 != 11 && arg0 != 12;
     }
+    case fpcNm_E_RDY_e:
+        // Shadow Bulblin, not variant 12: the story Kargorok keeps a raw pointer to its rider.
+        return ((params & 0xF000) >> 12) != 12;
     default:
         return false;
     }
