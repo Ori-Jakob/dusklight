@@ -181,12 +181,15 @@ Wolf, Midna and transformations (`StepsWolf.cpp`):
 | op | fields | does |
 | --- | --- | --- |
 | `setForm` | `form` (`wolf`, `human`) | the form Link spawns in on the next stage load (follow with a warp) |
-| `transform` | `form`, `trace`, `timeoutSec` | transforms our player; with `trace` every stage and every expected emitter must show |
+| `transform` | `form`, `trace`, `voice`, `timeoutSec` | transforms our player; with `trace` every stage and every expected emitter must show; `voice` plays Midna's demo's transformation voice |
 | `expectLocalForm` | `form` | |
 | `expectRemoteForm` | `form`, `body` (form or `hidden`), `count`, `timeoutSec` | peers send `form` and their dummies show `body` |
 | `expectCleanAnims` | `frames` (120), `maxRefused` (0) | no dummy refuses more clips than that |
 | `setMidna` | `ride`, `visible`, `timeoutSec` | Midna on our wolf's back (visible in the light world: transform level 3) |
-| `expectRemoteMidna` | `mode` (`drawn`, `shadow`, `none`), `upper`, `hairHand`, `leftHand`, `rightHand`, `tired`, `maxRefused`, `count`, `frames`, `timeoutSec` | peers' dummies pose their Midna so |
+| `expectRemoteMidna` | `mode` (`drawn`, `shadow`, `apart`, `none`), `upper`, `hairHand`, `leftHand`, `rightHand`, `tired`, `maxRefused`, `count`, `frames`, `timeoutSec` | peers' dummies pose their Midna so |
+| `midnaSfx` | `sound`, `voice` (true) | our Midna starts that creature voice or sound (sent as PLAYER_SFX) |
+| `markRemoteMidna` / `expectRemoteMidnaSince` | `minSfx`, `minApartTicks`, `minShownTicks`, `timeoutSec` | the first peer's dummy heard that many Midna sounds and showed her that long since the mark |
+| `expectRemoteSfxTiming` | `sound`, `maxLag` (1), `transform`, `timeoutSec` | the first peer's dummy played that PLAYER_SFX within `maxLag` ticks of the pose tick it was made in (and of the transformation's start) |
 | `transformFxSelfTest` | | replay planner and codec; needs no peer |
 | `expectRemoteTransformFx` | `form`, `maxLag`, `minSilhouette`, `fur`, `maxAnchorErr`, `skip`, `hidden`, `anchorSource`, `timeoutSec` | the first peer's next transformation as sent and as its dummy replayed it |
 | `expectNoTransformFx` | `frames` | the dummy replays no transformation |
@@ -224,6 +227,7 @@ Items and projectiles (`StepsItemFx.cpp`). Kinds in `{kind: n}` fields are `arro
 | `injectItemFx` | `slots`, `events`, `hook`, `ball`, `packets` | our next updates show these |
 | `setOil` | `value` (21600) | lantern oil |
 | `expectLocalItemFx` | `objects`, `events`, `hookOutTicks`, `ironBallTicks`, `levelSfxTicks`, `minHookDist`, `timeoutSec` | our capture's totals |
+| `expectRemoteFishing` | `shown` (true), `action`, `minLine`, `maxReach` (600), `minCastTicks`, `timeoutSec` | the first peer's dummy draws its fishing rod so (tip in its hand, line that long) |
 | `markRemoteItemFx` | | remembers the first peer dummy's counters |
 | `expectRemoteItemFx` | `minDrawn` / `maxDrawn` (`{kind: n}` drawn now), `minSeen` (`{kind: n}` since the mark), `explosions`, `hitMarks`, `sounds`, `splashes`, `particles`, `maxExplosions` (since the mark), `tornado`, `boomCharge`, `minLights`, `maxLights`, `minEmitters`, `maxHeapUsed`, `hookChain`, `minTipDist`, `minHookShots` (chains since the mark), `minHookPeak` (the latest chain's longest tip distance), `minIronBallMode`, `maxIronBallMode`, `minIronBallDist`, `lanternFlame`, `minLanternGlow`, `maxLanternGlow`, `levelSfx` (level sounds started since the mark); `frames` (0), `timeoutSec` (20) | until the first peer's dummy shows every field given, then for `frames` more ticks |
 
@@ -274,12 +278,14 @@ Epona (`StepsHorse.cpp`):
 | `rideHorse` | `ride` (true), `mode` (`force`, `mount`), `timeoutSec` | on (forced or the real mount) or off our horse |
 | `expectLocalHorse` | `present` (true), `ridden`, `timeoutSec` | our horse as shown and ridden |
 | `setHorseHidden` | `hidden` (true) | our horse's call wait on or off |
-| `expectRemoteHorse` | `count`, `name`, `ridden`, `parked`, `maxDist`, `maxSeatDist`, `card`, `tagLine2`, `onScreen`, `tint`, `vanilla`, `hueGain`, `frames`, `timeoutSec` | peers' puppets as the fields say, held for `frames` ticks |
+| `expectRemoteHorse` | `count`, `name`, `ridden`, `parked`, `maxDist`, `maxSeatDist`, `zelda`, `maxZeldaDist` (150), `card`, `tagLine2`, `onScreen`, `tint`, `vanilla`, `hueGain`, `frames`, `timeoutSec` | peers' puppets as the fields say, held for `frames` ticks |
+| `spawnHoZelda` | `timeoutSec` | Zelda behind our Link on our horse (daHoZelda_c) |
+| `expectRiderBowTilt` | `minDeg` (20), `maxDeg` (35), `minTicks` (5), `timeoutSec` | a peer's riding dummy turns joint 5 for its bow |
 | `expectNoRemoteHorse` | `timeoutSec` | no puppet shown, no horse card drawn |
 | `expectRidePrompt` | `target` (`own`, `remote`), `frames` (60), `dist` (110) | GET_ON on our horse / never on the puppet |
 | `expectNotRiding` | `frames` (30) | our Link rides nothing |
 | `clearEnemies` | `radius` (8000) | deletes the enemies near our Link |
-| `horseCamera` | `target` (`remote`, `own`, `both`), `back`, `up`, `side`, `height`, `hold` / `release` | the camera behind our Link looking at the horse; `hold` keeps it (CameraService operator) |
+| `horseCamera` | `target` (`remote`, `own`, `both`, `dummy`), `back`, `up`, `side`, `height`, `hold` / `release` | the camera behind our Link looking at the horse (or the peer's dummy); `hold` keeps it (CameraService operator) |
 
 Teleport (`StepsTeleport.cpp`):
 
@@ -368,12 +374,14 @@ Map cursors (`StepsMapCursor.cpp`). Targets are peer names or `#<client id>`:
 | `mapCursorSelfTest` | | projection, facing, outline, pins, colours |
 | `showMinimap` | `minAlpha`, `timeoutSec` | until the minimap draws on screen |
 | `injectMapCursorClients` / `clearMapCursorClients` | `clients` (`id`, `color`, `dx`, `dz`, `dy`, `angle`), `unit` (`cm`, `texel`) | extra markers around our map position |
-| `expectMapCursor` | `surface` (`minimap`, `dmap`), `target(s)`, `color(s)`, `pinned`, `floorDelta`, `facing`, `count`, `holdTicks`, `maxAgeTicks`, `timeoutSec` | a fresh frame with those markers in exactly those colours |
-| `expectNoMapCursor` | `surface`, `target`, `reason`, `holdTicks` (30), `timeoutSec` | no marker, for that reason: a frame reason (`locationsOff`, `cutscene`, `notConnected`, `alphaZero`), a client reason (`noSave`, `noUpdate`, `otherStage`, `otherLayer`, `otherFloor`, `badPose`) or `absent` |
+| `expectMapCursor` | `surface` (`minimap`, `dmap`, `fmap`), `target(s)`, `color(s)`, `pinned`, `floorDelta`, `facing`, `count`, `holdTicks`, `maxAgeTicks`, `timeoutSec` | a fresh frame with those markers in exactly those colours |
+| `expectNoMapCursor` | `surface`, `target`, `reason`, `holdTicks` (30), `timeoutSec` | no marker, for that reason: a frame reason (`locationsOff`, `cutscene`, `notConnected`, `alphaZero`, `notInField`, `otherRegion`), a client reason (`noSave`, `noUpdate`, `otherStage`, `otherLayer`, `otherFloor`, `badPose`) or `absent` |
 | `checkMapCursorTransform` | `target`, `tolPx` | anchors and facings against the offscreen pass's matrices |
 | `expectMapPaletteClean` | `groups`, `holdTicks` | the dungeon map palette is untouched |
 | `dumpMapCursors` | `surface` | logs the frame and `MAPCURSOR_PROBE` screen fractions |
-| `openPauseMap` | `timeoutSec` | the dungeon map, as the map button opens it (a B press closes it) |
+| `openPauseMap` | `surface` (`dmap`, `fmap`), `timeoutSec` | the dungeon or field map, as the map button opens it (a B press closes it) |
+| `checkFmapLinkIcon` | `tolPx` (1) | on the field map our position, placed as remote players are, lands under the Link icon |
+| `expectMapHorse` | `target`, `color`, `ridden`, `ownerAway`, `holdTicks`, `timeoutSec` | a remote Epona's horseshoe on the minimap |
 
 Item toasts (`StepsItemToast.cpp`), checked through the toast history:
 

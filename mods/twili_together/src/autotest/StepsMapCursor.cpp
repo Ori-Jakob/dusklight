@@ -71,8 +71,10 @@ uint32_t resolveTarget(const std::string& target) {
 }
 
 mc::Surface surfaceOf(const json& step) {
-    return step.value("surface", std::string("minimap")) == "dmap" ? mc::Surface::PauseDmap
-                                                                    : mc::Surface::Minimap;
+    const std::string s = step.value("surface", std::string("minimap"));
+    return s == "dmap" ? mc::Surface::PauseDmap
+         : s == "fmap" ? mc::Surface::PauseFmap
+                       : mc::Surface::Minimap;
 }
 
 bool fresh(const mc::Frame& f, const json& step) {
@@ -251,7 +253,7 @@ std::optional<bool> expectNoMapCursor(StepContext& ctx) {
     const std::string reason = step.value("reason", std::string{});
 
     static const char* const kGates[] = {"alphaZero", "notConnected", "locationsOff", "cutscene",
-                                         "noStage"};
+                                         "noStage", "notInField", "otherRegion"};
     static const char* const kSkips[] = {"noSave", "noUpdate", "otherStage", "otherLayer",
                                          "otherFloor", "badPose"};
     const bool gateReason = std::find(std::begin(kGates), std::end(kGates), reason) != std::end(kGates);
@@ -371,6 +373,88 @@ std::optional<bool> checkMapCursorTransform(StepContext& ctx) {
                  checked, t.worldW, t.worldH, t.texW, t.texH, t.rectX, t.rectY, t.rectW, t.rectH,
                  t.mirror);
     return true;
+}
+
+// The field map places remote players as it placed its Link icon: ours lands under it.
+std::optional<bool> checkFmapLinkIcon(StepContext& ctx) {
+    const json& step = ctx.step;
+    const mc::Frame& f = mc::lastFrame(mc::Surface::PauseFmap);
+    const f32 tol = step.value("tolPx", 1.0f);
+    if (!fresh(f, step) || f.gate != mc::Gate::Drawn || !f.linkIconValid) {
+        if (ctx.seconds > ctx.timeout(10.0)) {
+            ctx.fail(fmt::format("checkFmapLinkIcon: no Link icon on a fresh field map frame; {}",
+                                 describe(f)));
+        }
+        return false;
+    }
+    const f32 dx = f.localAnchor.x - f.linkIcon.x;
+    const f32 dy = f.localAnchor.y - f.linkIcon.y;
+    if (std::fabs(dx) > tol || std::fabs(dy) > tol) {
+        ctx.fail(fmt::format("checkFmapLinkIcon: our position placed at ({:.2f}, {:.2f}), the Link "
+                             "icon at ({:.2f}, {:.2f})",
+                             f.localAnchor.x, f.localAnchor.y, f.linkIcon.x, f.linkIcon.y));
+        return false;
+    }
+    TwiliLog.info("[autotest] field map: our position ({:.2f}, {:.2f}) is under the Link icon "
+                  "({:.2f}, {:.2f})",
+                  f.localAnchor.x, f.localAnchor.y, f.linkIcon.x, f.linkIcon.y);
+    return true;
+}
+
+// A remote Epona's horseshoe on the minimap, in its owner's colour.
+std::optional<bool> expectMapHorse(StepContext& ctx) {
+    const json& step = ctx.step;
+    const mc::Frame& f = mc::lastFrame(mc::Surface::Minimap);
+    const std::string target = step.value("target", std::string{});
+    const uint32_t id = resolveTarget(target);
+    std::string why = "no fresh frame that ran the filters";
+    bool ok = false;
+    if (fresh(f, step) && f.gate == mc::Gate::Drawn) {
+        why = fmt::format("no horse icon for {}", target);
+        for (const mc::HorseIcon& h : f.horses) {
+            if (h.clientId != id) continue;
+            ok = true;
+            why.clear();
+            if (step.contains("ridden") && h.ridden != step.value("ridden", false)) {
+                ok = false;
+                why = fmt::format("{}'s horse ridden={}", target, h.ridden);
+            }
+            if (ok && step.contains("ownerAway") &&
+                h.ownerAway != step.value("ownerAway", false)) {
+                ok = false;
+                why = fmt::format("{}'s horse ownerAway={}", target, h.ownerAway);
+            }
+            if (ok && step.contains("color")) {
+                Rgb want;
+                const std::string col = step.value("color", std::string{});
+                if (col == "peer") {
+                    const Client* c = clientNamed(target);
+                    if (c != nullptr) want = {c->colorR, c->colorG, c->colorB};
+                } else if (!parseHex(col, want)) {
+                    ctx.fail("expectMapHorse: bad colour '" + col + "'");
+                    return false;
+                }
+                if (h.fill[0] != want.r || h.fill[1] != want.g || h.fill[2] != want.b) {
+                    ok = false;
+                    why = fmt::format("{}'s horse is drawn {}", target, hex(h.fill));
+                }
+            }
+            if (ok) {
+                why = fmt::format("{} at ({:.1f}, {:.1f}) size {:.1f} ridden={} ownerAway={}",
+                                  hex(h.fill), h.anchor.x, h.anchor.y, h.size, h.ridden,
+                                  h.ownerAway);
+            }
+            break;
+        }
+    }
+    if (held(ok, ctx, step.value("holdTicks", 0))) {
+        TwiliLog.info("[autotest] map horse of {}: {}", target, why);
+        return true;
+    }
+    if (ctx.seconds > ctx.timeout(20.0)) {
+        ctx.fail("expectMapHorse: " + why + "; " + describe(f));
+    }
+    return false;
 }
 
 std::optional<bool> injectClients(StepContext& ctx) {
@@ -523,6 +607,8 @@ std::optional<bool> mapCursorSteps(const std::string& op, StepContext& ctx) {
     }
 
     if (op == "expectMapCursor") return expectMapCursor(ctx);
+    if (op == "checkFmapLinkIcon") return checkFmapLinkIcon(ctx);
+    if (op == "expectMapHorse") return expectMapHorse(ctx);
     if (op == "expectNoMapCursor") return expectNoMapCursor(ctx);
     if (op == "checkMapCursorTransform") return checkMapCursorTransform(ctx);
     if (op == "expectMapPaletteClean") return expectPaletteClean(ctx);
@@ -533,10 +619,17 @@ std::optional<bool> mapCursorSteps(const std::string& op, StepContext& ctx) {
     }
 
     if (op == "openPauseMap") {
+        const bool field = surfaceOf(step) == mc::Surface::PauseFmap;
         if (!ctx.begun) {
-            dMeter2Info_setPauseStatus(4);
+            if (field) {
+                // The PC map key's path (dMeterMap_c::ctrlShowMap)
+                dMeter2Info_setMapStatus(2);
+                dMeter2Info_setMapKeyDirection(0x400);
+            } else {
+                dMeter2Info_setPauseStatus(4);
+            }
         }
-        const mc::Frame& f = mc::lastFrame(mc::Surface::PauseDmap);
+        const mc::Frame& f = mc::lastFrame(field ? mc::Surface::PauseFmap : mc::Surface::PauseDmap);
         if (fresh(f, step) && f.mapAlpha > 0) {
             TwiliLog.info("[autotest] pause map open: {}", describe(f));
             return true;

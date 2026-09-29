@@ -486,8 +486,44 @@ bool expectLocalItemFx(StepContext& ctx) {
     return false;
 }
 
+// The peer's rod on its dummy: in hand or cast, its tip in the dummy's hand, a line out.
+std::optional<bool> expectRemoteFishing(StepContext& ctx) {
+    const json& step = ctx.step;
+    fopAc_ac_c* dummy = firstPeerDummy();
+    DummyPlayerDebugInfo info;
+    std::string why = "no dummy for a peer in our layer";
+    bool ok = false;
+    if (dummy != nullptr && GetDummyPlayerDebugInfo(dummy, info)) {
+        const DummyFishingDebug& f = info.fishing;
+        const cXyz tip(f.tip[0], f.tip[1], f.tip[2]);
+        const float reach = tip.abs(static_cast<daAlink_c*>(dummy)->current.pos);
+        ok = f.shown == step.value("shown", true);
+        why = fmt::format("rod shown {} action {} line {:.0f} tip {:.0f} from the dummy, {} ticks "
+                          "cast",
+                          f.shown, f.action, f.lineLength, reach, f.castTicks);
+        if (ok && f.shown) {
+            ok = (!step.contains("action") || f.action == step.value("action", 0)) &&
+                 f.lineLength >= step.value("minLine", 0.0f) &&
+                 reach <= step.value("maxReach", 600.0f) &&
+                 f.castTicks >= step.value("minCastTicks", 0u);
+        }
+    }
+    if (ok) {
+        TwiliLog.info("[autotest] remote fishing rod: {}", why);
+        return true;
+    }
+    if (ctx.seconds > ctx.timeout(20.0)) {
+        ctx.fail("expectRemoteFishing: " + why);
+    }
+    return false;
+}
+
 std::optional<bool> itemFxSteps(const std::string& op, StepContext& ctx) {
     const json& step = ctx.step;
+
+    if (op == "expectRemoteFishing") {
+        return expectRemoteFishing(ctx);
+    }
 
     if (op == "spawnLocalItem") {
         return spawnLocalItem(ctx);

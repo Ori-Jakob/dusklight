@@ -3085,6 +3085,13 @@ void daDummyPlayer_c::playQueuedSfx(const twili::Client& client, double shownSeq
         std::copy_backward(std::begin(mDummySfxRecent), std::end(mDummySfxRecent) - 1,
             std::end(mDummySfxRecent));
         mDummySfxRecent[0] = {s.id, s.seq, shownSeq, s.kind};
+        if (s.kind == static_cast<uint8_t>(twili::PlayerSfxKind::Voice) ||
+            s.kind == static_cast<uint8_t>(twili::PlayerSfxKind::MidnaVoice))
+        {
+            std::copy_backward(std::begin(mDummyVoiceRecent), std::end(mDummyVoiceRecent) - 1,
+                std::end(mDummyVoiceRecent));
+            mDummyVoiceRecent[0] = mDummySfxRecent[0];
+        }
     }
 }
 
@@ -3357,6 +3364,8 @@ void daDummyPlayer_c::getDebugInfo(twili::DummyPlayerDebugInfo& out) const {
     out.bowTiltTicks = mDummyBowTiltTicks;
     out.bowTiltDeg = mDummyBowTiltDeg;
     std::copy(std::begin(mDummySfxRecent), std::end(mDummySfxRecent), std::begin(out.sfxRecent));
+    std::copy(std::begin(mDummyVoiceRecent), std::end(mDummyVoiceRecent),
+        std::begin(out.voiceRecent));
 }
 
 bool daDummyPlayer_c::isHidden() const {

@@ -26,7 +26,7 @@ const STAGES = {
 // dItemNo_* values and event bits.
 const ITEMS = {
     boomerang: 0x40, spinner: 0x41, ironball: 0x42, bow: 0x43, hookshot: 0x44, copyRod: 0x46,
-    wHookshot: 0x47, lantern: 0x48, slingshot: 0x4b, horseFlute: 0x84,
+    wHookshot: 0x47, lantern: 0x48, fishingRod: 0x4a, slingshot: 0x4b, horseFlute: 0x84,
 };
 const EVENTS = { shieldAttack: 0x2908, copyRodPower: 0x2580 };
 

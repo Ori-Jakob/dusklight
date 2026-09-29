@@ -13,6 +13,7 @@
 #include "d/d_com_inf_game.h"
 #include "d/d_kankyo.h"
 #include "res/Object/AlAnm.h"
+#include "Z2AudioLib/Z2SeMgr.h"
 
 #include <fmt/format.h>
 
@@ -20,6 +21,7 @@
 #include <cmath>
 #include <cstring>
 #include <map>
+#include <vector>
 
 namespace twili::autotest {
 namespace {
@@ -148,6 +150,12 @@ bool transform(StepContext& ctx) {
         // Again on every call until it takes: some procs and running events refuse it.
         if (!transforming) {
             link->procCoMetamorphoseInit();
+            // Midna's transformation demo's voice (procCoMetamorphoseInit plays it only there).
+            if (ctx.step.value("voice", false) && link->mProcID == daAlink_c::PROC_METAMORPHOSE) {
+                link->voiceStart(Z2SE_AL_V_TRANSFORM);
+                TwiliLog.info("[autotest] transform voice at pose tick {}",
+                    Session::localPoseSeq() + 1);
+            }
         }
     }
     if (ctx.seconds > ctx.timeout(30.0)) {
@@ -308,6 +316,13 @@ std::string midnaMismatch(const nlohmann::json& step, uint8_t want, const Client
     if (want == kMidnaNone) {
         return {};
     }
+    if (want == kMidnaApart) {
+        if (!info.midnaReady || !isMidnaBodyClip(info.midnaBodyAnm) || !info.midnaShown) {
+            return fmt::format("dummy Midna apart: ready {}, clip 0x{:X}, shown {}",
+                info.midnaReady, info.midnaBodyAnm, info.midnaShown);
+        }
+        return {};
+    }
     // Her root sits about 90 units from the wolf's joint WL_JNT_MD.
     if (!info.midnaReady || !info.wolfBody || !isMidnaBodyClip(info.midnaBodyAnm) ||
         info.midnaBackDist <= 0.0f || info.midnaBackDist >= 120.0f)
@@ -351,6 +366,8 @@ bool expectRemoteMidna(StepContext& ctx) {
         want = kMidnaDrawn;
     } else if (modeName == "shadow") {
         want = kMidnaShadowOnly;
+    } else if (modeName == "apart") {
+        want = kMidnaApart;
     } else if (modeName != "none") {
         ctx.fail("expectRemoteMidna: unknown mode '" + modeName + "'");
         return false;
@@ -684,6 +701,121 @@ bool waitRemoteTransformPhase(StepContext& ctx) {
     return false;
 }
 
+// The first peer's dummy in our layer, or nullptr.
+fopAc_ac_c* firstPeerDummy(const Client** peer = nullptr) {
+    auto& b = Session::instance();
+    for (const auto& [id, c] : b.clients()) {
+        if (!peerInMyLayer(c)) continue;
+        if (fopAc_ac_c* dummy = b.dummyActorForClient(id)) {
+            if (peer != nullptr) *peer = &c;
+            return dummy;
+        }
+    }
+    return nullptr;
+}
+
+// Counters markRemoteMidna took from the first peer's dummy.
+struct MidnaMark {
+    bool valid = false;
+    uint32_t sfx = 0;
+    uint32_t apartTicks = 0;
+    uint32_t shownTicks = 0;
+};
+MidnaMark sMidnaMark;
+
+bool markRemoteMidna(StepContext& ctx) {
+    DummyPlayerDebugInfo info;
+    fopAc_ac_c* dummy = firstPeerDummy();
+    if (dummy == nullptr || !GetDummyPlayerDebugInfo(dummy, info) || !info.shellReady) {
+        if (ctx.seconds > ctx.timeout(20.0)) ctx.fail("markRemoteMidna: no peer dummy");
+        return false;
+    }
+    sMidnaMark = {true, info.midnaSfx, info.midnaApartTicks, info.midnaShownTicks};
+    TwiliLog.info("[autotest] remote Midna marked: {} sounds, {} ticks apart", info.midnaSfx,
+        info.midnaApartTicks);
+    return true;
+}
+
+// Midna's sounds heard and her time off the wolf's back since markRemoteMidna.
+bool expectRemoteMidnaSince(StepContext& ctx) {
+    if (!sMidnaMark.valid) {
+        ctx.fail("expectRemoteMidnaSince: no markRemoteMidna before");
+        return false;
+    }
+    DummyPlayerDebugInfo info;
+    fopAc_ac_c* dummy = firstPeerDummy();
+    const bool have = dummy != nullptr && GetDummyPlayerDebugInfo(dummy, info) && info.shellReady;
+    const uint32_t sfx = have ? info.midnaSfx - sMidnaMark.sfx : 0;
+    const uint32_t apart = have ? info.midnaApartTicks - sMidnaMark.apartTicks : 0;
+    const uint32_t shown = have ? info.midnaShownTicks - sMidnaMark.shownTicks : 0;
+    if (have && sfx >= ctx.step.value("minSfx", 0u) &&
+        apart >= ctx.step.value("minApartTicks", 0u) &&
+        shown >= ctx.step.value("minShownTicks", 0u))
+    {
+        TwiliLog.info("[autotest] remote Midna since the mark: {} sounds, {} ticks apart, {} "
+                      "ticks shown",
+            sfx, apart, shown);
+        return true;
+    }
+    if (ctx.seconds > ctx.timeout(20.0)) {
+        ctx.fail(fmt::format("expectRemoteMidnaSince: {} sounds (want {}), {} ticks apart "
+                             "(want {}), {} ticks shown (want {}){}",
+            sfx, ctx.step.value("minSfx", 0u), apart, ctx.step.value("minApartTicks", 0u), shown,
+            ctx.step.value("minShownTicks", 0u), have ? "" : ", no peer dummy"));
+    }
+    return false;
+}
+
+// A PLAYER_SFX played on the dummy's playout clock at the pose tick it was made in.
+bool expectRemoteSfxTiming(StepContext& ctx) {
+    const uint32_t sound = ctx.step.value("sound", 0u);
+    const double maxLag = ctx.step.value("maxLag", 1.0);
+    const Client* peer = nullptr;
+    DummyPlayerDebugInfo info;
+    fopAc_ac_c* dummy = firstPeerDummy(&peer);
+    if (dummy != nullptr && GetDummyPlayerDebugInfo(dummy, info)) {
+        std::vector<DummySfxPlayed> recent(std::begin(info.voiceRecent), std::end(info.voiceRecent));
+        recent.insert(recent.end(), std::begin(info.sfxRecent), std::end(info.sfxRecent));
+        for (const DummySfxPlayed& p : recent) {
+            if (p.id != sound || p.seq == 0) continue;
+            const double lag = p.shown - p.seq;
+            std::string why;
+            if (lag < 0.0 || lag > maxLag) {
+                why = fmt::format("played at tick {:.2f}, {:.2f} after its tick {}", p.shown, lag,
+                    p.seq);
+            }
+            double tfLag = 0.0;
+            if (why.empty() && ctx.step.value("transform", false)) {
+                const TransformFxTrace& t = peer->transformTrace;
+                tfLag = p.shown - info.tf.startShown;
+                const int32_t wireLag = static_cast<int32_t>(p.seq - t.startSeq);
+                if (t.startSeq == 0 || info.tf.startShown <= 0.0 || std::abs(wireLag) > 1 ||
+                    std::fabs(tfLag) > maxLag + 1.0)
+                {
+                    why = fmt::format("voice tick {} vs the transformation's {} (wire), played "
+                                      "{:.2f} ticks from its first shown tick {:.2f}",
+                        p.seq, t.startSeq, tfLag, info.tf.startShown);
+                }
+            }
+            if (!why.empty()) {
+                ctx.fail("expectRemoteSfxTiming: " + why);
+                return false;
+            }
+            TwiliLog.info("[autotest] sound 0x{:X} made at tick {} played at shown tick {:.2f} "
+                          "(lag {:.2f}, {:.2f} from the transformation's start), {} played, {} "
+                          "dropped",
+                sound, p.seq, p.shown, lag, tfLag, info.sfxPlayed, info.sfxDropped);
+            return true;
+        }
+    }
+    if (ctx.seconds > ctx.timeout(30.0)) {
+        ctx.fail(fmt::format("expectRemoteSfxTiming: sound 0x{:X} never played on the clock "
+                             "({} played, {} dropped)",
+            sound, info.sfxPlayed, info.sfxDropped));
+    }
+    return false;
+}
+
 std::optional<bool> wolfRemoteSteps(const std::string& op, StepContext& ctx) {
     if (op == "setForm") {
         bool wolf = true;
@@ -722,6 +854,31 @@ std::optional<bool> wolfRemoteSteps(const std::string& op, StepContext& ctx) {
     }
     if (op == "expectRemoteMidna") {
         return expectRemoteMidna(ctx);
+    }
+    if (op == "midnaSfx") {
+        daMidna_c* midna = daPy_py_c::getMidnaActor();
+        if (midna == nullptr) {
+            ctx.fail("midnaSfx: no Midna");
+            return false;
+        }
+        const uint32_t sound = ctx.step.value("sound", 0u);
+        if (ctx.step.value("voice", true)) {
+            midna->mSound.startCreatureVoice(sound, 0);
+        } else {
+            midna->mSound.startCreatureSound(sound, 0, 0);
+        }
+        TwiliLog.info("[autotest] Midna sound 0x{:X} at pose tick {}", sound,
+            Session::localPoseSeq() + 1);
+        return true;
+    }
+    if (op == "markRemoteMidna") {
+        return markRemoteMidna(ctx);
+    }
+    if (op == "expectRemoteMidnaSince") {
+        return expectRemoteMidnaSince(ctx);
+    }
+    if (op == "expectRemoteSfxTiming") {
+        return expectRemoteSfxTiming(ctx);
     }
     if (op == "transformFxSelfTest") {
         std::string why;

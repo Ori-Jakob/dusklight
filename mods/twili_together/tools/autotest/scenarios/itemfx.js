@@ -737,4 +737,57 @@ module.exports = [
             },
         ],
     },
+    {
+        name: "itemfx-fishing",
+        description: "B takes out its fishing rod and casts (button fishing): A's dummy of B holds the rod, then shows the bobber out on its line, drawn from B's rod state",
+        timeoutSec: 300,
+        cvars: [...COMMON_CVARS, "game.buttonFishing=true"],
+        instances: [
+            {
+                name: "A",
+                start: STAGES.southFaron,
+                steps: [
+                    ...connect,
+                    ...meetIn(STAGES.southFaron, "B"),
+                    { op: "expectRemoteFishing", shown: false },
+                    // The camera behind us and off to the side, on B: captures see the rod and line.
+                    { op: "horseCamera", target: "dummy", back: 350, up: 220, side: 300, height: 90, hold: true },
+                    ...barrier("no-rod", "B"),
+                    { op: "waitSignal", name: "rod", from: "B", timeoutSec: 30 },
+                    { op: "expectRemoteFishing", action: 0, minLine: 5, timeoutSec: 15 },
+                    { op: "mark", msg: "ITEMFX_HOLD rod" },
+                    { op: "wait", frames: 60 },
+                    ...barrier("saw-rod", "B"),
+                    // Cast onto dry land, the line comes back after 20 ticks: counted, not polled.
+                    { op: "waitSignal", name: "cast", from: "B", timeoutSec: 30 },
+                    { op: "expectRemoteFishing", minCastTicks: 10, timeoutSec: 15 },
+                    { op: "horseCamera", release: true },
+                    ...barrier("saw-cast", "B"),
+                    { op: "quit" },
+                ],
+            },
+            {
+                name: "B",
+                start: STAGES.southFaron,
+                steps: [
+                    ...connect,
+                    ...meetIn(STAGES.southFaron, "A"),
+                    ...barrier("no-rod", "A"),
+                    { op: "giveItem", item: ITEMS.fishingRod },
+                    { op: "assignItemX", item: ITEMS.fishingRod },
+                    { op: "walk", frames: 1, stickX: 0, stickY: 0, buttons: PAD_X },
+                    { op: "wait", frames: 40 },
+                    { op: "signal", name: "rod" },
+                    ...barrier("saw-rod", "A"),
+                    // X held seven ticks with button fishing is uki_ready's cast.
+                    { op: "mark", msg: "ITEMFX_HOLD cast" },
+                    { op: "walk", frames: 9, stickX: 0, stickY: 0, buttons: PAD_X },
+                    { op: "wait", frames: 20 },
+                    { op: "signal", name: "cast" },
+                    ...barrier("saw-cast", "A"),
+                    { op: "quit" },
+                ],
+            },
+        ],
+    },
 ];

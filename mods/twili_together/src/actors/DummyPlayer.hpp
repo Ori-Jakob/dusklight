@@ -140,6 +140,7 @@ struct DummyPlayerDebugInfo {
     uint32_t sfxDropped = 0;  // late, too far ahead, or across a snap
     uint32_t midnaSfx = 0;    // Midna's sounds played (from the wire and her clips)
     DummySfxPlayed sfxRecent[16];  // the latest first
+    DummySfxPlayed voiceRecent[8];  // the same for Link's and Midna's voices alone
     DummyFishingDebug fishing;
     // A rider aiming the bow: ticks jointControll turned joint 5, and by how much last time
     uint32_t bowTiltTicks = 0;
@@ -407,6 +408,7 @@ private:
     uint32_t mDummyBowTiltTicks = 0;
     f32 mDummyBowTiltDeg = 0.0f;
     twili::DummySfxPlayed mDummySfxRecent[16];
+    twili::DummySfxPlayed mDummyVoiceRecent[8];
 };
 
 // ActorService profile "TTlink".

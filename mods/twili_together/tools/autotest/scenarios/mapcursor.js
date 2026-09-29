@@ -277,4 +277,60 @@ module.exports = [
             ],
         })),
     },
+    {
+        name: "map-cursor-fmap",
+        description: "field pause map: the peer and injected players in their exact colours, placed like the Link icon (ours lands under it), facings right, hidden with Show Locations off and in a local cutscene",
+        timeoutSec: 360,
+        cvars: NORMAL,
+        instances: ["A", "B"].map((name) => ({
+            name,
+            start: STAGES.faronField,
+            cvars: colorCvars(COLORS[name]),
+            steps: [
+                ...connect,
+                ...meetIn(STAGES.faronField, other(name)),
+                { op: "showMinimap" },
+                ...(name === "A"
+                    ? [
+                        { op: "injectMapCursorClients", unit: "texel", clients: [...CONTRAST_FAR, EAST, SOUTH] },
+                        { op: "openPauseMap", surface: "fmap" },
+                        seesPeer(name, { surface: "fmap", holdTicks: 30 }),
+                        {
+                            op: "expectMapCursor",
+                            surface: "fmap",
+                            targets: CONTRAST_FAR.map((c) => `#${c.id}`),
+                            colors: CONTRAST_FAR.map((c) => c.color),
+                        },
+                        { op: "expectMapCursor", surface: "fmap", target: `#${EAST.id}`, facing: [1, 0] },
+                        { op: "expectMapCursor", surface: "fmap", target: `#${SOUTH.id}`, facing: [0, 1] },
+                        { op: "checkFmapLinkIcon" },
+                        { op: "dumpMapCursors", surface: "fmap" },
+                        { op: "mark", msg: "MAPCURSOR_HOLD fmap" },
+                        { op: "wait", frames: 150 },
+                    ]
+                    : []),
+                ...barrier("fmap-open", other(name)),
+                ...room("showLocationsMode", false),
+                ...(name === "A" ? [{ op: "expectNoMapCursor", surface: "fmap", target: "B", reason: "locationsOff" }] : []),
+                ...barrier("fmap-locations", other(name)),
+                ...room("showLocationsMode", true),
+                ...room("hidePlayersInCutscene", true),
+                ...(name === "A"
+                    ? [
+                        seesPeer(name, { surface: "fmap", holdTicks: 15 }),
+                        { op: "forceCutscene", on: true },
+                        { op: "expectNoMapCursor", surface: "fmap", target: "B", reason: "cutscene" },
+                        { op: "forceCutscene", on: null },
+                        seesPeer(name, { surface: "fmap", holdTicks: 15 }),
+                        // A B press closes the map.
+                        { op: "walk", frames: 1, stickX: 0, stickY: 0, buttons: 0x200 },
+                        { op: "wait", frames: 90 },
+                        { op: "clearMapCursorClients" },
+                    ]
+                    : []),
+                ...barrier("checked-fmap", other(name)),
+                { op: "quit" },
+            ],
+        })),
+    },
 ];

@@ -15,6 +15,7 @@
 #include "SSystem/SComponent/c_math.h"
 #include "d/actor/d_a_alink.h"
 #include "d/actor/d_a_horse.h"
+#include "d/actor/d_a_hozelda.h"
 #include "d/d_camera.h"
 #include "d/d_com_inf_game.h"
 #include "f_op/f_op_actor_iter.h"
@@ -343,6 +344,19 @@ std::string horseMismatch(const json& step, uint32_t id, const Client& c, fopAc_
             return fmt::format("tag not on screen (drawn:{})", drawnText());
         }
     }
+    if (step.contains("zelda")) {
+        const bool want = step.value("zelda", false);
+        if (d.zeldaShown != want) {
+            return fmt::format("Zelda shown {} (latest flags 0x{:X})", d.zeldaShown,
+                c.horse.flags);
+        }
+        // Behind the saddle, as daHoZelda_c::setMatrix puts her
+        const float behind = cXyz(d.zeldaPos[0], d.zeldaPos[1], d.zeldaPos[2])
+                                 .abs(cXyz(d.saddlePos[0], d.saddlePos[1], d.saddlePos[2]));
+        if (want && behind > step.value("maxZeldaDist", 150.0f)) {
+            return fmt::format("Zelda is {:.0f} from the saddle", behind);
+        }
+    }
     if (step.value("vanilla", false) && d.recolorKey != RecolorSet::kPristine) {
         return fmt::format("mane holds #{:06X}", d.recolorKey);
     }
@@ -553,6 +567,15 @@ bool aimCamera(const json& cam, cXyz& center, cXyz& eye, std::string& why) {
     daHorse_c* ours = dComIfGp_getHorseActor();
     daDummyHorse_c* remote = firstRemoteHorse();
     const fopAc_ac_c* anchor = target == "own" ? static_cast<fopAc_ac_c*>(ours) : remote;
+    if (target == "dummy") {
+        // The first peer's player puppet
+        anchor = nullptr;
+        for (const auto& [id, c] : Session::instance().clients()) {
+            if (!c.self && anchor == nullptr) {
+                anchor = Session::instance().dummyActorForClient(id);
+            }
+        }
+    }
     if (link == nullptr || anchor == nullptr ||
         (target == "both" && (ours == nullptr || remote == nullptr)))
     {
@@ -649,7 +672,65 @@ bool clearEnemies(StepContext& ctx) {
     return true;
 }
 
+// Zelda behind our rider, as the final battle's horse event makes her (daHoZelda_c).
+bool spawnHoZelda(StepContext& ctx) {
+    daAlink_c* link = daAlink_getAlinkActorClass();
+    daHorse_c* h = dComIfGp_getHorseActor();
+    if (link == nullptr || h == nullptr) {
+        ctx.fail("spawnHoZelda: no player or no horse");
+        return false;
+    }
+    if (!ctx.begun) {
+        ScopedPlayerLayer layer(link);
+        const fpc_ProcID pid = fopAcM_create(fpcNm_HOZELDA_e, 0, &h->current.pos,
+            dComIfGp_roomControl_getStayNo(), &h->shape_angle, nullptr, -1);
+        TwiliLog.info("[autotest] spawnHoZelda: pid {}", pid);
+    }
+    daHoZelda_c* z = h->getZeldaActor();
+    if (z != nullptr && z->mpZeldaModel != nullptr) {
+        TwiliLog.info("[autotest] Zelda rides behind us (clip 0x{:X})", z->field_0x6e4[0]);
+        return true;
+    }
+    if (ctx.seconds > ctx.timeout(30.0)) {
+        ctx.fail("spawnHoZelda: no Zelda on our horse");
+    }
+    return false;
+}
+
+// Our rider's dummy on the peer's screen: joint 5 turned for the bow while riding.
+bool expectRiderBowTilt(StepContext& ctx) {
+    const float minDeg = ctx.step.value("minDeg", 20.0f);
+    const float maxDeg = ctx.step.value("maxDeg", 35.0f);
+    std::string why = "no peer dummy";
+    for (const auto& [id, c] : Session::instance().clients()) {
+        if (c.self) continue;
+        fopAc_ac_c* dummy = Session::instance().dummyActorForClient(id);
+        DummyPlayerDebugInfo info;
+        if (dummy == nullptr || !GetDummyPlayerDebugInfo(dummy, info)) continue;
+        if (info.bowTiltTicks >= ctx.step.value("minTicks", 5u) && info.bowTiltDeg >= minDeg &&
+            info.bowTiltDeg <= maxDeg)
+        {
+            TwiliLog.info("[autotest] rider bow tilt: {} ticks, joint 5 turned {:.1f} degrees",
+                info.bowTiltTicks, info.bowTiltDeg);
+            return true;
+        }
+        why = fmt::format("{} ticks with the tilt, joint 5 turned {:.1f} degrees (rider {} bowTilt "
+                          "{})",
+            info.bowTiltTicks, info.bowTiltDeg, c.horse.rider.active, c.horse.rider.bowTilt);
+    }
+    if (ctx.seconds > ctx.timeout(30.0)) {
+        ctx.fail("expectRiderBowTilt: " + why);
+    }
+    return false;
+}
+
 std::optional<bool> horseSteps(const std::string& op, StepContext& ctx) {
+    if (op == "spawnHoZelda") {
+        return spawnHoZelda(ctx);
+    }
+    if (op == "expectRiderBowTilt") {
+        return expectRiderBowTilt(ctx);
+    }
     if (op == "spawnHorse") {
         return spawnHorse(ctx);
     }

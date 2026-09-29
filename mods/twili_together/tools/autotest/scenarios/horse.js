@@ -1,6 +1,6 @@
 // Epona sync; Faron Field has a horse on a fresh save; HORSE_HOLD <what> (on A) marks captures.
 
-const { STAGES, COMMON_CVARS, tt, barrier, meetIn, connect, warp, waitStage } = require("../lib");
+const { STAGES, ITEMS, COMMON_CVARS, tt, barrier, meetIn, connect, warp, waitStage } = require("../lib");
 
 const RED = "e53935";
 const colorCvars = (hex) => [tt("color", hex)];
@@ -343,6 +343,95 @@ module.exports = [
                     { op: "spawnHorse", dist: 300 },
                     { op: "signal", name: "spawned" },
                     ...barrier("done-c", "A"),
+                    { op: "quit" },
+                ],
+            },
+        ],
+    },
+    {
+        name: "horse-zelda",
+        description: "B rides its Epona with Zelda behind it (the final battle's daHoZelda_c): A's puppet shows her behind B's dummy, from HoZelda.arc loaded on A",
+        timeoutSec: 300,
+        cvars: COMMON_CVARS,
+        instances: [
+            {
+                name: "A",
+                start: field,
+                steps: [
+                    ...connect,
+                    ...meetIn(field, "B"),
+                    { op: "clearEnemies" },
+                    { op: "waitSignal", name: "zelda", from: "B", timeoutSec: 90 },
+                    { op: "expectRemoteHorse", ridden: true, zelda: true, maxSeatDist: 60, frames: 30, timeoutSec: 30 },
+                    ...onCamera([{ op: "expectRemoteHorse", ridden: true, zelda: true, frames: 5 }], "zelda"),
+                    ...barrier("saw-zelda", "B"),
+                    { op: "quit" },
+                ],
+            },
+            {
+                name: "B",
+                start: B_START,
+                cvars: colorCvars(RED),
+                steps: [
+                    ...connect,
+                    ...meetIn(field, "A"),
+                    { op: "clearEnemies" },
+                    { op: "spawnHorse", dist: 300, side: 120 },
+                    { op: "rideHorse", mode: "force" },
+                    { op: "expectLocalHorse", ridden: true },
+                    { op: "spawnHoZelda" },
+                    { op: "signal", name: "zelda" },
+                    ...barrier("saw-zelda", "A"),
+                    { op: "quit" },
+                ],
+            },
+        ],
+    },
+    {
+        name: "horse-bow-map",
+        description: "B's parked and then ridden Epona has a horseshoe in B's colour on A's minimap; B aims its bow in the saddle: A's dummy of B turns its chest (joint 5) like a rider's",
+        timeoutSec: 360,
+        cvars: COMMON_CVARS,
+        instances: [
+            {
+                name: "A",
+                start: field,
+                steps: [
+                    ...connect,
+                    ...meetIn(field, "B"),
+                    { op: "clearEnemies" },
+                    { op: "showMinimap" },
+                    { op: "waitSignal", name: "spawned", from: "B", timeoutSec: 60 },
+                    { op: "expectMapHorse", target: "B", color: "peer", ridden: false, ownerAway: false, holdTicks: 15 },
+                    ...barrier("saw-icon", "B"),
+                    { op: "waitSignal", name: "aiming", from: "B", timeoutSec: 60 },
+                    { op: "expectMapHorse", target: "B", color: "peer", ridden: true, timeoutSec: 10 },
+                    { op: "expectRiderBowTilt", minDeg: 20, maxDeg: 35, timeoutSec: 10 },
+                    { op: "mark", msg: "HORSE_HOLD bow" },
+                    ...barrier("saw-bow", "B"),
+                    { op: "quit" },
+                ],
+            },
+            {
+                name: "B",
+                start: B_START,
+                cvars: colorCvars(RED),
+                steps: [
+                    ...connect,
+                    ...meetIn(field, "A"),
+                    { op: "clearEnemies" },
+                    { op: "giveItem", item: ITEMS.bow },
+                    { op: "assignItemX", item: ITEMS.bow },
+                    { op: "spawnHorse", dist: 300, side: 120 },
+                    { op: "signal", name: "spawned" },
+                    ...barrier("saw-icon", "A"),
+                    { op: "rideHorse", mode: "force" },
+                    { op: "expectLocalHorse", ridden: true },
+                    { op: "wait", frames: 20 },
+                    { op: "signal", name: "aiming" },
+                    // X held: the bow comes up and stays drawn (ASHOOTWAIT) while riding.
+                    { op: "walk", frames: 240, stickX: 0, stickY: 0, buttons: 0x400 },
+                    ...barrier("saw-bow", "A"),
                     { op: "quit" },
                 ],
             },
