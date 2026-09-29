@@ -32,18 +32,32 @@ using FastCreateFn = fopAc_ac_c* (*)(s16, u32, const cXyz*, int, const csXyz*, c
     createFunc, void* IF_DUSK_ARG(u32) IF_DUSK_ARG(u8));
 DEFINE_HOOK(static_cast<FastCreateFn>(&fopAcM_fastCreate), ActorFastCreate);
 // Header-inline wrappers: the mod has its own copies, so these resolve the game's by name.
-DEFINE_HOOK_SYMBOL("?dComIfGp_particle_set@@YAPEAVJPABaseEmitter@@GPEBUcXyz@@PEBVcsXyz@@0@Z",
+#ifdef _MSVC_LANG
+#define particleSetRot_sig "?dComIfGp_particle_set@@YAPEAVJPABaseEmitter@@GPEBUcXyz@@PEBVcsXyz@@0@Z"
+#define particleSetTevRot_sig                                                                      \
+    "?dComIfGp_particle_set@@YAPEAVJPABaseEmitter@@GPEBUcXyz@@PEBVdKy_tevstr_c@@PEBVcsXyz@@0@Z"
+#define particleSetPolyColor_sig                                                                   \
+    "?dComIfGp_particle_setPolyColor@@YAPEAVJPABaseEmitter@@GAEAVcBgS_PolyInfo@@"                  \
+    "PEBUcXyz@@PEBVdKy_tevstr_c@@PEBVcsXyz@@1HPEAVdPa_levelEcallBack@@C1@Z"
+#define setHitMark_sig "?dComIfGp_setHitMark@@YAXGPEAVfopAc_ac_c@@PEBUcXyz@@PEBVcsXyz@@1I@Z"
+#else
+#define particleSetRot_sig "_Z21dComIfGp_particle_settPK4cXyzPK5csXyzS1_"
+#define particleSetTevRot_sig "_Z21dComIfGp_particle_settPK4cXyzPK12dKy_tevstr_cPK5csXyzS1_"
+#define particleSetPolyColor_sig                                                                   \
+    "_Z30dComIfGp_particle_setPolyColortR13cBgS_PolyInfoPK4cXyzPK12dKy_tevstr_cPK5csXyzS3_i"       \
+    "P18dPa_levelEcallBackaS3_"
+#define setHitMark_sig "_Z19dComIfGp_setHitMarktP10fopAc_ac_cPK4cXyzPK5csXyzS3_j"
+#endif
+DEFINE_HOOK_SYMBOL(particleSetRot_sig,
     JPABaseEmitter*(u16, const cXyz*, const csXyz*, const cXyz*), ParticleSetRot);
-DEFINE_HOOK_SYMBOL(
-    "?dComIfGp_particle_set@@YAPEAVJPABaseEmitter@@GPEBUcXyz@@PEBVdKy_tevstr_c@@PEBVcsXyz@@0@Z",
+DEFINE_HOOK_SYMBOL(particleSetTevRot_sig,
     JPABaseEmitter*(u16, const cXyz*, const dKy_tevstr_c*, const csXyz*, const cXyz*),
     ParticleSetTevRot);
-DEFINE_HOOK_SYMBOL("?dComIfGp_particle_setPolyColor@@YAPEAVJPABaseEmitter@@GAEAVcBgS_PolyInfo@@"
-                   "PEBUcXyz@@PEBVdKy_tevstr_c@@PEBVcsXyz@@1HPEAVdPa_levelEcallBack@@C1@Z",
+DEFINE_HOOK_SYMBOL(particleSetPolyColor_sig,
     JPABaseEmitter*(u16, cBgS_PolyInfo&, const cXyz*, const dKy_tevstr_c*, const csXyz*,
         const cXyz*, int, dPa_levelEcallBack*, s8, const cXyz*),
     ParticleSetPolyColor);
-DEFINE_HOOK_SYMBOL("?dComIfGp_setHitMark@@YAXGPEAVfopAc_ac_c@@PEBUcXyz@@PEBVcsXyz@@1I@Z",
+DEFINE_HOOK_SYMBOL(setHitMark_sig,
     void(u16, fopAc_ac_c*, const cXyz*, const csXyz*, const cXyz*, u32), SetHitMark);
 
 namespace {

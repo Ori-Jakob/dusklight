@@ -15,7 +15,12 @@
 namespace twili::autotest {
 
 // A getter the game calls only in a debug view; the game's copy of the header-inline wrapper.
-DEFINE_HOOK_SYMBOL("?dComIfGp_particle_getHeapSize@@YAIXZ", uint32_t(), PerfProbe);
+#ifdef _MSVC_LANG
+#define perfProbe_sig "?dComIfGp_particle_getHeapSize@@YAIXZ"
+#else
+#define perfProbe_sig "_Z29dComIfGp_particle_getHeapSizev"
+#endif
+DEFINE_HOOK_SYMBOL(perfProbe_sig, uint32_t(), PerfProbe);
 
 namespace {
 
