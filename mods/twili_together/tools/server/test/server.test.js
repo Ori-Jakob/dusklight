@@ -588,6 +588,32 @@ test("queued team packets are replayed to a teammate who joins later", () => wit
     await c.expectNone((p) => p.type === "SET_FLAG" || p.type === "SET_EVENT_BIT", "replay to another team");
 }));
 
+test("LIGHT_DROP is team-scoped, queued and replayed after the cached world state", () => withServer(async (mk) => {
+    const a = mk();
+    await a.join({ teamId: "t" });
+    const mate = mk();
+    await mate.join({ teamId: "t" });
+    const other = mk();
+    await other.join({ teamId: "u" });
+    a.send({ type: "UPDATE_WORLD_STATE", save: "AAAA", saveTblNo: 3 });
+    a.send({ type: "LIGHT_DROP", area: 1, tbl: 3, tbox: 7, addToQueue: true });
+    const live = await mate.waitType("LIGHT_DROP");
+    assert.equal(live.tbox, 7);
+    assert.equal(live.teamId, "t");
+    assert.ok(Number.isInteger(live.queueSeq), "queued packets are numbered");
+    await other.expectNone((p) => p.type === "LIGHT_DROP", "LIGHT_DROP to another team");
+
+    await settle();
+    const b = mk();
+    await b.join({ teamId: "t" });
+    b.send({ type: "REQUEST_WORLD_STATE", catchUp: true });
+    const ws = await b.waitType("UPDATE_WORLD_STATE");
+    assert.equal(ws.fromCache, true);
+    const drop = await b.waitType("LIGHT_DROP");
+    assert.equal(drop.fromQueue, true);
+    assert.equal(drop.area, 1);
+}));
+
 test("team packets carry the sender's name and colour, also when replayed after it left", () => withServer(async (mk) => {
     // Players without a team show in their own colour.
     const a = mk();

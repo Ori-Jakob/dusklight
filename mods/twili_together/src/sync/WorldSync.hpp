@@ -46,6 +46,13 @@ void onSaveWritten();
 void beforeItemGet(uint8_t itemNo);
 void afterItemGet(uint8_t itemNo);
 void closeGrantWindow();
+// daObjDrop_c::dropGet pre/post: a tear pickup, sent as LIGHT_DROP.
+void beforeDropGet(void* drop);
+void afterDropGet(void* drop);
+bool insideDropGet();
+#if TWILI_ENABLE_AUTOTEST
+void keepTakenTearsForTest(bool keep);
+#endif
 bool installItemObserver();
 void removeItemObserver();
 

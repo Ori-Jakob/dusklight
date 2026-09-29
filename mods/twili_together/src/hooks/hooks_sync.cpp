@@ -138,7 +138,10 @@ HookAction onTboxPre(ModContext*, void* args, void*, void*) {
 
 void onTboxPost(ModContext*, void* args, void*, void*) {
     const int no = mods::arg<int>(args, 1);
-    if (s_tbox.pop() == 0 && memBitOld(mods::arg<dSv_memBit_c*>(args, 0), 0, no) == 1) {
+    // A tear's bit travels in its LIGHT_DROP.
+    if (s_tbox.pop() == 0 && memBitOld(mods::arg<dSv_memBit_c*>(args, 0), 0, no) == 1 &&
+        !sync::insideDropGet())
+    {
         sync::onSetFlag("TBOX", no, 0);
     }
 }

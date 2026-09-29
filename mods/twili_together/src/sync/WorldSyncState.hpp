@@ -80,6 +80,9 @@ void sendUpdateWorldState(uint32_t targetClientId = 0);
 void handleRequestWorldState(const nlohmann::json& packet);
 void handleUpdateWorldState(const nlohmann::json& packet);
 
+// LightDrops.cpp
+void handleLightDrop(const nlohmann::json& packet);
+
 // GiveItem.cpp
 void sendGiveItem(uint8_t itemNo);
 void handleGiveItem(const nlohmann::json& packet);

@@ -209,6 +209,8 @@ bool handlePacket(const std::string& type, const nlohmann::json& packet) {
         handleGiveItem(packet);
     } else if (type == "UPDATE_DUNGEON_ITEMS") {
         handleUpdateDungeonItems(packet);
+    } else if (type == "LIGHT_DROP") {
+        handleLightDrop(packet);
     } else if (type == "REQUEST_WORLD_STATE") {
         handleRequestWorldState(packet);
     } else if (type == "UPDATE_WORLD_STATE") {

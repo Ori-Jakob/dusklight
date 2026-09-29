@@ -42,6 +42,7 @@ const TEAM_PACKET_TYPES = new Set([
     "UPDATE_DUNGEON_ITEMS",
     "UPDATE_WORLD_STATE",
     "REQUEST_WORLD_STATE",
+    "LIGHT_DROP",
 ]);
 const PRESENCE_PACKET_TYPES = new Set(["PLAYER_UPDATE", "PLAYER_SFX"]);
 // Teammates in the sender's stage and layer only; never cached or queued.
@@ -104,6 +105,8 @@ function packetSummary(packet) {
             return `${packet.type} no=0x${hex(packet.no, 4)}`;
         case "GIVE_ITEM":
             return `${packet.type} item=0x${hex(packet.itemNo, 2)}`;
+        case "LIGHT_DROP":
+            return `${packet.type} area=${text(packet.area)} saveTbl=${text(packet.tbl)} tbox=${text(packet.tbox)}`;
         case "UPDATE_DUNGEON_ITEMS":
             return `${packet.type} saveTbl=${text(packet.saveTblNo)} keyDelta=${text(packet.keyDelta)} bits=0x${hex(packet.dungeonItemBits)}`;
         case "UPDATE_WORLD_STATE":

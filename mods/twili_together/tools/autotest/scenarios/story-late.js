@@ -43,6 +43,8 @@ const observeScenarios = [
     observe("cell-l11", "the cell point 24 on layer 11 with the wake-up bit already set (V45)",
         { stage: "R_SP107", room: 0, point: 0, eventBits: [B.day2Done, B.cellWakeUp], levels: { transform: [0] } },
         [{ op: "expectSwitch", no: 27, set: false }, { op: "triggerStory", via: "arrival", room: 0, point: 24, layer: 11 }, { op: "wait", sec: 5 }]),
+    observe("tear", "one Eldin tear picked up in Kakariko", { ...STORY.eldinTwilight, lightDrops: { 1: 10 } },
+        [{ op: "countTears" }, { op: "collectTear", nth: 0 }, { op: "expectLightDrops", area: 1, num: 11 }]),
     bossExit("forestBoss", "Forest Temple (V13)"),
     bossExit("goronMinesBoss", "Goron Mines (V19)"),
     bossExit("lakebedBoss", "Lakebed Temple and the Zant chain (V30)"),
@@ -221,6 +223,52 @@ const scenarios = [
             ],
         },
     }),
+    (() => {
+        const kakariko = { ...STORY.eldinTwilight, lightDrops: { 1: 10 } };
+        const both = (other, collect, after) => [
+            ...connect, at("F_SP109"), { op: "waitPeers", count: 1, timeoutSec: 90 },
+            { op: "countTears" },
+            ...barrier("ready", other, 180),
+            collect,
+            { op: "expectLightDrops", area: 1, num: 12, timeoutSec: 60 },
+            { op: "expectTears", delta: -2, timeoutSec: 30 },
+            ...barrier("both-collected", other, 120),
+            ...after,
+            ...barrier("done", other, 300),
+            { op: "quit" },
+        ];
+        return {
+            name: "story-tears-union",
+            description: "A and B collect different Eldin tears at once: both counts rise by two and neither tear respawns; a pickup racing a teammate's is not counted twice",
+            timeoutSec: 600,
+            cvars: COMMON_CVARS,
+            instances: [
+                { name: "A", start: kakariko, steps: both("B", { op: "collectTear", nth: 0 }, [
+                    ...barrier("keeping", "B", 60),
+                    { op: "collectTear", nth: 0 },
+                    { op: "expectLightDrops", area: 1, num: 13 },
+                    { op: "signal", name: "a-third" },
+                    { op: "waitSignal", name: "b-raced", from: "B", timeoutSec: 120 },
+                    { op: "expectLightDrops", area: 1, num: 13 },
+                ]) },
+                { name: "B", start: kakariko, steps: both("A", { op: "collectTear", nth: 1 }, [
+                    { op: "warp", stage: "F_SP109", room: 0, point: 0 },
+                    { op: "wait", sec: 3 },
+                    at("F_SP109"),
+                    { op: "expectTears", delta: -2 },
+                    { op: "expectLightDrops", area: 1, num: 12 },
+                    { op: "keepTakenTears", value: true },
+                    ...barrier("keeping", "A", 60),
+                    { op: "waitSignal", name: "a-third", from: "A", timeoutSec: 120 },
+                    { op: "expectLightDrops", area: 1, num: 13, timeoutSec: 30 },
+                    { op: "collectTear", nth: 0 },
+                    { op: "expectLightDrops", area: 1, num: 13 },
+                    { op: "keepTakenTears", value: false },
+                    { op: "signal", name: "b-raced" },
+                ]) },
+            ],
+        };
+    })(),
 ];
 
 module.exports = [...observeScenarios, ...scenarios];

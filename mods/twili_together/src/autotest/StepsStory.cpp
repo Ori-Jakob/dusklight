@@ -12,10 +12,12 @@
 #include "story/StoryLog.hpp"
 #include "story/StoryState.hpp"
 #include "sync/RemoteApplyGuard.hpp"
+#include "sync/WorldSync.hpp"
 
 #include "d/actor/d_a_alink.h"
 #include "d/actor/d_a_midna.h"
 #include "d/actor/d_a_obj_bosswarp.h"
+#include "d/actor/d_a_obj_drop.h"
 #include "d/actor/d_a_tag_event.h"
 #include "d/d_com_inf_game.h"
 #include "d/d_event.h"
@@ -28,9 +30,11 @@
 
 #include <fmt/format.h>
 
+#include <algorithm>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <vector>
 
 namespace twili::autotest {
 
@@ -138,6 +142,10 @@ namespace sd = story::detail;
 
 json sForcedMove;
 bool sSaveReqSeen = false;
+int sTearsAtMark = 0;
+int sTearTbox = -1;
+int sTearCountBefore = 0;
+bool sTearPicked = false;
 int sSavePulse = 0;
 int sSavePulseTick = 0;
 
@@ -464,6 +472,85 @@ std::optional<bool> triggerStory(StepContext& ctx) {
     TwiliLog.info("[autotest] triggerStory: tag ordered map event {} (event {})", find.eventNo,
         tag->mEventIdx);
     return true;
+}
+
+std::vector<daObjDrop_c*> s_tears;
+
+void* collectTears(void* proc, void*) {
+    auto* actor = static_cast<fopAc_ac_c*>(proc);
+    if (fopAcM_GetName(actor) == fpcNm_Obj_Drop_e) {
+        s_tears.push_back(static_cast<daObjDrop_c*>(actor));
+    }
+    return nullptr;
+}
+
+// The live tears of the stage, by TBOX number.
+const std::vector<daObjDrop_c*>& liveTears() {
+    s_tears.clear();
+    fopAcM_Search(&collectTears, nullptr);
+    std::sort(s_tears.begin(), s_tears.end(),
+        [](daObjDrop_c* a, daObjDrop_c* b) { return a->getSave() < b->getSave(); });
+    return s_tears;
+}
+
+std::string tearList() {
+    std::string s;
+    for (daObjDrop_c* t : liveTears()) {
+        s += fmt::format("{}{}(mode {})", s.empty() ? "" : " ", t->getSave(), t->mMode);
+    }
+    return s;
+}
+
+// Frees the nth tear from its insect and picks it up (dropGet; its draw-in runs only on screen).
+std::optional<bool> collectTear(StepContext& ctx) {
+    const int area = dComIfGp_getStartStageDarkArea();
+    if (!ctx.begun) {
+        const auto& tears = liveTears();
+        const size_t nth = static_cast<size_t>(ctx.step.value("nth", 0));
+        if (nth >= tears.size()) {
+            ctx.fail(fmt::format("collectTear: no tear {} (live: {})", nth, tearList()));
+            return false;
+        }
+        daObjDrop_c* tear = tears[nth];
+        sTearTbox = tear->getSave();
+        sTearPicked = false;
+        sTearCountBefore = dComIfGs_getLightDropNum(static_cast<u8>(area));
+        // A tear still carried by its shadow insect appears once the insect is gone.
+        fopAc_ac_c* insect = tear->mMode == daObjDrop_c::MODE_PARENT_WAIT_e ?
+                                 fopAcM_SearchByID(tear->parentActorID) :
+                                 nullptr;
+        if (insect != nullptr &&
+            (fopAcM_GetName(insect) == fpcNm_E_YM_e || fopAcM_GetName(insect) == fpcNm_E_YMB_e))
+        {
+            fopAcM_delete(insect);
+        }
+        TwiliLog.info("[autotest] collectTear: tear {} of area {} (count {}; live: {})", sTearTbox,
+            area, sTearCountBefore, tearList());
+        return false;
+    }
+    daObjDrop_c* tear = nullptr;
+    for (daObjDrop_c* t : liveTears()) {
+        if (t->getSave() == sTearTbox) {
+            tear = t;
+        }
+    }
+    if (tear == nullptr) {
+        TwiliLog.info("[autotest] tear {} collected: count {} -> {}", sTearTbox, sTearCountBefore,
+            dComIfGs_getLightDropNum(static_cast<u8>(area)));
+        return true;
+    }
+    if (tear->mMode == daObjDrop_c::MODE_WAIT_e && !sTearPicked) {
+        sTearPicked = true;
+        tear->mSetCollectDrop = true;
+        tear->dropGet();
+        fopAcM_delete(tear);
+        TwiliLog.info("[autotest] tear {} picked up", sTearTbox);
+    }
+    if (ctx.seconds > ctx.timeout(60.0)) {
+        ctx.fail(fmt::format("collectTear: tear {} still there (mode {} action {})", sTearTbox,
+            tear->mMode, tear->mModeAction));
+    }
+    return false;
 }
 
 std::optional<bool> expectStoryMove(StepContext& ctx) {
@@ -845,6 +932,34 @@ std::optional<bool> storySteps(const std::string& op, StepContext& ctx) {
             ctx.fail(fmt::format("expectTransient: {} ({})", st.team.transient, sd::debugText()));
         }
         return false;
+    }
+
+    if (op == "collectTear") {
+        return collectTear(ctx);
+    }
+
+    // countTears marks the live tear count; expectTears waits for mark + delta.
+    if (op == "countTears") {
+        sTearsAtMark = static_cast<int>(liveTears().size());
+        TwiliLog.info("[autotest] {} live tear(s): {}", sTearsAtMark, tearList());
+        return true;
+    }
+    if (op == "expectTears") {
+        const int want = sTearsAtMark + step.value("delta", 0);
+        const int have = static_cast<int>(liveTears().size());
+        if (have == want) {
+            TwiliLog.info("[autotest] {} live tear(s): {}", have, tearList());
+            return true;
+        }
+        if (ctx.seconds > ctx.timeout(20.0)) {
+            ctx.fail(fmt::format("expectTears: {} live (want {}): {}", have, want, tearList()));
+        }
+        return false;
+    }
+    // Received tears stay on screen, so a pickup can race a teammate's.
+    if (op == "keepTakenTears") {
+        sync::keepTakenTearsForTest(step.value("value", true));
+        return true;
     }
 
     if (op == "expectLightDrops") {
