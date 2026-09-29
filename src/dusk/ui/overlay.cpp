@@ -52,6 +52,7 @@ const Rml::String kDocumentSource = R"RML(
     </speedrun-timer>
     <mods-display id="mods-display">
     </mods-display>
+    <mod-panels id="mod-panels" />
 </body>
 </rml>
 )RML";
@@ -239,6 +240,7 @@ Overlay::Overlay() : Document(kDocumentSource, true, DocumentScope::Overlay) {
     mSpeedrunRta = mDocument->GetElementById("speedrun-rta");
     mSpeedrunIgt = mDocument->GetElementById("speedrun-igt");
     mModsDisplay = mDocument->GetElementById("mods-display");
+    mModPanels = mDocument->GetElementById("mod-panels");
 
     listen(mDocument, Rml::EventId::Focus, [](Rml::Event&) { Log.warn("Overlay received focus"); });
     listen(mDocument, Rml::EventId::Transitionend, [this](Rml::Event& event) {
@@ -388,6 +390,17 @@ void Overlay::update() {
             set_text_content(mModsDisplay, fmt::format("Enabled Mods:\n{}", enabled_mods_list));
         } else {
             mModsDisplay->RemoveAttribute("open");
+        }
+    }
+
+    if (mModPanels != nullptr) {
+        const bool interactive = any_document_visible();
+        if (interactive != mModPanels->HasAttribute("interactive")) {
+            if (interactive) {
+                mModPanels->SetAttribute("interactive", "");
+            } else {
+                mModPanels->RemoveAttribute("interactive");
+            }
         }
     }
 

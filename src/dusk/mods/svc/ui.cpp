@@ -15,6 +15,7 @@
 #include "dusk/ui/menu_bar.hpp"
 #include "dusk/ui/mod_window.hpp"
 #include "dusk/ui/modal.hpp"
+#include "dusk/ui/overlay.hpp"
 #include "dusk/ui/row.hpp"
 #include "dusk/ui/ui.hpp"
 #include "dusk/utilities.hpp"
@@ -29,6 +30,7 @@
 #include <algorithm>
 #include <chrono>
 #include <climits>
+#include <cmath>
 #include <cstddef>
 #include <functional>
 #include <limits>
@@ -75,6 +77,7 @@ enum class UiSlotKind : u8 {
     Style,
     MenuTab,
     ContextMenu,
+    OverlayPanel,
 };
 
 const char* slot_kind_name(UiSlotKind kind) {
@@ -101,10 +104,14 @@ const char* slot_kind_name(UiSlotKind kind) {
         return "menu tab";
     case UiSlotKind::ContextMenu:
         return "context menu";
+    case UiSlotKind::OverlayPanel:
+        return "overlay panel";
     default:
         return "unknown";
     }
 }
+
+class OverlayPanelListener;
 
 // Game thread only: all mutations happen in service calls made from mod code, in UI callbacks
 // (ui::update), or in the loader's deactivate paths.
@@ -130,6 +137,13 @@ struct UiSlot {
     // Style payload
     ui::DocumentScope styleScope = ui::DocumentScope::None;
     std::string styleId;
+    // Overlay panel payload; the listener belongs to the element
+    OverlayPanelListener* panelListener = nullptr;
+    UiOverlayPanelClickFn onPanelClick = nullptr;
+    UiOverlayPanelMovedFn onPanelMoved = nullptr;
+    void* panelUserData = nullptr;
+    float panelX = 0.0f;
+    float panelY = 0.0f;
     // Cached rendered values for element setters. These make the natural "set every update"
     // style cheap when the displayed value has not changed.
     std::string elementValue;
@@ -254,6 +268,127 @@ void track_element(uint64_t handle, UiSlot& slot, Rml::Element& element) {
     slot.element = &element;
     element.AddEventListener(Rml::EventId::Click, new SlotDetachListener{handle});
 }
+
+// Delivered from frameEnd, never from inside RmlUi event dispatch.
+struct PanelEvent {
+    uint64_t handle = 0;
+    bool moved = false;
+    std::string elementId;
+    float x = 0.0f;
+    float y = 0.0f;
+};
+
+std::vector<PanelEvent> s_panelEvents;
+
+float clamp_fraction(float value) {
+    return std::isfinite(value) ? std::clamp(value, 0.0f, 1.0f) : 0.0f;
+}
+
+// Left/top place the panel's corner at x/y of its parent; the translate pulls it back by x/y of its
+// own size, so 0..1 spans the free space and the panel stays inside.
+void apply_panel_position(Rml::Element& panel, float x, float y) {
+    panel.SetProperty(Rml::PropertyId::Left, Rml::Property{x * 100.0f, Rml::Unit::PERCENT});
+    panel.SetProperty(Rml::PropertyId::Top, Rml::Property{y * 100.0f, Rml::Unit::PERCENT});
+    panel.SetProperty(
+        "transform", fmt::format("translate({:.4f}%, {:.4f}%)", -x * 100.0f, -y * 100.0f));
+}
+
+std::string element_id_in(Rml::Element* element, const Rml::Element* panel) {
+    for (; element != nullptr && element != panel; element = element->GetParentNode()) {
+        if (!element->GetId().empty()) {
+            return element->GetId();
+        }
+    }
+    return {};
+}
+
+// Clicks on [id] elements and drags by [drag-handle] elements; the overlay's RCSS only lets pointer
+// events through while a menu is open.
+class OverlayPanelListener final : public Rml::EventListener {
+public:
+    explicit OverlayPanelListener(uint64_t handle) : m_handle{handle} {}
+
+    void attach(Rml::Element& element) {
+        for (const auto id : {Rml::EventId::Mousedown, Rml::EventId::Mouseup,
+                 Rml::EventId::Dragstart, Rml::EventId::Drag, Rml::EventId::Dragend})
+        {
+            element.AddEventListener(id, this);
+            ++m_attached;
+        }
+    }
+
+    void ProcessEvent(Rml::Event& event) override {
+        auto* slot = slot_from_handle(m_handle);
+        if (slot == nullptr || slot->kind != UiSlotKind::OverlayPanel) {
+            return;
+        }
+        Rml::Element* panel = slot->element;
+        switch (event.GetId()) {
+        case Rml::EventId::Mousedown:
+            if (event.GetParameter<int>("button", -1) == 0) {
+                m_pressedId = element_id_in(event.GetTargetElement(), panel);
+            }
+            break;
+        case Rml::EventId::Mouseup:
+            if (event.GetParameter<int>("button", -1) == 0) {
+                const std::string id = element_id_in(event.GetTargetElement(), panel);
+                if (!m_dragging && !id.empty() && id == m_pressedId) {
+                    s_panelEvents.push_back({.handle = m_handle, .elementId = id});
+                }
+                m_pressedId.clear();
+            }
+            break;
+        case Rml::EventId::Dragstart:
+            m_dragging = true;
+            m_dragMouse = event.GetUnprojectedMouseScreenPos();
+            m_dragX = slot->panelX;
+            m_dragY = slot->panelY;
+            break;
+        case Rml::EventId::Drag:
+            if (m_dragging) {
+                auto* parent = panel->GetParentNode();
+                const auto delta = event.GetUnprojectedMouseScreenPos() - m_dragMouse;
+                const float freeW = parent->GetClientWidth() - panel->GetOffsetWidth();
+                const float freeH = parent->GetClientHeight() - panel->GetOffsetHeight();
+                slot->panelX = clamp_fraction(freeW > 0.0f ? m_dragX + delta.x / freeW : 0.0f);
+                slot->panelY = clamp_fraction(freeH > 0.0f ? m_dragY + delta.y / freeH : 0.0f);
+                apply_panel_position(*panel, slot->panelX, slot->panelY);
+            }
+            break;
+        case Rml::EventId::Dragend:
+            finish_drag(*slot);
+            break;
+        default:
+            break;
+        }
+    }
+
+    void OnDetach(Rml::Element*) override {
+        if (--m_attached <= 0) {
+            delete this;
+        }
+    }
+
+    // New content removes the dragged handle, so no Dragend follows.
+    void content_replaced(UiSlot& slot) { finish_drag(slot); }
+
+private:
+    void finish_drag(const UiSlot& slot) {
+        if (m_dragging) {
+            m_dragging = false;
+            s_panelEvents.push_back(
+                {.handle = m_handle, .moved = true, .x = slot.panelX, .y = slot.panelY});
+        }
+    }
+
+    uint64_t m_handle;
+    int m_attached = 0;
+    std::string m_pressedId;
+    bool m_dragging = false;
+    Rml::Vector2f m_dragMouse;
+    float m_dragX = 0.0f;
+    float m_dragY = 0.0f;
+};
 
 template <typename T, typename Fn>
 T guarded_call(LoadedMod& mod, const char* what, T fallback, Fn&& fn) {
@@ -940,7 +1075,10 @@ ModResult ui_elem_set_text(LoadedMod& mod, uint64_t elem, const char* text) {
 }
 
 ModResult ui_elem_set_rml(LoadedMod& mod, uint64_t elem, const char* rml) {
-    auto* slot = resolve(mod, elem, UiSlotKind::Text, "elem_set_rml");
+    auto* entry = s_slots.find_owned(elem, mod);
+    auto* slot = entry != nullptr && entry->value.kind == UiSlotKind::OverlayPanel ?
+                     &entry->value :
+                     resolve(mod, elem, UiSlotKind::Text, "elem_set_rml");
     if (slot == nullptr) {
         return MOD_INVALID_ARGUMENT;
     }
@@ -951,6 +1089,9 @@ ModResult ui_elem_set_rml(LoadedMod& mod, uint64_t elem, const char* rml) {
     slot->hasElementValue = true;
     slot->elementValueIsRml = true;
     slot->element->SetInnerRML(rml);
+    if (slot->panelListener != nullptr) {
+        slot->panelListener->content_replaced(*slot);
+    }
     return MOD_OK;
 }
 
@@ -1172,6 +1313,83 @@ ModResult ui_context_menu_close(LoadedMod& mod, uint64_t handle) {
     }
     static_cast<ui::ContextMenu*>(slot->document)->dismiss();
     return MOD_OK;
+}
+
+ModResult ui_overlay_panel_create(
+    LoadedMod& mod, const UiOverlayPanelDesc& desc, uint64_t& outHandle) {
+    outHandle = 0;
+    if (!aurora::rmlui::is_initialized()) {
+        return MOD_UNAVAILABLE;
+    }
+    auto* overlay = dynamic_cast<ui::Overlay*>(ui::find_document(ui::DocumentScope::Overlay));
+    auto* element = overlay != nullptr ? ui::append(overlay->mod_panels(), "mod-panel") : nullptr;
+    if (element == nullptr) {
+        return MOD_UNAVAILABLE;
+    }
+    element->SetAttribute("mod-id", mod.metadata.id);
+    element->SetInnerRML(desc.rml);
+    const float x = clamp_fraction(desc.x);
+    const float y = clamp_fraction(desc.y);
+    apply_panel_position(*element, x, y);
+
+    auto& slot = alloc_slot(mod, UiSlotKind::OverlayPanel, outHandle);
+    slot.elementValue = desc.rml;
+    slot.hasElementValue = true;
+    slot.elementValueIsRml = true;
+    slot.onPanelClick = desc.on_click;
+    slot.onPanelMoved = desc.on_moved;
+    slot.panelUserData = desc.user_data;
+    slot.panelX = x;
+    slot.panelY = y;
+    auto* listener = new OverlayPanelListener{outHandle};
+    slot.panelListener = listener;
+    track_element(outHandle, slot, *element);
+    listener->attach(*element);
+    return MOD_OK;
+}
+
+ModResult ui_overlay_panel_set_position(LoadedMod& mod, uint64_t handle, float x, float y) {
+    auto* slot = resolve(mod, handle, UiSlotKind::OverlayPanel, "overlay_panel_set_position");
+    if (slot == nullptr) {
+        return MOD_INVALID_ARGUMENT;
+    }
+    slot->panelX = clamp_fraction(x);
+    slot->panelY = clamp_fraction(y);
+    apply_panel_position(*slot->element, slot->panelX, slot->panelY);
+    return MOD_OK;
+}
+
+ModResult ui_overlay_panel_destroy(LoadedMod& mod, uint64_t handle) {
+    auto* slot = resolve(mod, handle, UiSlotKind::OverlayPanel, "overlay_panel_destroy");
+    if (slot == nullptr) {
+        return MOD_INVALID_ARGUMENT;
+    }
+    // Destroying the element frees the slot and its listener
+    if (auto* parent = slot->element->GetParentNode()) {
+        parent->RemoveChild(slot->element);
+    }
+    return MOD_OK;
+}
+
+void ui_deliver_panel_events() {
+    for (const auto& event : std::exchange(s_panelEvents, {})) {
+        auto* entry = s_slots.find(event.handle);
+        if (entry == nullptr || entry->value.kind != UiSlotKind::OverlayPanel) {
+            continue;
+        }
+        LoadedMod& mod = *entry->owner;
+        void* userData = entry->value.panelUserData;
+        if (event.moved) {
+            if (const auto fn = entry->value.onPanelMoved) {
+                guarded_call(mod, "overlay panel on_moved callback",
+                    [&] { fn(mod.context.get(), event.handle, event.x, event.y, userData); });
+            }
+        } else if (const auto fn = entry->value.onPanelClick) {
+            guarded_call(mod, "overlay panel on_click callback", [&] {
+                fn(mod.context.get(), event.handle, event.elementId.c_str(), userData);
+            });
+        }
+    }
 }
 
 ModResult ui_window_push(LoadedMod& mod, const UiWindowDesc& desc, uint64_t& outHandle) {
@@ -1415,6 +1633,11 @@ void ui_sync_menu_tabs() {
     }
 }
 
+void ui_frame_end() {
+    ui_sync_menu_tabs();
+    ui_deliver_panel_events();
+}
+
 bool ui_any_document_visible() {
     return ui::any_document_visible();
 }
@@ -1520,6 +1743,11 @@ void ui_remove_mod(LoadedMod& mod) {
             break;
         case UiSlotKind::Style:
             ui::unregister_scoped_styles(slot.styleScope, slot.styleId);
+            break;
+        case UiSlotKind::OverlayPanel:
+            if (auto* parent = slot.element->GetParentNode()) {
+                parent->RemoveChild(slot.element);
+            }
             break;
         default:
             break;
@@ -1817,6 +2045,42 @@ ModResult ui_context_menu_close(ModContext* context, UiContextMenuHandle handle)
         return MOD_INVALID_ARGUMENT;
     }
     return ui_impl::ui_context_menu_close(*mod, handle);
+}
+
+ModResult ui_overlay_panel_create(
+    ModContext* context, const UiOverlayPanelDesc* desc, UiElementHandle* outPanel) {
+    if (outPanel != nullptr) {
+        *outPanel = 0;
+    }
+    auto* mod = mod_from_context(context);
+    if (mod == nullptr || desc == nullptr || desc->struct_size < sizeof(UiOverlayPanelDesc) ||
+        desc->rml == nullptr || outPanel == nullptr)
+    {
+        return MOD_INVALID_ARGUMENT;
+    }
+    uint64_t handle = 0;
+    const auto result = ui_impl::ui_overlay_panel_create(*mod, *desc, handle);
+    if (result == MOD_OK) {
+        *outPanel = handle;
+    }
+    return result;
+}
+
+ModResult ui_overlay_panel_set_position(
+    ModContext* context, UiElementHandle panel, float x, float y) {
+    auto* mod = mod_from_context(context);
+    if (mod == nullptr || panel == 0) {
+        return MOD_INVALID_ARGUMENT;
+    }
+    return ui_impl::ui_overlay_panel_set_position(*mod, panel, x, y);
+}
+
+ModResult ui_overlay_panel_destroy(ModContext* context, UiElementHandle panel) {
+    auto* mod = mod_from_context(context);
+    if (mod == nullptr || panel == 0) {
+        return MOD_INVALID_ARGUMENT;
+    }
+    return ui_impl::ui_overlay_panel_destroy(*mod, panel);
 }
 
 ModResult ui_register_mods_panel(ModContext* context, const UiModsPanelDesc* desc) {
@@ -2307,6 +2571,9 @@ constexpr UiService s_uiService{
     .elem_focus = ui_elem_focus,
     .context_menu_push = ui_context_menu_push,
     .context_menu_close = ui_context_menu_close,
+    .overlay_panel_create = ui_overlay_panel_create,
+    .overlay_panel_set_position = ui_overlay_panel_set_position,
+    .overlay_panel_destroy = ui_overlay_panel_destroy,
 };
 
 }  // namespace
@@ -2336,7 +2603,7 @@ constinit const ServiceModule g_uiModule{
     .minorVersion = UI_SERVICE_MINOR,
     .service = &s_uiService,
     .modDetached = ui_impl::ui_remove_mod,
-    .frameEnd = ui_impl::ui_sync_menu_tabs,
+    .frameEnd = ui_impl::ui_frame_end,
 };
 
 }  // namespace dusk::mods::svc

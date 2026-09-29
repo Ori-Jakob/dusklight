@@ -1021,6 +1021,37 @@ toast.duration_ms = 3000;
 svc_ui->push_toast(mod_ctx, &toast);
 ```
 
+**Overlay panels (UiService 2.4):** `overlay_panel_create` puts a small mod-owned panel of RML on the passive overlay,
+next to toasts and the FPS counter, for always-visible information such as a player list. It never takes focus or game
+input. While a menu or window is open it accepts the mouse: a press and release on an element with an `id` attribute
+(or inside one) calls `on_click` with that id, and dragging an element with a `drag-handle` attribute moves the panel
+and calls `on_moved` on release. `x`/`y` place the panel within the free screen space (0 = left/top edge, 1 =
+right/bottom edge), so it always stays on screen; `on_moved` reports the same units for you to save. Update the
+content with `elem_set_rml`, hide it with `elem_set_visible`, and remove it with `overlay_panel_destroy`. The overlay
+is created after mods initialize, so create panels from `mod_update` and retry on `MOD_UNAVAILABLE`. Panels are
+`mod-panel[mod-id="..."]` elements for `UI_SCOPE_OVERLAY` styles, inside `mod-panels`, which carries an `interactive`
+attribute while they accept the mouse.
+
+```cpp
+UiElementHandle panel = 0;
+
+void on_click(ModContext*, UiElementHandle, const char* id, void*) {
+    if (std::strcmp(id, "refresh") == 0) {
+        refresh();
+    }
+}
+
+UiOverlayPanelDesc desc = UI_OVERLAY_PANEL_DESC_INIT;
+desc.rml = "<div drag-handle=\"\">Status</div><div id=\"refresh\">Refresh</div>";
+desc.x = 0.0f;
+desc.y = 0.5f;
+desc.on_click = on_click;
+if (SERVICE_HAS(svc_ui, UiService, overlay_panel_create) &&
+    svc_ui->overlay_panel_create(mod_ctx, &desc, &panel) == MOD_OK) {
+    svc_ui->elem_set_rml(mod_ctx, panel, "<div drag-handle=\"\">Status: ok</div>");
+}
+```
+
 **Menu bar tabs:** `register_menu_tab` adds a tab to the in-game menu bar. `on_selected` fires when the user activates
 the tab: typically you'd push a window from it. The tab is removed by `unregister_menu_tab`, or automatically when the
 mod is disabled.

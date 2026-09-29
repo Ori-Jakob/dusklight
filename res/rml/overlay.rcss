@@ -14,6 +14,7 @@ body {
     align-items: stretch;
     z-index: 2;
     pointer-events: none;
+    focus: none;
 }
 
 fps,
@@ -284,6 +285,34 @@ mods-display {
 
 mods-display[open] {
     display: block;
+}
+
+mod-panels {
+    position: absolute;
+    top: 12dp;
+    right: 12dp;
+    bottom: 12dp;
+    left: 12dp;
+}
+
+mod-panel {
+    position: absolute;
+    display: block;
+    padding: 6dp var(--space-sm);
+    border-width: 1dp;
+    border-color: var(--color-border);
+    border-radius: var(--radius-control);
+    background-color: rgba(var(--color-surface-rgb), 80%);
+    font-size: var(--font-size-md);
+    white-space: nowrap;
+}
+
+mod-panels[interactive] mod-panel {
+    pointer-events: auto;
+}
+
+mod-panel [drag-handle] {
+    drag: drag;
 }
 
 fps[open] {

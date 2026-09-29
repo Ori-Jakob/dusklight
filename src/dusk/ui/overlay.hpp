@@ -13,6 +13,9 @@ public:
     void show() override;
     void update() override;
 
+    // Parent of mod overlay panels; has the `interactive` attribute while a menu is open.
+    Rml::Element* mod_panels() const { return mModPanels; }
+
 protected:
     bool handle_nav_command(Rml::Event& event, NavCommand cmd) override;
 
@@ -30,6 +33,7 @@ private:
     Rml::Element* mSpeedrunRta = nullptr;
     Rml::Element* mSpeedrunIgt = nullptr;
     Rml::Element* mModsDisplay = nullptr;
+    Rml::Element* mModPanels = nullptr;
     clock::time_point mCurrentToastStartTime;
     clock::time_point mMenuNotificationStartTime;
     clock::time_point mPipelineProgressStartTime;

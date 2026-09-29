@@ -420,6 +420,11 @@ Document* find_document(DocumentScope scope) noexcept {
             return doc.get();
         }
     }
+    for (auto& doc : sPassiveDocuments) {
+        if (!doc->closed() && doc->scope() == scope) {
+            return doc.get();
+        }
+    }
     return nullptr;
 }
 

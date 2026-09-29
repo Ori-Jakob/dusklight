@@ -10,7 +10,7 @@
 
 #define UI_SERVICE_ID DUSKLIGHT_SERVICE_ID_PREFIX "ui"
 #define UI_SERVICE_MAJOR 2u
-#define UI_SERVICE_MINOR 3u
+#define UI_SERVICE_MINOR 4u
 
 /*
  * UI primitives: a panel inside the host Mods window, mod-owned windows, dialogs, toasts,
@@ -34,7 +34,7 @@ typedef enum UiStyleScope {
     UI_SCOPE_PRELAUNCH = 0,      /* the pre-launch menu */
     UI_SCOPE_WINDOW = 1,         /* every tabbed/small window, host and mod alike */
     UI_SCOPE_MENU_BAR = 2,       /* the in-game menu bar */
-    UI_SCOPE_OVERLAY = 3,        /* the passive overlay (toasts, FPS counter, timers) */
+    UI_SCOPE_OVERLAY = 3,        /* the passive overlay (toasts, FPS counter, timers, panels) */
     UI_SCOPE_TOUCH_CONTROLS = 4, /* touch controls and their editor */
     UI_SCOPE_GRAPHICS_TUNER = 5, /* the graphics tuner overlay window */
 } UiStyleScope;
@@ -351,6 +351,35 @@ typedef struct UiToastDesc {
 
 #define UI_TOAST_DESC_INIT {sizeof(UiToastDesc), NULL, NULL, NULL, 0u}
 
+/* Minor version 4 */
+
+/* A press and release on an element of the panel carrying an `id` attribute (or inside one). */
+typedef void (*UiOverlayPanelClickFn)(
+    ModContext* ctx, UiElementHandle panel, const char* element_id, void* user_data);
+/* The user dragged the panel; x/y as in UiOverlayPanelDesc. */
+typedef void (*UiOverlayPanelMovedFn)(
+    ModContext* ctx, UiElementHandle panel, float x, float y, void* user_data);
+
+/*
+ * A mod-owned panel on the passive overlay layer, next to toasts and the FPS counter. It never
+ * takes focus or game input. While a focus-stack document is visible (a menu or window is open)
+ * it takes mouse input: clicks on elements with an `id` attribute fire on_click, and pressing an
+ * element with a `drag-handle` attribute drags the panel and fires on_moved on release.
+ * x and y place the panel within the free screen space: 0 is the left/top edge, 1 the right/bottom
+ * edge, so the panel always stays fully visible.
+ */
+typedef struct UiOverlayPanelDesc {
+    uint32_t struct_size;
+    const char* rml; /* required */
+    float x;
+    float y;
+    UiOverlayPanelClickFn on_click; /* optional */
+    UiOverlayPanelMovedFn on_moved; /* optional */
+    void* user_data;
+} UiOverlayPanelDesc;
+
+#define UI_OVERLAY_PANEL_DESC_INIT {sizeof(UiOverlayPanelDesc), NULL, 0.0f, 0.0f, NULL, NULL, NULL}
+
 typedef struct UiService {
     ServiceHeader header;
 
@@ -453,6 +482,16 @@ typedef struct UiService {
     ModResult (*context_menu_push)(ModContext* ctx, UiElementHandle anchor,
         const UiContextMenuDesc* desc, UiContextMenuHandle* out_menu);
     ModResult (*context_menu_close)(ModContext* ctx, UiContextMenuHandle menu);
+
+    /* Minor version 4 */
+
+    /* Add a panel to the overlay. MOD_UNAVAILABLE until the overlay exists (retry later).
+     * elem_set_rml, elem_set_visible and elem_set_class accept the panel handle. */
+    ModResult (*overlay_panel_create)(
+        ModContext* ctx, const UiOverlayPanelDesc* desc, UiElementHandle* out_panel);
+    ModResult (*overlay_panel_set_position)(
+        ModContext* ctx, UiElementHandle panel, float x, float y);
+    ModResult (*overlay_panel_destroy)(ModContext* ctx, UiElementHandle panel);
 } UiService;
 
 MOD_DECLARE_SERVICE(UiService, svc_ui, UI_SERVICE_ID, UI_SERVICE_MAJOR, UI_SERVICE_MINOR);
