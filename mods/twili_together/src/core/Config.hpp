@@ -33,6 +33,12 @@ enum class Var : uint8_t {
     AutoReconnect,
     RandoAllowUnverified,
     TeleportAcrossTeams,
+    PlayersWidget,
+    // Per mille of the free screen space (UiService overlay panel x/y).
+    PlayersWidgetX,
+    PlayersWidgetY,
+    // Percent, of the widget's background and border.
+    PlayersWidgetOpacity,
 #if TWILI_ENABLE_AUTOTEST
     AutotestScript,
 #endif

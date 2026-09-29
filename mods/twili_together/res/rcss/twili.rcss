@@ -33,3 +33,12 @@
     padding-left: 22dp;
     opacity: 0.75;
 }
+
+/* Players tab rows: the player's text, then its icon buttons. */
+.twili-player-text {
+    flex: 1 1 auto;
+}
+
+button.icon-button.twili-unavailable icon {
+    opacity: 0.4;
+}

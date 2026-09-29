@@ -106,6 +106,7 @@ set(TWILI_SOURCES
     src/ui/ItemToasts.cpp
     src/ui/MapCursors.cpp
     src/ui/NameTags.cpp
+    src/ui/PlayersWidget.cpp
     src/ui/StoryPrompt.cpp
     src/ui/Toasts.cpp
     src/ui/TwiliWindow.cpp

@@ -89,6 +89,8 @@ Personal settings, on the Connection tab:
 | Item Pickups | on | a toast with the item's icon when a teammate picks something up; items synced while you were away are summarized |
 | Your Own Pickups | off | toasts for your own pickups too |
 | Story Prompts | on | ask whether to follow when a teammate's story event moves them |
+| Players Widget | on | the players list on screen (below) |
+| Players Widget Opacity | 80% | how solid its background and border are, 0% to 100% |
 | Server URL | empty | see Connecting |
 | Reconnect Automatically | on | |
 | Always Sync Unverified Randomizer Games | off | (Room tab) skip the Sync Unverified Match question |
@@ -108,7 +110,7 @@ the others see the owner's values, greyed out.
 | Friendly Fire | off | PvP within a team too |
 | Lethal PvP | off | off: PvP hits never take you below one heart |
 | Show Locations | on | other players on the minimap and the dungeon map |
-| Teleport to Player | off | teleport buttons on the Players tab |
+| Teleport to Player | off | teleport buttons on the Players tab and the players widget |
 | Teleport Across Teams | off | teleport to other teams' players (never between different games) |
 | Enemy Health | 100% | health of regular enemies, 100% to 500% |
 | Enemy Count | 100% | extra copies of the regular enemies placed in an area, 100% to 300% (not bosses, story, twilight or spawned enemies); applies when an area loads |
@@ -152,12 +154,23 @@ with Lethal PvP, one that takes their last heart shows "A knocked out B".
 ## The Players tab
 
 Lists everyone in the room, grouped by team, with where they are and whether they sync with you.
-From there you can teleport to a player (when the room allows it), hand over the room or your
-team, and use **Catch up to story**: when a teammate's story event moved them (for example
-Link's capture into Hyrule Castle) and you were not there, this takes you to the matching place
-with the matching form. It prefers the team's latest strong story move to a later minor one, and
-it also works offline from the moves this game learned before. Tears of light a teammate collects
-count for the whole team.
+Each player has small buttons beside them: teleport to them (on a team only teammates are offered,
+unless the room allows teleporting across teams; greyed out with the reason in its tooltip while
+teleporting is off or not possible now), and, for the room owner or team leader, hand over the room
+or the team. Below the list is **Catch up to story**: when a teammate's story event moved them (for
+example Link's capture into Hyrule Castle) and you were not there, this takes you to the matching
+place with the matching form. It prefers the team's latest strong story move to a later minor one,
+and it also works offline from the moves this game learned before. Tears of light a teammate
+collects count for the whole team.
+
+## The players widget
+
+A small list on screen of your teammates, or everyone in the room without a team: their colour,
+name, area and a teleport button (same rules and tooltip as the Players tab). It stays put and
+ignores the controller while you play; with the menu open, drag it by its title to move it (the
+spot is saved) or click a teleport button. It hides while you are not connected, have nobody to
+list, or watch a cutscene or the game's own menus. It needs a Dusklight with UiService 2.4 (overlay
+panels); older builds just go without it.
 
 ## Known limitations
 

@@ -2,7 +2,7 @@
 
 #include <mods/api.h>
 
-// Everything on screen: the window, styles, toasts, name tags and map cursors.
+// Everything on screen: the window, styles, toasts, name tags, map cursors and the players widget.
 namespace twili::ui {
 
 // mod_initialize; failures only disable the part that failed.

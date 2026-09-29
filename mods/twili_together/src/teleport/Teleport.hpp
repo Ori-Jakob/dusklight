@@ -30,6 +30,13 @@ struct Status {
 
 // Why teleporting to `clientId` is refused now, or nullptr.
 const char* blockCode(uint32_t clientId);
+
+// Whether the UI offers a teleport button for this client: never for ourselves, offline players or
+// another team's players the room keeps apart; Blocked while blockCode says no.
+enum class Offer : uint8_t { None, Ready, Blocked };
+Offer offer(uint32_t clientId);
+// "Teleport to <name>", with the reason while blocked.
+std::string offerTooltip(uint32_t clientId);
 // Text for a reason code, also used for story codes ("in a cutscene").
 std::string reasonText(std::string_view code);
 // Re-checks everything; a refusal ends up in status() too.

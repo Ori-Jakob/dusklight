@@ -543,6 +543,24 @@ const char* blockCode(uint32_t clientId) {
     return localTeleportBlocker();
 }
 
+Offer offer(uint32_t clientId) {
+    const Session& s = session();
+    const auto it = s.clients().find(clientId);
+    if (!s.isConnected() || it == s.clients().end() || it->second.self || !it->second.online ||
+        team_game::teleportBlock(clientId) != nullptr)
+    {
+        return Offer::None;
+    }
+    return blockCode(clientId) == nullptr ? Offer::Ready : Offer::Blocked;
+}
+
+std::string offerTooltip(uint32_t clientId) {
+    const char* code = blockCode(clientId);
+    const std::string name = clientName(clientId);
+    return code == nullptr ? "Teleport to " + name
+                           : fmt::format("Teleport to {} ({})", name, reasonText(code));
+}
+
 bool request(uint32_t clientId) {
     State& t = s_state;
     if (const char* code = blockCode(clientId)) {

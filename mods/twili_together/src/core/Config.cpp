@@ -43,6 +43,11 @@ constexpr VarDef kVars[] = {
     {Var::AutoReconnect, "auto_reconnect", CONFIG_VAR_BOOL, true},
     {Var::RandoAllowUnverified, "rando_allow_unverified", CONFIG_VAR_BOOL},
     {Var::TeleportAcrossTeams, "teleport_across_teams", CONFIG_VAR_BOOL},
+    {Var::PlayersWidget, "players_widget", CONFIG_VAR_BOOL, true},
+    // Right edge, between the action buttons and the rupees.
+    {Var::PlayersWidgetX, "players_widget_x", CONFIG_VAR_INT, false, 1000},
+    {Var::PlayersWidgetY, "players_widget_y", CONFIG_VAR_INT, false, 500},
+    {Var::PlayersWidgetOpacity, "players_widget_opacity", CONFIG_VAR_INT, false, 80},
 #if TWILI_ENABLE_AUTOTEST
     {Var::AutotestScript, "autotest_script", CONFIG_VAR_STRING},
 #endif

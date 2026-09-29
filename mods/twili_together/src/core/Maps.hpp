@@ -17,4 +17,7 @@ struct Room {
 extern const Room kRooms[];
 extern const size_t kRoomCount;
 
+// The room's name, else the stage's first one, else nullptr.
+const char* areaName(const char* stage, int room);
+
 }  // namespace twili::maps

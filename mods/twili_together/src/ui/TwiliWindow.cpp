@@ -8,6 +8,7 @@
 #include "story/StoryUi.hpp"
 #include "teleport/Teleport.hpp"
 #include "ui/ColorMath.hpp"
+#include "ui/PlayersWidget.hpp"
 #include "ui/StoryPrompt.hpp"
 #include "ui/Toasts.hpp"
 
@@ -32,7 +33,7 @@ constexpr const char* kColorPresets[] = {
     "00acc1", "1e88e5", "5e35b1", "8e24aa", "d81b60", "ffffff",
 };
 constexpr color::Rgb8 kDefaultColor{255, 255, 255};
-constexpr size_t kTeleportSlots = 12;
+constexpr size_t kPlayerSlots = 12;
 
 UiMenuTabHandle s_menuTab = 0;
 UiWindowHandle s_window = 0;
@@ -55,14 +56,22 @@ struct Live {
     Shown claimGame;
     Shown confirmMatch;
     Shown teamColor;
-    UiElementHandle players = 0;
-    std::array<UiElementHandle, kTeleportSlots> teleport{};
-    std::array<uint32_t, kTeleportSlots> teleportIds{};
+    // A player's row: its team's header above it (first of a team), the text and icon buttons.
+    struct PlayerSlot {
+        Shown header;
+        Shown row;
+        UiElementHandle text = 0;
+        Shown teleport;
+        Shown actions;
+        uint32_t clientId = 0;
+        bool blocked = false;
+        std::string lastHeader;
+        std::string lastText;
+        std::string lastTooltip;
+    };
+    std::array<PlayerSlot, kPlayerSlots> players{};
+    UiElementHandle playersEmpty = 0;
     UiElementHandle teleportStatus = 0;
-    // [0] Make ... Room Owner, [1] Make ... Team Leader.
-    std::array<std::array<UiElementHandle, kTeleportSlots>, 2> promote{};
-    std::array<std::array<uint32_t, kTeleportSlots>, 2> promoteIds{};
-    std::array<std::array<std::string, kTeleportSlots>, 2> lastPromoteLabels;
     UiElementHandle storyStatus = 0;
     UiElementHandle catchUp = 0;
     std::string lastStatus;
@@ -70,8 +79,7 @@ struct Live {
     std::string lastRoomInfo;
     std::string lastTeamInfo;
     std::string lastTeamPermalink;
-    std::string lastPlayers;
-    std::array<std::string, kTeleportSlots> lastTeleportLabels;
+    std::string lastPlayersEmpty;
     std::string lastTeleportStatus;
     std::string lastStoryStatus;
     std::string lastCatchUp;
@@ -236,6 +244,22 @@ ModResult buildConnectionTab(ModContext*, UiWindowHandle, UiElementHandle left, 
         "<p>Also notify for items you pick up yourself.</p>");
     addToggle(left, Var::StoryPrompts, "Story Prompts",
         "<p>Ask whether to follow when a teammate's story event moves them somewhere else.</p>");
+    addToggle(left, Var::PlayersWidget, "Players Widget",
+        "<p>A small list on screen of your teammates (everyone in the room without a team), where "
+        "they are and a teleport button. While the menu is open, drag it by its title to move it "
+        "or press a teleport button.</p>");
+    UiControlDesc opacity = UI_CONTROL_DESC_INIT;
+    opacity.kind = UI_CONTROL_NUMBER;
+    opacity.label = "Players Widget Opacity";
+    opacity.help_rml = "<p>How solid the players widget's background and border are. Its text and "
+                       "buttons stay fully visible.</p>";
+    opacity.binding = UI_BINDING_CONFIG_VAR;
+    opacity.config_var = config::handle(Var::PlayersWidgetOpacity);
+    opacity.min = 0;
+    opacity.max = 100;
+    opacity.step = 5;
+    opacity.suffix = "%";
+    addControl(left, opacity);
 
     svc_ui->pane_add_section(mod_ctx, left, "Server");
     addString(left, Var::ServerUrl, "Server URL",
@@ -647,15 +671,10 @@ std::string playerRml(uint32_t id, const Client& c, bool ownTeam) {
     } else if (!c.self && !c.layout.empty() && c.layout != layout::saveLayoutHex()) {
         tags += " [incompatible version]";
     }
-    const std::string where =
-        !c.isSaveLoaded ? "no save loaded"
-                        : fmt::format("{} layer {} room {}",
-                              std::string(c.stageName, strnlen(c.stageName, sizeof(c.stageName))),
-                              c.layerNo, c.roomNo);
     std::string rml = fmt::format(
         "<p><span class=\"twili-swatch\" style=\"background-color: {};\"></span> {}{}</p>",
         colorCss(c.colorR, c.colorG, c.colorB), escapeRml(clientName(id)), escapeRml(tags));
-    std::string details = where;
+    std::string details = areaText(c);
     // The form comes with PLAYER_UPDATE, which only players in our stage and layer send.
     if (c.isSaveLoaded && !c.self && c.hasPlayerUpdate) {
         details += c.transformStatus != 0 ? " (wolf)" : " (human)";
@@ -679,67 +698,48 @@ std::string playerRml(uint32_t id, const Client& c, bool ownTeam) {
     return rml;
 }
 
+struct PlayerEntry {
+    uint32_t clientId = 0;
+    // First player of its team: the team's header goes above it.
+    std::string headerRml;
+    bool ownTeam = false;
+};
+
 // Grouped by team, ours first.
-std::string playersRml() {
+std::vector<PlayerEntry> playerEntries() {
+    std::vector<PlayerEntry> entries;
     const Session& session = Session::instance();
     if (!session.isConnected()) {
-        return "Not connected.";
+        return entries;
     }
     std::map<std::string, std::vector<uint32_t>> others;
     std::vector<uint32_t> ours;
     for (const auto& [id, c] : session.clients()) {
         (c.teamId == session.selfTeamId() ? ours : others[c.teamId]).push_back(id);
     }
-    std::string rml;
     const auto addGroup = [&](const std::string& teamId, const std::vector<uint32_t>& ids) {
-        if (ids.empty()) {
-            return;
-        }
-        rml += teamHeaderRml(teamId);
-        for (const uint32_t id : ids) {
-            rml += playerRml(id, session.clients().at(id), teamId == session.selfTeamId());
+        for (size_t i = 0; i < ids.size(); ++i) {
+            entries.push_back({ids[i], i == 0 ? teamHeaderRml(teamId) : std::string{},
+                teamId == session.selfTeamId()});
         }
     };
     addGroup(session.selfTeamId(), ours);
     for (const auto& [teamId, ids] : others) {
         addGroup(teamId, ids);
     }
-    return rml.empty() ? std::string("No players.") : rml;
-}
-
-std::vector<uint32_t> teleportTargets() {
-    std::vector<uint32_t> ids;
-    const Session& session = Session::instance();
-    if (!session.isConnected()) {
-        return ids;
-    }
-    for (const auto& [id, c] : session.clients()) {
-        if (!c.self && c.online && ids.size() < kTeleportSlots) {
-            ids.push_back(id);
-        }
-    }
-    return ids;
-}
-
-std::string teleportLabel(uint32_t id) {
-    const char* code = teleport::blockCode(id);
-    const std::string name = clientName(id);
-    return code == nullptr ? "Teleport to " + name
-                           : fmt::format("Teleport to {} ({})", name, teleport::reasonText(code));
+    return entries;
 }
 
 uint32_t slotClient(void* data) {
     const auto slot = reinterpret_cast<uintptr_t>(data);
-    return slot < kTeleportSlots ? s_live.teleportIds[slot] : 0;
+    return slot < kPlayerSlots ? s_live.players[slot].clientId : 0;
 }
 
-bool teleportDisabled(ModContext*, void* data) {
-    const uint32_t id = slotClient(data);
-    return id == 0 || teleport::blockCode(id) != nullptr;
-}
-
+// A blocked button still asks, so the refusal says why.
 void onTeleport(ModContext*, void* data) {
-    if (const uint32_t id = slotClient(data); id != 0) {
+    if (const uint32_t id = slotClient(data);
+        id != 0 && teleport::offer(id) != teleport::Offer::None)
+    {
         teleport::request(id);
     }
 }
@@ -748,33 +748,25 @@ void onTeleport(ModContext*, void* data) {
 
 enum PromoteRole : uintptr_t { kRoomOwner = 0, kTeamLeader = 1 };
 
-// Every other member for the room owner; every other teammate for the team leader.
-std::vector<uint32_t> promoteTargets(PromoteRole role) {
-    std::vector<uint32_t> ids;
+bool canPromote(PromoteRole role, const Client& c) {
     const Session& session = Session::instance();
-    const bool allowed = role == kRoomOwner ? session.isRoomOwner() : team_game::isTeamOwner();
-    if (!session.isConnected() || !allowed) {
-        return ids;
+    if (!session.isConnected() || c.self || !c.online) {
+        return false;
     }
-    for (const auto& [id, c] : session.clients()) {
-        if (!c.self && c.online && ids.size() < kTeleportSlots &&
-            (role == kRoomOwner || c.teamId == session.selfTeamId()))
-        {
-            ids.push_back(id);
-        }
-    }
-    return ids;
+    return role == kRoomOwner ? session.isRoomOwner()
+                              : team_game::isTeamOwner() && c.teamId == session.selfTeamId();
 }
 
-void* promoteData(PromoteRole role, size_t slot) {
-    return reinterpret_cast<void*>(static_cast<uintptr_t>(role) * kTeleportSlots + slot);
+void* promoteData(PromoteRole role, uint32_t clientId) {
+    return reinterpret_cast<void*>((static_cast<uintptr_t>(clientId) << 1) | role);
 }
 
 void onPromote(ModContext*, void* data) {
     const auto value = reinterpret_cast<uintptr_t>(data);
-    const auto role = static_cast<PromoteRole>(value / kTeleportSlots);
-    const uint32_t id = s_live.promoteIds[role][value % kTeleportSlots];
-    if (id == 0) {
+    const auto role = static_cast<PromoteRole>(value & 1);
+    const auto id = static_cast<uint32_t>(value >> 1);
+    const auto& clients = Session::instance().clients();
+    if (const auto it = clients.find(id); it == clients.end() || !canPromote(role, it->second)) {
         return;
     }
     const std::string name = escapeRml(clientName(id));
@@ -798,6 +790,35 @@ void onPromote(ModContext*, void* data) {
             .onAccept = [id] { team_game::promoteTeamLeader(id); },
         });
     }
+}
+
+void onPlayerActions(ModContext*, void* data) {
+    const auto slot = reinterpret_cast<uintptr_t>(data);
+    const uint32_t id = slotClient(data);
+    const auto& clients = Session::instance().clients();
+    const auto it = clients.find(id);
+    if (it == clients.end()) {
+        return;
+    }
+    const std::string name = clientName(id);
+    const std::string labels[2] = {"Make " + name + " Room Owner", "Make " + name + " Team Leader"};
+    std::vector<UiContextMenuItem> items;
+    for (const PromoteRole role : {kRoomOwner, kTeamLeader}) {
+        if (canPromote(role, it->second)) {
+            UiContextMenuItem item = UI_CONTEXT_MENU_ITEM_INIT;
+            item.label = labels[role].c_str();
+            item.on_pressed = onPromote;
+            item.user_data = promoteData(role, id);
+            items.push_back(item);
+        }
+    }
+    if (items.empty()) {
+        return;
+    }
+    UiContextMenuDesc desc = UI_CONTEXT_MENU_DESC_INIT;
+    desc.items = items.data();
+    desc.item_count = items.size();
+    svc_ui->context_menu_push(mod_ctx, s_live.players[slot].actions.elem, &desc, nullptr);
 }
 
 std::string catchUpLabel() {
@@ -836,48 +857,121 @@ void onForgetStory(ModContext*, void*) {
     });
 }
 
+void addPlayerSlot(UiElementHandle pane, size_t index) {
+    Live::PlayerSlot& slot = s_live.players[index];
+    void* data = reinterpret_cast<void*>(static_cast<uintptr_t>(index));
+    slot.header.elem = addRml(pane, " ");
+    UiRowDesc rowDesc = UI_ROW_DESC_INIT;
+    if (svc_ui->pane_add_row(mod_ctx, pane, &rowDesc, &slot.row.elem) != MOD_OK) {
+        slot.row.elem = 0;
+        return;
+    }
+    slot.text = addRml(slot.row.elem, " ");
+    if (slot.text != 0) {
+        svc_ui->elem_set_class(mod_ctx, slot.text, "twili-player-text", true);
+    }
+
+    UiControlDesc teleport = UI_CONTROL_DESC_INIT;
+    teleport.kind = UI_CONTROL_ICON_BUTTON;
+    teleport.icon = "arrow_forward";
+    teleport.label = "Teleport";
+    teleport.help_rml = "<p>Teleport to this player's last spot on solid ground. The room owner "
+                        "turns teleporting on in the Room tab; on a team only teammates are "
+                        "offered unless the room allows teleporting across teams.</p>";
+    teleport.on_pressed = onTeleport;
+    teleport.user_data = data;
+    addControl(slot.row.elem, teleport, &slot.teleport.elem);
+
+    UiControlDesc actions = UI_CONTROL_DESC_INIT;
+    actions.kind = UI_CONTROL_ICON_BUTTON;
+    actions.icon = "expand_more";
+    actions.label = "Hand Over";
+    actions.tooltip = "Make room owner or team leader";
+    actions.help_rml = "<p>The room owner can hand the room to anyone here, a team leader the "
+                       "team to a teammate. When one of them leaves, the longest-connected player "
+                       "takes over.</p>";
+    actions.on_pressed = onPlayerActions;
+    actions.user_data = data;
+    addControl(slot.row.elem, actions, &slot.actions.elem);
+    for (const UiElementHandle button : {slot.teleport.elem, slot.actions.elem}) {
+        if (button != 0) {
+            svc_ui->elem_set_class(mod_ctx, button, "compact", true);
+        }
+    }
+    setShown(slot.header, false);
+    setShown(slot.row, false);
+}
+
+void updatePlayerSlot(Live::PlayerSlot& slot, const PlayerEntry* entry) {
+    const Session& session = Session::instance();
+    const auto& clients = session.clients();
+    const auto it = entry != nullptr ? clients.find(entry->clientId) : clients.end();
+    if (it == clients.end()) {
+        slot.clientId = 0;
+        setShown(slot.header, false);
+        setShown(slot.row, false);
+        return;
+    }
+    const uint32_t id = entry->clientId;
+    slot.clientId = id;
+    if (!entry->headerRml.empty()) {
+        setRml(slot.header.elem, slot.lastHeader, entry->headerRml);
+    }
+    setShown(slot.header, !entry->headerRml.empty());
+    setRml(slot.text, slot.lastText, playerRml(id, it->second, entry->ownTeam));
+    setShown(slot.row, true);
+
+    const teleport::Offer offer = teleport::offer(id);
+    setShown(slot.teleport, offer != teleport::Offer::None);
+    if (offer != teleport::Offer::None && slot.teleport.elem != 0) {
+        if (std::string tooltip = teleport::offerTooltip(id); tooltip != slot.lastTooltip) {
+            slot.lastTooltip = std::move(tooltip);
+            svc_ui->control_set_tooltip(mod_ctx, slot.teleport.elem, slot.lastTooltip.c_str());
+        }
+        if (const bool blocked = offer == teleport::Offer::Blocked; blocked != slot.blocked) {
+            slot.blocked = blocked;
+            svc_ui->elem_set_class(mod_ctx, slot.teleport.elem, "twili-unavailable", blocked);
+        }
+    }
+    setShown(slot.actions,
+        canPromote(kRoomOwner, it->second) || canPromote(kTeamLeader, it->second));
+}
+
+void updatePlayers() {
+    const std::vector<PlayerEntry> entries = playerEntries();
+    for (size_t i = 0; i < kPlayerSlots; ++i) {
+        if (s_live.players[i].row.elem != 0) {
+            updatePlayerSlot(s_live.players[i], i < entries.size() ? &entries[i] : nullptr);
+        }
+    }
+    std::string empty;
+    if (!Session::instance().isConnected()) {
+        empty = "Not connected.";
+    } else if (entries.size() > kPlayerSlots) {
+        empty = fmt::format("And {} more.", entries.size() - kPlayerSlots);
+    }
+    setOptionalRml(s_live.playersEmpty, s_live.lastPlayersEmpty, escapeRml(empty));
+    setOptionalRml(
+        s_live.teleportStatus, s_live.lastTeleportStatus, escapeRml(teleport::statusMessage()));
+}
+
 ModResult buildPlayersTab(ModContext*, UiWindowHandle, UiElementHandle left, UiElementHandle,
     void*, ModError*) {
     s_live = {};
     svc_ui->pane_add_section(mod_ctx, left, "Connected Players");
-    s_live.lastPlayers = playersRml();
-    s_live.players = addRml(left, s_live.lastPlayers);
-
-    svc_ui->pane_add_section(mod_ctx, left, "Teleport");
-    for (size_t i = 0; i < kTeleportSlots; ++i) {
-        UiControlDesc button = UI_CONTROL_DESC_INIT;
-        button.kind = UI_CONTROL_BUTTON;
-        button.label = "Teleport";
-        button.help_rml = "<p>Teleport to this player's last spot on solid ground. The room owner "
-                          "turns teleporting on in the Room tab.</p>";
-        button.on_pressed = onTeleport;
-        button.is_disabled = teleportDisabled;
-        button.user_data = reinterpret_cast<void*>(static_cast<uintptr_t>(i));
-        addControl(left, button, &s_live.teleport[i]);
-        if (s_live.teleport[i] != 0) {
-            svc_ui->elem_set_visible(mod_ctx, s_live.teleport[i], false);
+    for (size_t i = 0; i < kPlayerSlots; ++i) {
+        addPlayerSlot(left, i);
+    }
+    s_live.lastPlayersEmpty = " ";
+    s_live.playersEmpty = addRml(left, s_live.lastPlayersEmpty);
+    s_live.lastTeleportStatus = " ";
+    s_live.teleportStatus = addRml(left, s_live.lastTeleportStatus);
+    for (const UiElementHandle elem : {s_live.playersEmpty, s_live.teleportStatus}) {
+        if (elem != 0) {
+            svc_ui->elem_set_visible(mod_ctx, elem, false);
         }
     }
-    svc_ui->pane_add_text(mod_ctx, left, "", &s_live.teleportStatus);
-
-    svc_ui->pane_add_section(mod_ctx, left, "Room Owner and Team Leader");
-    svc_ui->pane_add_text(mod_ctx, left,
-        "The room owner can hand the room to anyone here, a team leader the team to a teammate. "
-        "When one of them leaves, the longest-connected player takes over.",
-        nullptr);
-    for (const PromoteRole role : {kRoomOwner, kTeamLeader}) {
-        for (size_t i = 0; i < kTeleportSlots; ++i) {
-            UiControlDesc button = UI_CONTROL_DESC_INIT;
-            button.kind = UI_CONTROL_BUTTON;
-            button.label = role == kRoomOwner ? "Make Room Owner" : "Make Team Leader";
-            button.on_pressed = onPromote;
-            button.user_data = promoteData(role, i);
-            addControl(left, button, &s_live.promote[role][i]);
-            if (s_live.promote[role][i] != 0) {
-                svc_ui->elem_set_visible(mod_ctx, s_live.promote[role][i], false);
-            }
-        }
-    }
+    updatePlayers();
 
     svc_ui->pane_add_section(mod_ctx, left, "Story");
     s_live.lastStoryStatus = story::statusRml();
@@ -902,44 +996,7 @@ ModResult buildPlayersTab(ModContext*, UiWindowHandle, UiElementHandle left, UiE
 }
 
 ModResult updatePlayersTab(ModContext*, void*, ModError*) {
-    setRml(s_live.players, s_live.lastPlayers, playersRml());
-    const std::vector<uint32_t> targets = teleportTargets();
-    for (size_t i = 0; i < kTeleportSlots; ++i) {
-        const uint32_t id = i < targets.size() ? targets[i] : 0;
-        if (s_live.teleport[i] == 0) {
-            continue;
-        }
-        if (id != s_live.teleportIds[i]) {
-            s_live.teleportIds[i] = id;
-            svc_ui->elem_set_visible(mod_ctx, s_live.teleport[i], id != 0);
-        }
-        if (id != 0) {
-            setLabel(s_live.teleport[i], s_live.lastTeleportLabels[i], teleportLabel(id));
-        }
-    }
-    std::string status = teleport::statusMessage();
-    if (targets.empty()) {
-        status = status.empty() ? "No other players." : status;
-    }
-    setText(s_live.teleportStatus, s_live.lastTeleportStatus, std::move(status));
-    for (const PromoteRole role : {kRoomOwner, kTeamLeader}) {
-        const std::vector<uint32_t> ids = promoteTargets(role);
-        for (size_t i = 0; i < kTeleportSlots; ++i) {
-            const uint32_t id = i < ids.size() ? ids[i] : 0;
-            if (s_live.promote[role][i] == 0) {
-                continue;
-            }
-            if (id != s_live.promoteIds[role][i]) {
-                s_live.promoteIds[role][i] = id;
-                svc_ui->elem_set_visible(mod_ctx, s_live.promote[role][i], id != 0);
-            }
-            if (id != 0) {
-                const char* what = role == kRoomOwner ? " Room Owner" : " Team Leader";
-                setLabel(s_live.promote[role][i], s_live.lastPromoteLabels[role][i],
-                    "Make " + clientName(id) + what);
-            }
-        }
-    }
+    updatePlayers();
     setRml(s_live.storyStatus, s_live.lastStoryStatus, story::statusRml());
     setLabel(s_live.catchUp, s_live.lastCatchUp, catchUpLabel());
     return MOD_OK;
@@ -1021,6 +1078,22 @@ bool windowOpen() {
 
 UiElementHandle colorControl() {
     return s_live.color;
+}
+
+std::vector<PlayersTabRow> playersTabRows() {
+    std::vector<PlayersTabRow> rows;
+    for (const Live::PlayerSlot& slot : s_live.players) {
+        if (slot.row.elem != 0 && slot.row.visible && slot.clientId != 0) {
+            const bool teleport = slot.teleport.elem != 0 && slot.teleport.visible;
+            rows.push_back({slot.clientId, teleport, teleport && slot.blocked,
+                teleport ? slot.lastTooltip : std::string{}, slot.actions.visible});
+        }
+    }
+    return rows;
+}
+
+bool playersTabShown() {
+    return s_live.players[0].row.elem != 0;
 }
 
 ModResult registerWindow() {

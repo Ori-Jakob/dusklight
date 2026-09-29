@@ -2,6 +2,8 @@
 
 #include "core/Maps.hpp"
 
+#include <cstring>
+
 namespace twili::maps {
 namespace {
 
@@ -384,5 +386,21 @@ const Room kRooms[] = {
     {"Title screen movie map", "S_MV000", 0, &kPoints[1308], 2},
 };
 const size_t kRoomCount = sizeof(kRooms) / sizeof(kRooms[0]);
+
+const char* areaName(const char* stage, int room) {
+    const char* stageName = nullptr;
+    for (size_t i = 0; i < kRoomCount; i++) {
+        if (std::strncmp(kRooms[i].stage, stage, 8) != 0) {
+            continue;
+        }
+        if (kRooms[i].room == room) {
+            return kRooms[i].name;
+        }
+        if (stageName == nullptr) {
+            stageName = kRooms[i].name;
+        }
+    }
+    return stageName;
+}
 
 }  // namespace twili::maps

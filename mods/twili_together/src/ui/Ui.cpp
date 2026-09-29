@@ -7,6 +7,7 @@
 #include "ui/ItemToasts.hpp"
 #include "ui/MapCursors.hpp"
 #include "ui/NameTags.hpp"
+#include "ui/PlayersWidget.hpp"
 #include "ui/TwiliWindow.hpp"
 
 #include <mods/svc/ui.h>
@@ -47,10 +48,12 @@ void tick() {
     }
     s_wasConnected = connected;
     item_toasts::tick();
+    players_widget::tick();
 }
 
 void shutdown() {
     shutdownWindow();
+    players_widget::shutdown();
     name_tags::uninstall();
     hit_markers::uninstall();
     map_cursor::reset();

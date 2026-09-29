@@ -40,7 +40,8 @@ IMPORT_SERVICE(HookService, svc_hook);
 IMPORT_SERVICE_VERSION(HostService, svc_host, 2);
 IMPORT_SERVICE_VERSION(ConfigService, svc_config, 0);
 IMPORT_SERVICE(ActorService, svc_actor);
-IMPORT_SERVICE(UiService, svc_ui);
+// Minor 4 (overlay panels, the players widget) is checked with SERVICE_HAS.
+IMPORT_SERVICE_VERSION(UiService, svc_ui, 3);
 IMPORT_OPTIONAL_SERVICE(InterpService, svc_interp);
 // Name tags only.
 IMPORT_OPTIONAL_SERVICE(GfxService, svc_gfx);
