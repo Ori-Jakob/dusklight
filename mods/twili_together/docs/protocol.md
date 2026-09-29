@@ -140,7 +140,7 @@ The relay stamps every relayed packet with the sender's `clientId`.
 | Packet | Notes |
 | --- | --- |
 | `PLAYER_UPDATE` | the player's pose, once per game tick while someone is there to see it |
-| `PLAYER_SFX` | `{soundId, kind, mapInfo}`: a Link voice or sound effect to play on the puppet |
+| `PLAYER_SFX` | `{soundId, kind, mapInfo, sq}`: a Link (kinds 0-6) or Midna (7 voice, 8 sound) sound to play on the puppet when it shows pose tick `sq` |
 
 A `PLAYER_UPDATE` carries `seq` (the sender's tick), `ep` (an epoch that changes on a scene
 change), `fl` (presence flags: wolf, in cutscene, shield up, ...) and short keys with integer
@@ -153,12 +153,12 @@ play them back a little behind the newest one, so network jitter does not show. 
 | `p`, `a`, `sa`, `ba`, `tw` | position, angles, body angle, twist |
 | `la`, `ua`, `lf`, `uf`, `lr`, `ur` | lower and upper body animations: clips, frames, blend ratios |
 | `eq`, `hi`, `ij`, `ib`, `pr` | clothes, sword, shield and item in hand, hand shapes, item clip, loaded ammo |
-| `md`, `mf`, `ma` | Midna on the wolf's back |
+| `md`, `mf`, `ma`, `me`, `mw` | Midna on the wolf's back, her eyes, and her place when she is off it |
 | `tf` | a running transformation |
 | `sx`, `sf` | status effects: frozen, burning, electrocuted, shield burning |
 | `wx` | wolf attacks: spin, Midna's dome, lock-on jumps |
-| `x0`..`x7`, `xe`, `hk`, `bc`, `ls`, `hx` | items in the world (arrows, bombs, boomerang, ...), one-shot events, clawshot, ball and chain, level sounds, bottle |
-| `ox`, `op`, `os`, `oa`, `of`, `ow`, `ok`, `or` | the player's Epona |
+| `x0`..`x7`, `xe`, `hk`, `bc`, `ls`, `hx`, `fr` | items in the world (arrows, bombs, boomerang, ...), one-shot events, clawshot, ball and chain, level sounds, bottle, fishing rod |
+| `ox`, `op`, `os`, `oa`, `of`, `ow`, `ok`, `or`, `oz` | the player's Epona, and Zelda behind its rider |
 
 Presence is best effort: when the send queue is full, deltas are dropped and the next keyframe
 repairs the stream.
