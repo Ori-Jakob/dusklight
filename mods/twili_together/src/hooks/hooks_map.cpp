@@ -15,7 +15,9 @@
 namespace twili::hooks {
 
 DEFINE_HOOK(&dMeterMap_c::draw, MeterMapDraw);
-DEFINE_HOOK(&dMenu_DmapBg_c::draw, DmapBgDraw);
+// dMenu_DmapBg_c has two bases: MSVC cannot constant-initialize a DEFINE_HOOK record for it.
+DEFINE_HOOK_SYMBOL("dMenu_DmapBg_c::draw", void(dMenu_DmapBg_c*), DmapBgDraw);
+static_assert(std::is_same_v<decltype(&dMenu_DmapBg_c::draw), void (dMenu_DmapBg_c::*)()>);
 DEFINE_HOOK(&dMenuMapCommon_c::drawIcon, MapCommonDrawIcon);
 DEFINE_HOOK(&dMenu_Dmap_c::getIconPos, DmapGetIconPos);
 

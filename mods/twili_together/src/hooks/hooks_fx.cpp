@@ -20,7 +20,11 @@ DEFINE_HOOK(&daAlink_c::setCutLargeJumpLandEffect, LinkSetCutLargeJumpLandEffect
 DEFINE_HOOK(&daAlink_c::setHookshotPos, LinkSetHookshotPos);
 DEFINE_HOOK(&daAlink_c::setIronBallPos, LinkSetIronBallPos);
 DEFINE_HOOK(&daAlink_c::loadModelDVD, LinkLoadModelDVD);
-DEFINE_HOOK(&Z2CreatureLink::startHitItemSE, LinkStartHitItemSE);
+// Z2CreatureLink has two bases: MSVC cannot constant-initialize a DEFINE_HOOK record for it.
+DEFINE_HOOK_SYMBOL("Z2CreatureLink::startHitItemSE",
+    Z2SoundHandlePool*(Z2CreatureLink*, u32, u32, Z2SoundObjBase*, f32), LinkStartHitItemSE);
+static_assert(std::is_same_v<decltype(&Z2CreatureLink::startHitItemSE),
+    Z2SoundHandlePool* (Z2CreatureLink::*)(u32, u32, Z2SoundObjBase*, f32)>);
 DEFINE_HOOK(&fopKyM_createWpillar, KankyoCreateWpillar);
 // setBombArrowExplode is inlined into the arrow's execute: its NBOMB create is tapped there.
 DEFINE_HOOK_SYMBOL("src/d/actor/d_a_arrow.cpp#daArrow_execute", int(daArrow_c*), ArrowExecute);
