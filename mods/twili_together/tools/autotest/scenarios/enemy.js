@@ -378,7 +378,7 @@ module.exports = [
             { op: "expectEnemyDamage", ...(isA ? { sent: 2, received: 2, applied: 2, floored: 0, dropped: 0 } : { sent: 2, received: 3, applied: 3, floored: 1, dropped: 0 }) },
         ]),
     pair("enemy-damage-scale",
-        "a hit converts between the sender's and our health percent, and a rescale is never sent as damage",
+        "a hit converts between the sender's and our health percent, a rescale is never sent as damage, and the sender's health heals a hit we missed",
         (isA, other) => [
             ...(isA ? [{ op: "setEnemyHealthPercent", value: 200 }] : []),
             { op: "expectEnemyHealthPercent", value: 200, timeoutSec: 30 },
@@ -400,8 +400,11 @@ module.exports = [
             ...(isA ? [{ op: "damageEnemy", tag: "boko", amount: 30 }] : []),
             health("boko", isA ? 75 : 45),
             ...barrier("hit2", other),
+            // The sender had 10 left at 100% (30 at our 300%): B missed a hit and drops to it.
+            ...(isA ? [{ op: "sendEnemyDamageForTest", tag: "boko", dmg: 5, pct: 300, hpAfter: 10 }] : [health("boko", 30)]),
+            ...barrier("healed", other),
             { op: "wait", frames: 30 },
-            { op: "expectEnemyDamage", ...(isA ? { sent: 2, received: 0 } : { sent: 0, received: 3, applied: 3, floored: 0, dropped: 0 }) },
+            { op: "expectEnemyDamage", ...(isA ? { sent: 2, received: 0 } : { sent: 0, received: 4, applied: 4, floored: 0, healed: 1, dropped: 0 }) },
         ]),
     {
         name: "enemy-damage-scope",

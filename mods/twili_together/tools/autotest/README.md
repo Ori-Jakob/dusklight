@@ -261,8 +261,8 @@ Life, PvP and enemies (`StepsPvp.cpp`, `StepsEnemy.cpp`):
 | `expectZoneActor` | `setId`, `room`, `set`, `timeoutSec` | the zone actor bit |
 | `expectEnemySync` | `sent`, `received`, `applied`, `echoes`, `expired`, `timeoutSec` | the enemy-death sync counters given |
 | `damageEnemy` | `tag`, `amount` | lowers health as an attributed hit of ours (unlike `setEnemyHealth`), so it is shared |
-| `sendEnemyDamageForTest` | `tag`, `dmg`, `pct` | sends an ENEMY_DAMAGE for the tagged enemy with any sender percent (not counted as sent) |
-| `expectEnemyDamage` | `sent`, `received`, `applied`, `floored`, `dropped`, `timeoutSec` | the shared-damage counters given (hits, not packets) |
+| `sendEnemyDamageForTest` | `tag`, `dmg`, `pct`, `hpAfter` (-1) | sends an ENEMY_DAMAGE for the tagged enemy with any sender percent (not counted as sent) |
+| `expectEnemyDamage` | `sent`, `received`, `applied`, `floored`, `healed`, `dropped`, `timeoutSec` | the shared-damage counters given (hits, not packets) |
 | `forceGroupFail` | `tags` | tagged Shadow Beasts into their downed wait, so the group is condemned |
 | `dumpEnemies` | | logs the current room's enemies, their scaling and extra index |
 

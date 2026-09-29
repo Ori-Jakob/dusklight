@@ -220,6 +220,7 @@ std::optional<bool> expectEnemyDamage(StepContext& ctx) {
         {"received", st.received},
         {"applied", st.applied},
         {"floored", st.floored},
+        {"healed", st.healed},
         {"dropped", st.dropped},
     };
     bool match = true;
@@ -233,8 +234,9 @@ std::optional<bool> expectEnemyDamage(StepContext& ctx) {
     }
     if (ctx.seconds > ctx.timeout(10.0)) {
         ctx.fail(fmt::format("enemy damage stats sent={} received={} applied={} floored={} "
-                             "dropped={}, step wants {}",
-            st.sent, st.received, st.applied, st.floored, st.dropped, ctx.step.dump()));
+                             "healed={} dropped={}, step wants {}",
+            st.sent, st.received, st.applied, st.floored, st.healed, st.dropped,
+            ctx.step.dump()));
     }
     return false;
 }
@@ -590,8 +592,9 @@ std::optional<bool> enemySteps(const std::string& op, StepContext& ctx) {
 
     if (op == "sendEnemyDamageForTest") {
         fopAc_ac_c* ac = runningActor(taggedId(ctx.step));
-        if (ac == nullptr || !enemy_damage::sendForTest(ac, ctx.step.value("dmg", 1),
-                                 ctx.step.value("pct", 100)))
+        if (ac == nullptr ||
+            !enemy_damage::sendForTest(ac, ctx.step.value("dmg", 1), ctx.step.value("pct", 100),
+                ctx.step.value("hpAfter", -1)))
         {
             ctx.fail("sendEnemyDamageForTest: '" + tagOf(ctx) +
                      "' is not a running shared enemy, or no teammate is here");

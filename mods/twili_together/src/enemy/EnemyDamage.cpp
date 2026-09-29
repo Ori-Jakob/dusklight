@@ -162,8 +162,19 @@ Apply tryApply(const Hit& h) {
             return Apply::Done;
         }
         const int dmg = std::max(1, (h.dmg * pct + h.pct / 2) / h.pct);
-        const bool floored = hp - dmg < r.floor;
-        const int next = floored ? r.floor : hp - dmg;
+        int next = hp - dmg;
+        // Never above the sender's own health (past its rounding): heals a hit we missed.
+        bool healed = false;
+        if (const int senderHp = (h.hpAfter * pct + 50) / 100;
+            h.hpAfter >= 0 && senderHp + pct / 100 < next)
+        {
+            next = senderHp;
+            healed = true;
+        }
+        const bool floored = next < r.floor;
+        if (floored) {
+            next = r.floor;
+        }
         ac->health = static_cast<s16>(next);
         // Keeps our own damage since the last poll measurable, and never sends this back.
         r.lastHealth = static_cast<int16_t>(r.lastHealth - (hp - next));
@@ -171,6 +182,12 @@ Apply tryApply(const Hit& h) {
         if (floored) {
             ++s_stats.floored;
         }
+        if (healed) {
+            ++s_stats.healed;
+        }
+        // A small spark where the teammate's hit landed on their copy.
+        const csXyz rot(0, 0, 0);
+        dComIfGp_setHitMark(7, nullptr, &ac->eyePos, &rot, nullptr, 0);
         TwiliLog.debug("[enemy] {} ({}) took {} from a teammate: {} -> {}{}",
             fopAcM_getProcNameString(ac), enemy_sync::keyText(r.key), dmg, hp, next,
             floored ? " (floor)" : "");
@@ -303,13 +320,14 @@ void noteLocalHitForTest(fopAc_ac_c* ac) {
     onLocalHit(ac);
 }
 
-bool sendForTest(fopAc_ac_c* ac, int dmg, int pct) {
+bool sendForTest(fopAc_ac_c* ac, int dmg, int pct, int hpAfter) {
     const auto it = s_recs.find(fopAcM_GetID(ac));
     if (it == s_recs.end()) {
         return false;
     }
     const Rec& r = it->second;
-    const Hit hit{r.key, static_cast<uint16_t>(dmg), static_cast<uint16_t>(pct), ac->health};
+    const Hit hit{r.key, static_cast<uint16_t>(dmg), static_cast<uint16_t>(pct),
+        static_cast<int16_t>(hpAfter)};
     return detail::sendHits(r.stage, r.layer, &hit, 1);
 }
 

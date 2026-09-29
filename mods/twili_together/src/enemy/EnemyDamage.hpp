@@ -22,7 +22,7 @@ struct Hit {
     uint16_t dmg;
     // The sender's applied health percent for this enemy.
     uint16_t pct;
-    // The sender's health after the hit in 100% units, for logs.
+    // The sender's health after the hit in 100% units; -1 if unknown.
     int16_t hpAfter;
 };
 
@@ -46,6 +46,8 @@ struct Stats {
     // Floored ones included.
     uint32_t applied = 0;
     uint32_t floored = 0;
+    // Lowered further to the sender's health: a hit we missed.
+    uint32_t healed = 0;
     // Never matched, or the copy was dying, at its floor or not shared.
     uint32_t dropped = 0;
 };
@@ -53,7 +55,7 @@ const Stats& stats();
 
 // Autotest.
 void noteLocalHitForTest(fopAc_ac_c* actor);
-bool sendForTest(fopAc_ac_c* actor, int dmg, int pct);
+bool sendForTest(fopAc_ac_c* actor, int dmg, int pct, int hpAfter);
 
 namespace detail {
 bool sendHits(const char* stage, int layer, const Hit* hits, size_t count);
