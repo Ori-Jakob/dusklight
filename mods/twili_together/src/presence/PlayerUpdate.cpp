@@ -331,9 +331,33 @@ struct PoseSender {
     bool tfLatched = false;
     bool tfToWolf = false;
     WirePose sent;
+    // Our pose at the player's last execute, sent or not.
+    WirePose latest;
+    uint8_t latestFlags = 0;
+    bool haveLatest = false;
+    // Unchanged at the next session tick: the player's execute did not run (game paused).
+    uint32_t idleCheckSeq = 0;
 };
 
 static PoseSender s_poseTx;
+
+// Peers who can use the stream (same layer, same protocol).
+static uint64_t peerSignature(const Session& session, bool& anyPeer) {
+    anyPeer = false;
+    uint64_t peers = 1469598103934665603ull;
+    for (const auto& [id, c] : session.clients()) {
+        if (!session.clientIsInCurrentLayer(c) || c.protocolVersion != Session::kProtocolVersion) {
+            continue;
+        }
+        anyPeer = true;
+        peers = (peers ^ ((static_cast<uint64_t>(id) << 8) | static_cast<uint8_t>(c.saveTblNo))) *
+                1099511628211ull;
+    }
+    return peers;
+}
+
+static void sendPose(Session& session, PoseSender& tx, const WirePose& cur, uint8_t flags,
+    uint64_t peers, const ItemFxEvent* itemEvents, int itemEventCount);
 
 uint32_t Session::localPoseSeq() {
     return s_poseTx.seq;
@@ -501,6 +525,7 @@ void Session::sendPlayerUpdate(float posX, float posY, float posZ,
             tx.epoch++;
         }
         tx.needKeyframe = true;
+        tx.haveLatest = false;
         tx.playerProcId = procId;
         tx.layer = layer;
         std::memset(tx.stage, 0, sizeof(tx.stage));
@@ -518,21 +543,8 @@ void Session::sendPlayerUpdate(float posX, float posY, float posZ,
         return;
     }
 
-    // Peers who can use the stream (same layer, same protocol).
     bool anyPeer = false;
-    uint64_t peers = 1469598103934665603ull;
-    for (const auto& [id, c] : mClients) {
-        if (!clientIsInCurrentLayer(c) || c.protocolVersion != kProtocolVersion) {
-            continue;
-        }
-        anyPeer = true;
-        peers = (peers ^ ((static_cast<uint64_t>(id) << 8) | static_cast<uint8_t>(c.saveTblNo))) *
-                1099511628211ull;
-    }
-    if (!anyPeer) {
-        tx.needKeyframe = true;
-        return;
-    }
+    const uint64_t peers = peerSignature(*this, anyPeer);
 
     uint16_t safeUpperANMs[3] = {upperANMs[0], upperANMs[1], upperANMs[2]};
     uint16_t safeLowerANMs[3] = {lowerANMs[0], lowerANMs[1], lowerANMs[2]};
@@ -623,6 +635,18 @@ void Session::sendPlayerUpdate(float posX, float posY, float posZ,
     if (inCutscene) flags |= kPresenceInCutscene;
     if (modelSwap) flags |= kPresenceModelSwap;
 
+    tx.latest = cur;
+    tx.latestFlags = flags;
+    tx.haveLatest = true;
+    if (!anyPeer) {
+        tx.needKeyframe = true;
+        return;
+    }
+    sendPose(*this, tx, cur, flags, peers, itemEvents, itemEventCount);
+}
+
+static void sendPose(Session& session, PoseSender& tx, const WirePose& cur, uint8_t flags,
+    uint64_t peers, const ItemFxEvent* itemEvents, int itemEventCount) {
     // A patched packet stands on its own, so its values never outlive it on the receiver.
     const bool patched = s_testPatchPackets > 0;
     const bool keyframe = tx.needKeyframe || peers != tx.peerSignature || patched ||
@@ -752,7 +776,7 @@ void Session::sendPlayerUpdate(float posX, float posY, float posZ,
     tx.sentFlags = flags;
     tx.lastSentSeq = tx.seq;
     // A dropped packet leaves the receivers' base behind: the next one must stand alone.
-    if (!send(packet, net::Delivery::Droppable)) {
+    if (!session.send(packet, net::Delivery::Droppable)) {
         tx.needKeyframe = true;
     }
 }
@@ -1099,6 +1123,39 @@ void Session::handlePlayerUpdate(const nlohmann::json& packet) {
 }
 
 namespace presence {
+
+void resendIdlePose() {
+    PoseSender& tx = s_poseTx;
+    if (tx.seq != tx.idleCheckSeq) {
+        tx.idleCheckSeq = tx.seq;
+        return;
+    }
+    Session& session = Session::instance();
+    if (!tx.haveLatest || !session.joined() || tx.selfClientId != session.selfClientId()) {
+        return;
+    }
+    const char* stage = dComIfGp_getStartStageName();
+    const daPy_py_c* link = dComIfGp_getLinkPlayer();
+    if (!isSaveLoaded() || stage == nullptr || link == nullptr ||
+        fopAcM_GetID(link) != tx.playerProcId ||
+        std::strncmp(stage, tx.stage, sizeof(tx.stage)) != 0 ||
+        std::strncmp(stage, session.reportedStageName(), sizeof(tx.stage)) != 0 ||
+        static_cast<int8_t>(dComIfG_play_c::getLayerNo(0)) != tx.layer ||
+        tx.layer != session.reportedLayerNo())
+    {
+        return;
+    }
+    bool anyPeer = false;
+    const uint64_t peers = peerSignature(session, anyPeer);
+    if (!anyPeer || (peers == tx.peerSignature && !tx.needKeyframe)) {
+        return;
+    }
+    // A repeated seq makes receivers restart their playout.
+    tx.seq++;
+    tx.idleCheckSeq = tx.seq;
+    tx.needKeyframe = true;
+    sendPose(session, tx, tx.latest, tx.latestFlags, peers, nullptr, 0);
+}
 
 void captureAndSend(daAlink_c* link) {
     const auto& pos = link->current.pos;

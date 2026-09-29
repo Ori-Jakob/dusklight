@@ -9,6 +9,7 @@
 #include "enemy/EnemySync.hpp"
 #include "game/GameIdentity.hpp"
 #include "game/TeamGame.hpp"
+#include "presence/Presence.hpp"
 #include "story/Story.hpp"
 #include "sync/WorldSync.hpp"
 #include "teleport/Teleport.hpp"
@@ -227,6 +228,7 @@ void Session::update() {
     team_game::tick();
     if (isConnected()) {
         tickStageTracking();
+        presence::resendIdlePose();
         tickSelfColor();
         tickHorseState();
         sync::tick();

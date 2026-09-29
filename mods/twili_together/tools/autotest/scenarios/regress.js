@@ -1,6 +1,6 @@
 // Regression scenarios for engine interactions found in play, one per bug.
 
-const { STAGES, COMMON_CVARS, connect, barrier, meetIn } = require("../lib");
+const { STAGES, COMMON_CVARS, connect, barrier, meetIn, warp, waitStage } = require("../lib");
 
 // Snowpeak point 1 is in a suspend region: a dummy spawned there used to stay frozen.
 const SNOWPEAK_TOP = { stage: "F_SP114", room: 1, point: 1 };
@@ -102,7 +102,41 @@ const woodShieldB = [
     { op: "quit" },
 ];
 
+// A sits in the field map (its player runs no execute) while B arrives in its stage.
+const pausedJoinA = [
+    ...connect,
+    waitStage(STAGES.faronField),
+    { op: "waitPeers", count: 1, timeoutSec: 90 },
+    { op: "wait", frames: 60 },
+    { op: "openPauseMap", surface: "fmap" },
+    ...barrier("a-paused", "B"),
+    ...barrier("b-saw-a", "B"),
+    { op: "walk", frames: 1, stickX: 0, stickY: 0, buttons: 0x200 },
+    { op: "quit" },
+];
+const pausedJoinB = [
+    ...connect,
+    waitStage(STAGES.linksHouse),
+    { op: "waitPeers", count: 1, timeoutSec: 90 },
+    ...barrier("a-paused", "A"),
+    warp(STAGES.faronField),
+    waitStage(STAGES.faronField),
+    { op: "waitDummies", count: 1, timeoutSec: 30 },
+    ...barrier("b-saw-a", "A"),
+    { op: "quit" },
+];
+
 module.exports = [
+    {
+        name: "paused-join",
+        description: "B enters A's stage while A has the field map open: A's dummy appears for B before A closes it",
+        timeoutSec: 300,
+        cvars: COMMON_CVARS,
+        instances: [
+            { name: "A", start: STAGES.faronField, steps: pausedJoinA },
+            { name: "B", start: STAGES.linksHouse, steps: pausedJoinB },
+        ],
+    },
     {
         name: "wood-shield-option",
         description: "with shareWoodenShield off a burnt wooden shield stays burnt through a reconnect merge; with it on, the merge brings a teammate's shield back",
