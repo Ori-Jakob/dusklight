@@ -6,6 +6,7 @@
 #include "core/Log.hpp"
 #include "core/SaveGate.hpp"
 #include "core/Session.hpp"
+#include "story/StoryNpc.hpp"
 #include "story/StoryState.hpp"
 #include "sync/WorldSync.hpp"
 #include "teleport/Teleport.hpp"
@@ -233,6 +234,9 @@ void Tracker::onEventAccepted(const dEvt_order_c& order) {
     in.reqKind = reqKindOf(order.mpRequestActor);
     if (in.reqKind == ReqKind::Actor) {
         in.reqKey = spawnKeyOf(order.mpRequestActor);
+        if (npc::isNpcT(in.requester)) {
+            in.npcIndex = static_cast<int16_t>(npc::orderedIndex(order.mpRequestActor));
+        }
     }
     if (in.requester == fpcNm_TAG_EVENT_e) {
         auto* tag = static_cast<daTag_Event_c*>(order.mpRequestActor);
@@ -284,7 +288,11 @@ void Tracker::onEventAccepted(const dEvt_order_c& order) {
         in.id, in.seq, in.eventId, in.listType, in.name, in.mapToolId, in.mapType,
         tableName(in.table), in.switchNo, in.next, in.exit, in.skipExit, in.requester,
         reqKindName(in.reqKind),
-        in.reqKey.valid() ? fmt::format(" [{}]", in.reqKey.text()) : std::string{}, in.orderType,
+        in.reqKey.valid() ?
+            fmt::format(" [{}{}]", in.reqKey.text(),
+                in.npcIndex >= 0 ? fmt::format(" npc entry {}", in.npcIndex) : std::string{}) :
+            std::string{},
+        in.orderType,
         in.flag, in.stage, in.room, in.layer, in.wolf ? "wolf" : "human",
         in.arrivalDemo ? " arrival" : "", in.continuation ? " continuation" : "",
         in.copyOf != 0 ? fmt::format(" copy of {}", in.copyOf) : std::string{});

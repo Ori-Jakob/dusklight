@@ -464,6 +464,32 @@ const scenarios = [
             },
         });
     })(),
+    ...(() => {
+        // Day 1 Ordon: Bo (NPC_BOU) and his event table entry 1, NO_RESPONSE, allowlisted for the test.
+        const bo = { profile: 0x246, index: 1, event: "NO_RESPONSE" };
+        const allow = { op: "allowNpcEvent", profile: bo.profile, event: bo.event };
+        // Point 22 stands a few steps from Bo (point 0 walks in from the ranch and can walk out).
+        const ordonNearBo = { ...STAGES.ordonVillage, point: 22 };
+        const npcPair = (name, description, before, after) => ({
+            name,
+            description,
+            timeoutSec: 480,
+            cvars: COMMON_CVARS,
+            instances: [
+                { name: "A", start: ordonNearBo, steps: [...connect, at("F_SP103"), { op: "waitPeers", count: 1, sameStage: true, timeoutSec: 90 },
+                    allow, ...barrier("ready", "B", 180), { op: "triggerStory", via: "npc", profile: bo.profile, index: bo.index }, settle(),
+                    { op: "expectStoryMove", role: "none" }, ...barrier("done", "B", 300), { op: "quit" }] },
+                { name: "B", start: ordonNearBo, steps: [...connect, at("F_SP103"), { op: "waitPeers", count: 1, sameStage: true, timeoutSec: 90 },
+                    allow, ...before, ...barrier("ready", "A", 180), ...after, settle(), ...barrier("done", "A", 300), { op: "quit" }] },
+            ],
+        });
+        return [
+            npcPair("story-npc-join", "Bo orders an allowlisted event on A: B, in the same room, joins through its own Bo and both watch it", [],
+                [{ op: "expectJoin", state: ["running", "ended"], timeoutSec: 60 }]),
+            npcPair("story-npc-join-state", "the same NPC event, but B's story flags differ (digest): B misses it", [{ op: "perturbStoryDigest", value: true }],
+                [{ op: "expectJoin", state: "missed", reason: "state", timeoutSec: 60 }]),
+        ];
+    })(),
 ];
 
 module.exports = [...observeScenarios, ...scenarios];

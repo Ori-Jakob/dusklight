@@ -10,12 +10,14 @@
 #include "core/LocalPlayer.hpp"
 #include "core/Log.hpp"
 #include "story/StoryLog.hpp"
+#include "story/StoryNpc.hpp"
 #include "story/StoryState.hpp"
 #include "sync/RemoteApplyGuard.hpp"
 #include "sync/WorldSync.hpp"
 
 #include "d/actor/d_a_alink.h"
 #include "d/actor/d_a_midna.h"
+#include "d/actor/d_a_npc.h"
 #include "d/actor/d_a_obj_bosswarp.h"
 #include "d/actor/d_a_obj_drop.h"
 #include "d/actor/d_a_tag_event.h"
@@ -453,6 +455,23 @@ std::optional<bool> triggerStory(StepContext& ctx) {
         fopAcM_orderPotentialEvent(midna, 0, 0xFFFF, 0);
         sForcedMove = step;
         TwiliLog.info("[autotest] triggerStory: Midna ordered a potential event");
+        return true;
+    }
+    // That NPC orders table entry `index` through its own evtOrder, as its action code would.
+    if (via == "npc") {
+        ProfileFind find{static_cast<int16_t>(step.value("profile", -1)), nullptr, 0.0f};
+        fopAcM_Search(&findNearestProfile, &find);
+        auto* npc = static_cast<daNpcT_c*>(find.nearest);
+        const int index = step.value("index", 0);
+        if (npc == nullptr || !story::npc::isNpcT(find.profile) ||
+            story::npc::eventName(npc, index).empty())
+        {
+            ctx.fail(fmt::format("triggerStory npc: no NPC {} with entry {}", find.profile, index));
+            return false;
+        }
+        story::npc::placeOrder(npc, index);
+        TwiliLog.info("[autotest] triggerStory: NPC {} orders entry {} '{}'", find.profile, index,
+            story::npc::eventName(npc, index));
         return true;
     }
     if (via == "actor") {
@@ -1116,6 +1135,17 @@ std::optional<bool> storySteps(const std::string& op, StepContext& ctx) {
     // from {stage, room?, point?} -> to {stage, room, point, layer?}, like a shuffled entrance.
     if (op == "testRemap") {
         sRemap = step.contains("from") ? json{{"from", step["from"]}, {"to", step["to"]}} : json();
+        return true;
+    }
+
+    if (op == "allowNpcEvent") {
+        story::npc::allowForTest(
+            static_cast<int16_t>(step.value("profile", -1)), step.value("event", std::string{}));
+        return true;
+    }
+
+    if (op == "perturbStoryDigest") {
+        story::npc::perturbDigestForTest(step.value("value", true));
         return true;
     }
 

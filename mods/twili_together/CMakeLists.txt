@@ -89,6 +89,7 @@ set(TWILI_SOURCES
     src/story/StoryLog.cpp
     src/story/StoryMove.cpp
     src/story/StoryMoves.cpp
+    src/story/StoryNpc.cpp
     src/story/StorySegments.cpp
     src/story/StoryTracker.cpp
     src/story/StoryUi.cpp

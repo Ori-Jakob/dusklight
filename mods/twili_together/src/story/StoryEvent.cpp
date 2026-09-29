@@ -5,6 +5,7 @@
 #include "core/LocalPlayer.hpp"
 #include "core/Log.hpp"
 #include "core/Session.hpp"
+#include "story/StoryNpc.hpp"
 #include "sync/RemoteApplyGuard.hpp"
 #include "sync/WorldSync.hpp"
 #include "teleport/Teleport.hpp"
@@ -12,6 +13,7 @@
 #include "ui/Toasts.hpp"
 
 #include "d/actor/d_a_alink.h"
+#include "d/actor/d_a_npc.h"
 #include "d/actor/d_a_tag_event.h"
 #include "d/d_com_inf_game.h"
 #include "d/d_event.h"
@@ -30,6 +32,8 @@ namespace {
 
 // A jump lands within this: the join waits for it instead of missing the cutscene.
 constexpr uint32_t kAirborneGraceTicks = 60;
+// An NPC orders only while no event runs or orders are open: it gets longer.
+constexpr uint32_t kNpcOrderTicks = 60;
 // An order not accepted by then (outranked, or the order list full) is placed again.
 constexpr uint32_t kOrderAcceptTicks = 10;
 constexpr int kMaxOrderRetries = 3;
@@ -67,7 +71,14 @@ void missToast(const std::string& name, const std::string& reason) {
     }
 }
 
+bool npcEvent(const Instance& in) {
+    return in.reqKind == ReqKind::Actor && npc::isNpcT(in.requester);
+}
+
 const char* requesterKind(const Instance& in) {
+    if (npcEvent(in)) {
+        return "npc";
+    }
     if (in.requester == -1) {
         return "none";
     }
@@ -90,6 +101,16 @@ const char* notJoinable(const Instance& in) {
     }
     if (in.orderType != dEvt_type_OTHER_e || in.eventId == -1) {
         return "not-a-demo";
+    }
+    // An NPC event: the joiner's own NPC orders the same table entry.
+    if (npcEvent(in)) {
+        if (npc::joinsOff()) {
+            return "npc-randomizer";
+        }
+        if (in.npcIndex <= 0) {
+            return "npc-unknown-entry";
+        }
+        return npc::joinable(in.requester, in.name) ? nullptr : "npc-not-allowlisted";
     }
     if (in.listType != dEvent_manager_c::BASE_STAGE && in.listType != dEvent_manager_c::BASE_DEMO &&
         (in.listType < dEvent_manager_c::BASE_ROOM0 || in.listType > dEvent_manager_c::BASE_ROOM5))
@@ -172,6 +193,15 @@ void* findLiveEventTag(void* proc, void* data) {
 
 void orderJoin() {
     JoinInfo& j = state().join;
+    if (j.npc) {
+        daNpcT_c* npc = static_cast<daNpcT_c*>(fopAcM_SearchByID(j.npcId));
+        npc::placeOrder(npc, j.npcIndex);
+        j.state = JoinState::Ordered;
+        j.startTick = nowTick();
+        TwiliLog.info("[story] join: our NPC {} orders entry {} '{}'", j.npcId, j.npcIndex,
+            j.eventName);
+        return;
+    }
     const int stay = dComIfGp_roomControl_getStayNo();
     const s16 evId = dComIfGp_getEventManager().getEventIdx(nullptr, j.mapToolId, -1);
     // Never 0xE00: change() takes any 0xE00 order whose requester is mChangeActor (NULL here).
@@ -238,7 +268,7 @@ void onInstanceAccepted(const Instance& in) {
     }
     const Session& session = Session::instance();
     if (!session.isConnected() || !sync::enabled() || !session.roomState().cutsceneSync ||
-        in.mapToolId == 0xFF)
+        (in.mapToolId == 0xFF && !npcEvent(in)))
     {
         return;
     }
@@ -271,6 +301,12 @@ void onInstanceAccepted(const Instance& in) {
     if (in.tagEventNo != 0xFF) {
         packet["tag"] = {{"no", in.tagEventNo}, {"swbit", in.tagSwbit}};
     }
+    if (npcEvent(in)) {
+        const SpawnKey& k = in.reqKey;
+        packet["npc"] = {{"prof", k.procName}, {"room", k.roomNo}, {"params", k.params},
+            {"set", k.setId}, {"home", {k.home[0], k.home[1], k.home[2]}}, {"k", in.npcIndex},
+            {"sd", fmt::format("{:016x}", npc::storyDigest())}};
+    }
     sendPacket(std::move(packet));
     st.announcedInstance = in.id;
     st.joinedBy.clear();
@@ -280,12 +316,57 @@ void onInstanceAccepted(const Instance& in) {
 
 uint32_t joinClaims(const dEvt_order_c& order) {
     const JoinInfo& j = state().join;
-    if (j.state != JoinState::Ordered || order.mpRequestActor != nullptr ||
-        order.mMapToolId != j.mapToolId)
-    {
+    if (j.state != JoinState::Ordered) {
+        return 0;
+    }
+    if (j.npc) {
+        // Our NPC ordered the entry through its own path: it is the requester.
+        return order.mpRequestActor != nullptr && fopAcM_GetID(order.mpRequestActor) == j.npcId ?
+                   j.originInstance :
+                   0;
+    }
+    if (order.mpRequestActor != nullptr || order.mMapToolId != j.mapToolId) {
         return 0;
     }
     return j.originInstance;
+}
+
+// J3n, J4n, J9: our copy of the NPC, the same table entry, the same story state.
+const char* checkNpcJoin(const nlohmann::json& packet, const std::string& eventName, JoinInfo& j) {
+    const auto it = packet.find("npc");
+    if (it == packet.end() || !it->is_object()) {
+        return "npc-data";
+    }
+    if (npc::joinsOff()) {
+        return "npc-randomizer";
+    }
+    SpawnKey key;
+    key.procName = static_cast<int16_t>(it->value("prof", -1));
+    key.roomNo = static_cast<int8_t>(it->value("room", -1));
+    key.params = it->value("params", 0u);
+    key.setId = static_cast<uint16_t>(it->value("set", 0));
+    const auto home = it->find("home");
+    for (int i = 0; home != it->end() && home->is_array() && home->size() == 3 && i < 3; i++) {
+        key.home[i] = (*home)[i].is_number() ? (*home)[i].get<float>() : 0.0f;
+    }
+    const int index = it->value("k", 0);
+    if (!npc::isNpcT(key.procName) || !npc::joinable(key.procName, eventName) || index <= 0) {
+        return "npc-not-allowlisted";
+    }
+    daNpcT_c* npc = npc::findNpc(key);
+    if (npc == nullptr) {
+        return "npc-missing";
+    }
+    if (npc::eventName(npc, index) != eventName) {
+        return "npc-event";
+    }
+    if (it->value("sd", std::string{}) != fmt::format("{:016x}", npc::storyDigest())) {
+        return "state";
+    }
+    j.npc = true;
+    j.npcIndex = static_cast<int16_t>(index);
+    j.npcId = fopAcM_GetID(npc);
+    return nullptr;
 }
 
 void handleStoryEvent(const nlohmann::json& packet) {
@@ -342,6 +423,29 @@ void handleStoryEvent(const nlohmann::json& packet) {
     {
         return miss("room");
     }
+    const std::string req = packet.value("req", std::string{});
+    if (req == "npc") {
+        JoinInfo npcJoin;
+        if (dComIfGp_event_runCheck()) {
+            return miss("cutscene");
+        }
+        if (const char* why = checkNpcJoin(packet, eventName, npcJoin)) {
+            return miss(why);
+        }
+        if (packet.value("wolf", false) != (daPy_py_c::checkNowWolf() != FALSE)) {
+            return miss("form");
+        }
+        if (const char* why = pullInBlocker()) {
+            return miss(why);
+        }
+        j = npcJoin;
+        j.originClientId = from;
+        j.originInstance = id;
+        j.originName = name;
+        j.eventName = eventName;
+        orderJoin();
+        return;
+    }
     // The same map event exists here, from the same table, with the same name.
     std::string table, localName;
     dStage_MapEvent_dt_c* dt = localMapEvent(m, stay, table, localName);
@@ -371,7 +475,6 @@ void handleStoryEvent(const nlohmann::json& packet) {
         return miss("seen");
     }
     // A tag's own trigger terms hold here too.
-    const std::string req = packet.value("req", std::string{});
     if (req == "tag") {
         const auto tag = packet.find("tag");
         if (tag != packet.end() && tag->is_object()) {
@@ -443,10 +546,14 @@ void tickJoin() {
         return;
     }
     case JoinState::Ordered:
+        if (j.npc && tick - j.startTick <= kNpcOrderTicks) {
+            return;
+        }
         if (tick - j.startTick > kOrderAcceptTicks) {
             if (j.retries >= kMaxOrderRetries || dComIfGp_event_runCheck()) {
                 j.state = JoinState::Missed;
                 j.reason = "refused";
+                npc::placeOrder(nullptr, 0);
                 TwiliLog.info("[story] join of '{}' was never accepted", j.eventName);
                 return;
             }

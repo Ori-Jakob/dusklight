@@ -4,8 +4,10 @@
 #include "core/Log.hpp"
 #include "core/Session.hpp"
 #include "story/Story.hpp"
+#include "story/StoryNpc.hpp"
 #include "sync/WorldSync.hpp"
 
+#include "d/actor/d_a_npc.h"
 #include "d/actor/d_a_obj_drop.h"
 #include "d/d_com_inf_game.h"
 #include "d/d_event.h"
@@ -16,6 +18,7 @@ namespace twili::hooks {
 
 DEFINE_HOOK(&dEvt_control_c::setParam, EventSetParam);
 DEFINE_HOOK(&daObjDrop_c::dropGet, ObjDropGet);
+DEFINE_HOOK(&daNpcT_c::evtOrder, NpcTEvtOrder);
 DEFINE_HOOK(static_cast<void (*)(const char*, s16, s8, s8, f32, u32, int, s8, s16, int, int)>(
                 &dComIfGp_setNextStage),
     SetNextStage);
@@ -27,6 +30,14 @@ HookAction onSetParamPre(ModContext*, void* args, void*, void*) {
     auto* order = mods::arg<dEvt_order_c*>(args, 1);
     if (Session::active() && order != nullptr) {
         story::onEventAccepted(*order);
+    }
+    return HOOK_CONTINUE;
+}
+
+// Which table entry an NPC orders (the originator's), or the entry a join places (the joiner's).
+HookAction onNpcTEvtOrderPre(ModContext*, void* args, void*, void*) {
+    if (Session::active()) {
+        story::npc::beforeEvtOrder(mods::arg<daNpcT_c*>(args, 0));
     }
     return HOOK_CONTINUE;
 }
@@ -88,6 +99,9 @@ ModResult installStory(std::string& error) {
     if (result == MOD_OK) {
         result = addPre<SetNextStage>(
             onSetNextStageLast, kAfterAll, "dComIfGp_setNextStage", error);
+    }
+    if (result == MOD_OK) {
+        result = addPre<NpcTEvtOrder>(onNpcTEvtOrderPre, kObserve, "daNpcT_c::evtOrder", error);
     }
     return result;
 }

@@ -80,6 +80,10 @@ struct JoinInfo {
     uint32_t startTick = 0;
     int retries = 0;
     uint32_t localInstance = 0;
+    // An NPC's event: our copy of that NPC orders its table entry npcIndex.
+    bool npc = false;
+    int16_t npcIndex = 0;
+    uint32_t npcId = 0;
     bool originEnded = false;
     Clock::time_point runningSince{}, originEndedAt{};
     std::string reason;

@@ -39,6 +39,7 @@ struct Instance {
     bool requesterIsPlayer = false;
     ReqKind reqKind = ReqKind::None;
     SpawnKey reqKey;  // actor requesters only
+    int16_t npcIndex = -1;  // a daNpcT_c requester's event table entry
     uint8_t tagEventNo = 0xFF;  // daTag_Event_c requester: its event no and switch
     uint8_t tagSwbit = 0xFF;
     bool arrivalDemo = false;
