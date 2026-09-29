@@ -143,6 +143,18 @@ with the matching form.
 - Only Windows has been tested.
 - There is no public relay; someone in your group hosts one.
 
+## Known issues
+
+Two rare crashes come from races in Dusklight itself, not in the mod:
+
+- **Crash when quitting.** JSystem's static loader lists (open DVD files, mounted archives) are
+  changed from the main thread and the audio/DVD loader thread without a lock. The damage stays
+  silent until the lists are destroyed at exit, which then crashes in `JSUPtrList::~JSUPtrList`.
+  It showed up in about 1 of 100 to 150 test runs.
+- **Crash at boot in Dawn.** aurora creates and releases Dawn bind groups on two threads without
+  a lock, which can crash inside `CreateBindGroup` in `webgpu_dawn.dll` at boot or during a stage
+  load. It is rare (3 in about 1000 game launches) and reproduces with all mods disabled.
+
 ## Building
 
 The mod builds with the rest of Dusklight (it is listed in the root `CMakeLists.txt`), using the
