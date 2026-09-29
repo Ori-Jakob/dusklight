@@ -101,7 +101,8 @@ const armorA = [
     ...connect,
     { op: "waitDummies", count: 1, timeoutSec: 60 },
     { op: "expectDummyLook", armorDrained: true, armorSettled: true, frames: 5, timeoutSec: 20 },
-    ...barrier("rejoined", "B"),
+    // Signals only reach connected clients: B waits for this one.
+    { op: "signal", name: "rejoined" },
     { op: "waitSignal", name: "powered", from: "B", timeoutSec: 60 },
     // power_up_a flashes for 70 ticks and ends at no offset.
     { op: "expectDummyLook", armorDrained: false, armorSettled: true, frames: 15, timeoutSec: 10 },
@@ -126,7 +127,7 @@ const armorB = [
     { op: "signal", name: "drained" },
     senderView,
     ...barrier("saw-drained", "A"),
-    ...barrier("rejoined", "A"),
+    { op: "waitSignal", name: "rejoined", from: "A", timeoutSec: 120 },
     { op: "setRupees", value: 300 },
     { op: "wait", frames: 2 },
     { op: "expectLocalStatus", armorDrained: false, timeoutSec: 2 },
