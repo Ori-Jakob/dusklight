@@ -31,8 +31,7 @@ const StoryMoveDef kStoryMoves[] = {
         nullptr, -1, "F_SP121", 2, nullptr, 10, Form::Any, false, false},
     {"lanayru-gate", "{name} passed the Lanayru twilight wall with Midna", "Lanayru in twilight",
         nullptr, -1, "F_SP121", 9, nullptr, 10, Form::Any, false, false},
-    // The last tear: kytag04's warp to the spring (point 30, layer 8), whose arrival clears the
-    // twilight; its scenes end on another point of the natural layer, where followers load.
+    // kytag04's warp to the spring (point 30, layer 8); followers load where its scenes end.
     {"eldin-light", "{name} restored the Eldin Spring", "Kakariko Village", nullptr, -1, "F_SP109",
         -1, nullptr, -1, Form::Human, false, false, -1, fpcNm_KYTAG04_e},
     {"lanayru-light", "{name} restored the Lanayru Spring", "Lake Hylia", nullptr, -1, "F_SP115",
@@ -45,14 +44,14 @@ const StoryMoveDef kStoryMoves[] = {
     // Zelda heals Midna in the castle tower (F_0250).
     {"mdh-zelda", "{name}'s Midna was healed by Zelda", "Faron Woods", "R_SP107", -1, nullptr, -1,
         nullptr, -1, Form::Wolf, false, false, -1, -1, 0x1E08},
-    // Arriving at the Sacred Grove point 99 clears twilight level 3.
+    // The pedestal (F_0264) sends Link to point 99 (twilight level 3 clears); the scene ends on 150.
     {"master-sword", "{name} drew the Master Sword", "the Sacred Grove", nullptr, -1, "F_SP117",
-        1, nullptr, 99, Form::Human, false, false},
+        1, nullptr, -1, Form::Human, false, false, -1, -1, 0x2020},
     {"palace-entry", "{name} entered the Palace of Twilight", "the Palace of Twilight", "F_SP125",
         -1, "D_MN08", -1, nullptr, -1, Form::Any, false, false},
-    // b_zant loads the throne room on cutscene layer 9.
+    // b_zant loads the throne room point 25 on cutscene layer 9; its scene ends on point 23.
     {"zant-defeated", "{name} defeated Zant", "the Palace of Twilight", nullptr, -1, "D_MN08A", 10,
-        nullptr, -1, Form::Any, false, false, 25},
+        nullptr, -1, Form::Any, false, false, -1, fpcNm_B_ZANT_e},
     {"castle-barrier", "{name} shattered the barrier around Hyrule Castle", "Hyrule Castle",
         "F_SP116", -1, nullptr, -1, nullptr, -1, Form::Any, false, false, -1, -1, 0x4208},
     {"final-battle", "{name} went on to face Ganondorf", "Hyrule Castle", nullptr, -1, "D_MN09A",

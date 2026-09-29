@@ -66,7 +66,7 @@ const pair = ({ name, description, a, b, timeoutSec = 600 }) => ({
     ],
 });
 
-const followTo = (stage, titleHas) => [
+const followTo = (stage, titleHas = "") => [
     { op: "expectPrompt", kind: "move", titleHas, timeoutSec: 360 },
     { op: "answerPrompt", answer: "follow" },
     { op: "expectStoryLoad", state: "arrived", timeoutSec: 150 },
@@ -89,15 +89,41 @@ const scenarios = [
             ],
         },
         b: {
-            start: { ...STORY.eldinTwilight, stage: "F_SP110", room: 0, point: 0 },
+            // Faron: no kytag04 shares the Eldin save table, so only the prompt brings B along.
+            start: { ...STORY.eldinTwilight, stage: "F_SP108", room: 0, point: 0 },
             steps: [
-                { op: "expectLocalForm", form: "wolf" },
+                { op: "expectSegment", id: "eldin-twilight", state: "behind" },
                 ...followTo("F_SP109", "Eldin Spring"),
                 settle(),
                 { op: "expectLocalForm", form: "human" },
                 { op: "expectDarkClear", level: 1 },
                 { op: "expectLayer", natural: true },
                 { op: "expectStoryMove", role: "none" },
+            ],
+        },
+    }),
+    pair({
+        name: "story-eldin-spring-sync",
+        description: "A completes the Eldin tears; B, a wolf on Death Mountain, gets kytag04's switch by world sync and the game warps B to the spring too: B ends human in Kakariko without a prompt",
+        a: {
+            start: STORY.eldinTwilight,
+            steps: [
+                { op: "triggerStory", via: "tearsFull", area: 1 },
+                { op: "wait", sec: 5 },
+                settle(300),
+                { op: "expectStoryMove", role: "sent", curated: "eldin-light" },
+            ],
+        },
+        b: {
+            start: { ...STORY.eldinTwilight, stage: "F_SP110", room: 0, point: 0 },
+            steps: [
+                { op: "expectLocalForm", form: "wolf" },
+                { op: "waitStage", stage: "F_SP109", timeoutSec: 300 },
+                settle(300),
+                { op: "expectLocalForm", form: "human" },
+                { op: "expectDarkClear", level: 1 },
+                { op: "expectStoryMove", role: "sent", curated: "eldin-light" },
+                { op: "expectNoPrompt", sec: 10 },
             ],
         },
     }),
@@ -152,6 +178,46 @@ const scenarios = [
                 { op: "expectPrompt", kind: "move", titleHas: "Eldin twilight wall", timeoutSec: 240 },
                 { op: "expectTransient", value: false },
                 { op: "answerPrompt", answer: "decline" },
+            ],
+        },
+    }),
+    pair({
+        name: "story-master-sword",
+        description: "A draws the Master Sword (a potential event into the Sacred Grove point 99): B, a wolf in Faron, follows and ends human; after M_077 A's later move as a wolf leaves B human",
+        timeoutSec: 780,
+        a: {
+            start: STORY.sacredGrove,
+            steps: [
+                { op: "triggerStory", via: "forcedMove", stage: "F_SP117", room: 1, point: 99, layer: -1, bit: B.masterSword },
+                settle(400),
+                { op: "expectStoryMove", role: "sent", curated: "master-sword", qualHas: QUAL.levels | QUAL.form, toStage: "F_SP117" },
+                { op: "expectDarkClear", level: 3 },
+                { op: "expectLocalForm", form: "human" },
+                // The Shadow Crystal: transforming is each player's own choice from here on.
+                { op: "setEventBit", no: B.shadowCrystal },
+                { op: "waitSignal", name: "b-human", from: "B", timeoutSec: 360 },
+                // Past B's own-arrival grace, so the next move is a pop-up again.
+                { op: "wait", sec: 12 },
+                { op: "transform", form: "wolf", timeoutSec: 60 },
+                // Faron Spring point 3 has a phase_1 side effect: a strong move no row names.
+                { op: "triggerStory", via: "forcedMove", stage: "F_SP108", room: 1, point: 3, layer: -1 },
+                settle(),
+                { op: "expectStoryMove", role: "sent", qualHas: QUAL.side, toStage: "F_SP108", toRoom: 1 },
+                { op: "expectLocalForm", form: "wolf" },
+            ],
+        },
+        b: {
+            start: { stage: "F_SP108", room: 0, point: 0, eventBits: STORY.sacredGrove.eventBits, levels: STORY.sacredGrove.levels },
+            steps: [
+                { op: "expectLocalForm", form: "wolf" },
+                ...followTo("F_SP117", "drew the Master Sword"),
+                settle(),
+                { op: "expectLocalForm", form: "human" },
+                { op: "expectEventBit", no: B.shadowCrystal, timeoutSec: 60 },
+                { op: "signal", name: "b-human" },
+                ...followTo("F_SP108"),
+                settle(),
+                { op: "expectLocalForm", form: "human" },
             ],
         },
     }),

@@ -50,7 +50,8 @@ const SWORD_DONE = [...MDH_DONE, B.masterSword, B.shadowCrystal];
 const bossRoom = (stage, eventBits, levels) => ({ stage, room: 50, point: 0, eventBits, levels, stageBoss: [stage] });
 const STORY = {
     eldinGate: { stage: "F_SP121", room: 2, point: 0, eventBits: FARON_DONE, levels: { transform: [0], darkClear: [0] } },
-    eldinTwilight: { stage: "F_SP109", room: 0, point: 0, eventBits: FARON_DONE, levels: { transform: [0, 1], darkClear: [0] }, vessels: [1] },
+    // Point 33 stands still (point 0 walks in from the gorge and can void out in twilight).
+    eldinTwilight: { stage: "F_SP109", room: 0, point: 33, eventBits: FARON_DONE, levels: { transform: [0, 1], darkClear: [0] }, vessels: [1] },
     goronMinesBoss: bossRoom("D_MN04A", FARON_DONE.concat([B.eldinSpirit]), { transform: [0, 1], darkClear: [0, 1] }),
     lanayruGate: { stage: "F_SP121", room: 9, point: 0, eventBits: ELDIN_DONE, levels: { transform: [0, 1], darkClear: [0, 1] } },
     lanayruTwilight: { stage: "F_SP115", room: 0, point: 0, eventBits: ELDIN_DONE.concat([B.meteorWarped]), levels: { transform: [0, 1, 2], darkClear: [0, 1] }, vessels: [2] },
@@ -63,7 +64,7 @@ const STORY = {
     totBoss: bossRoom("D_MN06A", SWORD_DONE.concat([B.arbiterClear, B.snowpeakClear]), { transform: [0, 1, 2, 3], darkClear: [0, 1, 2, 3] }),
     cityBoss: bossRoom("D_MN07A", SWORD_DONE.concat([B.arbiterClear, B.snowpeakClear, B.timeClear]), { transform: [0, 1, 2, 3], darkClear: [0, 1, 2, 3] }),
     palaceZant: { stage: "D_MN08A", room: 10, point: 0, eventBits: SWORD_DONE.concat([B.arbiterClear, B.snowpeakClear, B.timeClear, B.cityClear, B.mirrorRestored]), levels: { transform: [0, 1, 2, 3], darkClear: [0, 1, 2, 3] } },
-    kakariko: { stage: "F_SP109", room: 0, point: 0, eventBits: ELDIN_DONE, levels: { transform: [0, 1], darkClear: [0, 1] } },
+    kakariko: { stage: "F_SP109", room: 0, point: 33, eventBits: ELDIN_DONE, levels: { transform: [0, 1], darkClear: [0, 1] } },
 };
 
 // Extra --cvar overrides for every instance.

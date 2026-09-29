@@ -362,8 +362,7 @@ bool Tracker::captureDeparture(PendingMove& out) {
         notStory = fmt::format("not-story: profile {}", m.event.requester);
         why = notStory.c_str();
     } else if (m.curated < 0) {
-        // Potential events (kytag04, bosses, King Bulblin) have no event id, and common events
-        // (the boss warp's BOSS_WARPIN) a shared one, but both have an actor requester.
+        // Potential events (kytag04, bosses) and common ones (BOSS_WARPIN) have actor requesters.
         const bool actor = m.event.reqKind == ReqKind::Actor;
         if (m.event.mode != dEvt_mode_DEMO_e || (eventFlag & 0x44) != 0) {
             why = "not-a-cutscene";  // talk, door or chest
