@@ -103,6 +103,7 @@ struct State {
     std::string lastMoveCurated;
     uint32_t lastMoveQual = 0;
     bool lastMoveFromCache = false;
+    MoveRecord lastMove;
 };
 
 State& state();

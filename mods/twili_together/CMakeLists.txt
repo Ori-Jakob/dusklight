@@ -82,6 +82,7 @@ set(TWILI_SOURCES
     src/pvp/PlantedHit.cpp
     src/pvp/Pvp.cpp
     src/story/StoryEvent.cpp
+    src/story/StoryLog.cpp
     src/story/StoryMove.cpp
     src/story/StoryMoves.cpp
     src/story/StorySegments.cpp

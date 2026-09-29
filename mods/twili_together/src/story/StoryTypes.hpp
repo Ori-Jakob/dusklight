@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace twili::story {
 
@@ -27,8 +28,24 @@ struct Entrance {
     static Entrance fromJson(const nlohmann::json& j);
 };
 
+// One arrival of a move: where the load landed and the arrival demo it started.
+struct Hop {
+    Entrance at;  // at.layerArg: what the request passed
+    uint8_t arrivalMap = 0xFF;
+    uint8_t arrivalSwitch = 0xFF;
+    std::string arrivalName;
+
+    nlohmann::json toJson() const;
+    static Hop fromJson(const nlohmann::json& j);
+};
+constexpr size_t kMaxHopRecords = 4;
+constexpr size_t kMaxMoveBits = 32;
+
 // searchMapEventData looks in the room first.
 enum class EventTable : uint8_t { None, Room, Stage };
+
+enum class ReqKind : uint8_t { None, Player, Tag, Actor };
+const char* reqKindName(ReqKind kind);
 
 // The event that ran when a stage change was requested.
 struct EventRef {
@@ -39,7 +56,8 @@ struct EventRef {
     uint8_t mapType = 0xFF;  // 0xFF without map data
     uint8_t switchNo = 0xFF;
     int16_t requester = -1;  // profile name, -1 for none
-    uint8_t mode = 0;        // dEvt_mode_*
+    ReqKind reqKind = ReqKind::None;
+    uint8_t mode = 0;  // dEvt_mode_*
     bool arrivalDemo = false;
 
     nlohmann::json toJson() const;
@@ -57,8 +75,10 @@ enum Qual : uint32_t {
     kQualLevels = 1 << 3,     // transform or twilight-clear level changed
     kQualOneShot = 1 << 4,    // the map event has a switch
     kQualStoryBits = 1 << 5,  // this client set a synced event bit during the event
+    kQualBoss = 1 << 6,       // left a boss room whose boss is defeated
 };
-constexpr uint32_t kQualStrong = kQualCurated | kQualSidePoint | kQualForm | kQualLevels;
+constexpr uint32_t kQualStrong =
+    kQualCurated | kQualSidePoint | kQualForm | kQualLevels | kQualBoss;
 
 // One story move, as recorded by its originator or received in STORY_MOVE.
 struct MoveRecord {
@@ -74,6 +94,13 @@ struct MoveRecord {
     int curated = -1;  // index into kStoryMoves
     uint32_t qual = 0;
     int hops = 1;
+    std::vector<Hop> hopList;
+    // Synced event bits we set from the stage visit's first story event to settle.
+    std::vector<uint16_t> bits;
+    // "<req kind>|<event or req:profile>|<from stage>/<room>|<to stage>/<room>"
+    std::string key;
+    // The request's explicit layer differs from what the originator's flags pick there.
+    bool transientHint = false;
     // Local clock; minus the server's ageMs if cached.
     Clock::time_point at{};
 
@@ -105,6 +132,8 @@ extern const StoryMoveDef kStoryMoves[];
 extern const int kStoryMoveCount;
 
 int matchCuratedMove(const MoveRecord& m);
+// MoveRecord::key of a move.
+std::string moveKey(const MoveRecord& m);
 const StoryMoveDef* curatedMove(int index);
 // The entrance loads with a phase_1 side effect (twilight clear, transform level, horse flute).
 bool isSideEffectPoint(const char* stage, int room, int point);

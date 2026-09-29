@@ -2,6 +2,7 @@
 
 // Recognises story events by their effect: a stage change requested while an event runs.
 
+#include "core/SpawnKey.hpp"
 #include "story/StoryTypes.hpp"
 
 #include <cstdint>
@@ -36,6 +37,8 @@ struct Instance {
     uint16_t flag = 0;
     int16_t requester = -1;
     bool requesterIsPlayer = false;
+    ReqKind reqKind = ReqKind::None;
+    SpawnKey reqKey;  // actor requesters only
     uint8_t tagEventNo = 0xFF;  // daTag_Event_c requester: its event no and switch
     uint8_t tagSwbit = 0xFF;
     bool arrivalDemo = false;
@@ -58,7 +61,7 @@ class Tracker {
 public:
     void onEventAccepted(const dEvt_order_c& order);
     void onStageSaveTableLoaded();
-    void noteLocalEventBit() { mLocalEventBitsSet++; }
+    void noteLocalEventBit(uint16_t no);
     uint32_t localEventBitsSet() const { return mLocalEventBitsSet; }
 
     void tick();
@@ -84,6 +87,8 @@ private:
     struct PendingMove {
         MoveRecord move;
         uint32_t bitsAtAccept = 0;
+        // The bit counter when the departure stage loaded.
+        uint32_t bitsAtVisit = 0;
         uint32_t copyOf = 0;
         bool sawUnload = false;
         bool leftOld = false;
@@ -91,6 +96,12 @@ private:
         uint32_t lastTick = 0;
         uint32_t quiet = 0;
         Clock::time_point departedAt{}, arrivedAt{};
+    };
+
+    struct BitNote {
+        uint32_t index = 0;  // mLocalEventBitsSet after it
+        uint16_t no = 0;
+        bool story = false;  // set while an event ran or a move was under way
     };
 
     bool captureDeparture(PendingMove& out);
@@ -101,6 +112,8 @@ private:
     uint32_t mNextInstanceId = 1;
     uint32_t mNextSeq = 1;
     uint32_t mLocalEventBitsSet = 0;
+    uint32_t mBitsAtStageLoad = 0;
+    std::deque<BitNote> mBitLog;
     bool mSawEventSinceLoad = false;
     bool mHadSave = false;
     bool mPrevPending = false;

@@ -14,8 +14,8 @@ namespace twili::story {
 void onEventAccepted(const dEvt_order_c& order);
 // dSv_info_c::getSave: a stage is loading.
 void onStageSaveTableLoaded();
-// World sync wrote one of our synced event bits.
-void noteLocalEventBit();
+// We set one of our synced event bits.
+void noteLocalEventBit(uint16_t no);
 
 bool handlePacket(const std::string& type, const nlohmann::json& packet);
 // Every Session::update, after teleport::tick, connected or not.

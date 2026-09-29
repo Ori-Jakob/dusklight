@@ -290,6 +290,17 @@ function logFindings(scenario, instName, lines) {
     return problems;
 }
 
+// start.fixture names a save captured by saveFixture (fixtures/<name>.json): the script carries it.
+function withFixture(start) {
+    if (!start || !start.fixture) return start;
+    const file = path.join(__dirname, "fixtures", `${start.fixture}.json`);
+    if (!fs.existsSync(file)) {
+        console.log(`    fixture ${start.fixture} not found, using the synthetic start`);
+        return start;
+    }
+    return { ...start, fixtureData: JSON.parse(fs.readFileSync(file, "utf8")).save };
+}
+
 async function runScenario(scenario, opts, outRoot) {
     const outDir = path.join(outRoot, scenario.name);
     fs.mkdirSync(outDir, { recursive: true });
@@ -326,7 +337,7 @@ async function runScenario(scenario, opts, outRoot) {
             room,
             timeoutSec,
             resultPath: path.join(outDir, `${inst.name}.result.json`),
-            start: inst.start,
+            start: withFixture(inst.start),
             steps: inst.steps,
         };
         const scriptPath = path.join(outDir, `${inst.name}.script.json`);

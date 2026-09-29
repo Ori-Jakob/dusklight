@@ -22,6 +22,7 @@
 
 #include <fmt/format.h>
 
+#include <algorithm>
 #include <cstring>
 #include <random>
 #include <vector>
@@ -39,6 +40,7 @@ constexpr uint32_t kSettleQuietTicks = 45;
 constexpr auto kSettleMax = std::chrono::seconds(180);
 constexpr auto kArrivalTimeout = std::chrono::seconds(60);
 constexpr int kMaxHops = 4;
+constexpr size_t kBitLogSize = 64;
 
 std::string mapEventName(const dStage_MapEvent_dt_c* dt) {
     if (dt == nullptr) {
@@ -115,6 +117,22 @@ int saveTblNo() {
     return Session::instance().currentSaveTblNo();
 }
 
+bool isEventTag(int16_t profile) {
+    return profile == fpcNm_TAG_EVENT_e || profile == fpcNm_TAG_EVT_e ||
+           profile == fpcNm_TAG_EVTAREA_e;
+}
+
+ReqKind reqKindOf(const fopAc_ac_c* actor) {
+    if (actor == nullptr) {
+        return ReqKind::None;
+    }
+    if (actor == dComIfGp_getPlayer(0)) {
+        return ReqKind::Player;
+    }
+    return isEventTag(fopAcM_GetName(const_cast<fopAc_ac_c*>(actor))) ? ReqKind::Tag :
+                                                                       ReqKind::Actor;
+}
+
 }  // namespace
 
 uint32_t nowTick() {
@@ -147,6 +165,19 @@ void Tracker::clear() {
 void Tracker::onStageSaveTableLoaded() {
     mSawEventSinceLoad = false;
     mInstances.clear();
+    mBitsAtStageLoad = mLocalEventBitsSet;
+}
+
+void Tracker::noteLocalEventBit(uint16_t no) {
+    mLocalEventBitsSet++;
+    BitNote note;
+    note.index = mLocalEventBitsSet;
+    note.no = no;
+    note.story = dComIfGp_event_runCheck() != FALSE || mMove.has_value();
+    mBitLog.push_back(note);
+    while (mBitLog.size() > kBitLogSize) {
+        mBitLog.pop_front();
+    }
 }
 
 const Instance* Tracker::openInstance() const {
@@ -188,6 +219,10 @@ void Tracker::onEventAccepted(const dEvt_order_c& order) {
     in.requester = order.mpRequestActor != nullptr ? fopAcM_GetName(order.mpRequestActor) : -1;
     in.requesterIsPlayer =
         order.mpRequestActor != nullptr && order.mpRequestActor == dComIfGp_getPlayer(0);
+    in.reqKind = reqKindOf(order.mpRequestActor);
+    if (in.reqKind == ReqKind::Actor) {
+        in.reqKey = spawnKeyOf(order.mpRequestActor);
+    }
     if (in.requester == fpcNm_TAG_EVENT_e) {
         auto* tag = static_cast<daTag_Event_c*>(order.mpRequestActor);
         in.tagEventNo = tag->getEventNo();
@@ -234,12 +269,13 @@ void Tracker::onEventAccepted(const dEvt_order_c& order) {
     }
 
     TwiliLog.info("[story] accept #{} seq {} ev {} (list {}) '{}' map {} type {} tbl {} sw {} "
-                  "next {} exit {}/{} req {}{} type {} flag 0x{:X} {} room {} layer {} {}{}{}{}",
+                  "next {} exit {}/{} req {} ({}){} type {} flag 0x{:X} {} room {} layer {} {}{}{}{}",
         in.id, in.seq, in.eventId, in.listType, in.name, in.mapToolId, in.mapType,
         tableName(in.table), in.switchNo, in.next, in.exit, in.skipExit, in.requester,
-        in.requesterIsPlayer ? " (player)" : "", in.orderType, in.flag, in.stage, in.room, in.layer,
-        in.wolf ? "wolf" : "human", in.arrivalDemo ? " arrival" : "",
-        in.continuation ? " continuation" : "",
+        reqKindName(in.reqKind),
+        in.reqKey.valid() ? fmt::format(" [{}]", in.reqKey.text()) : std::string{}, in.orderType,
+        in.flag, in.stage, in.room, in.layer, in.wolf ? "wolf" : "human",
+        in.arrivalDemo ? " arrival" : "", in.continuation ? " continuation" : "",
         in.copyOf != 0 ? fmt::format(" copy of {}", in.copyOf) : std::string{});
 
     mInstances.push_back(in);
@@ -283,10 +319,12 @@ bool Tracker::captureDeparture(PendingMove& out) {
         m.event.mapType = last->mapType;
         m.event.switchNo = last->switchNo;
         m.event.requester = last->requester;
+        m.event.reqKind = last->reqKind;
         m.event.arrivalDemo = last->arrivalDemo;
         out.bitsAtAccept = last->bitsAtAccept;
         out.copyOf = last->copyOf;
     }
+    out.bitsAtVisit = mBitsAtStageLoad;
     if (running && (last == nullptr || last->eventId != evt->mEventId)) {
         // Programmatic or not seen by the hook: take what the live event says.
         m.event.name = eventDataName(evt->mEventId);
@@ -298,6 +336,7 @@ bool Tracker::captureDeparture(PendingMove& out) {
         }
         fopAc_ac_c* req = evt->getPt1();
         m.event.requester = req != nullptr ? fopAcM_GetName(req) : -1;
+        m.event.reqKind = reqKindOf(req);
         out.bitsAtAccept = mLocalEventBitsSet;
     }
     m.curated = matchCuratedMove(m);
@@ -320,10 +359,10 @@ bool Tracker::captureDeparture(PendingMove& out) {
         }
     }
     TwiliLog.info("[story] depart {} room {} layer {} -> {} ev {} (list {}) '{}' map {} sw {} "
-                  "req {}{}{} {}",
+                  "req {} ({}) mode {}{}{} {}",
         m.from.stage, m.from.room, m.from.layer, entranceText(m.to), m.event.eventId,
         m.event.listType, m.event.name, m.event.mapToolId, m.event.switchNo, m.event.requester,
-        m.event.arrivalDemo ? " arrival" : "",
+        reqKindName(m.event.reqKind), m.event.mode, m.event.arrivalDemo ? " arrival" : "",
         m.curated >= 0 ? fmt::format(" curated {}", kStoryMoves[m.curated].id) : std::string{},
         why != nullptr ? fmt::format("ignored ({})", why) : std::string("tracked"));
     if (why != nullptr) {
@@ -359,23 +398,57 @@ void Tracker::recordArrival() {
     m.dclAfter = darkClearLevels();
     m.arrivalEvent = link != nullptr ? static_cast<uint8_t>(link->mStartEventID) : 0xFF;
     EventTable t;
-    m.arrivalName = mapEventName(findMapEvent(m.arrivalEvent, m.to.room, t));
+    const dStage_MapEvent_dt_c* arrivalDt = findMapEvent(m.arrivalEvent, m.to.room, t);
+    m.arrivalName = mapEventName(arrivalDt);
     m.curated = matchCuratedMove(m);
+    if (m.hopList.size() < kMaxHopRecords) {
+        Hop hop;
+        hop.at = m.to;
+        hop.arrivalMap = m.arrivalEvent;
+        hop.arrivalSwitch = arrivalDt != nullptr ? arrivalDt->switch_no : 0xFF;
+        hop.arrivalName = m.arrivalName;
+        m.hopList.push_back(std::move(hop));
+    }
     p.arrived = true;
     p.arrivedAt = Clock::now();
     p.lastTick = nowTick();
     p.quiet = 0;
     TwiliLog.info("[story] arrive {} ({}) tlv 0x{:02X}->0x{:02X} dcl 0x{:02X}->0x{:02X} arrival "
-                  "event {} '{}'",
+                  "event {} '{}' sw {}",
         entranceText(m.to), m.wolfAfter ? "wolf" : "human", m.tlvBefore, m.tlvAfter, m.dclBefore,
-        m.dclAfter, m.arrivalEvent, m.arrivalName);
+        m.dclAfter, m.arrivalEvent, m.arrivalName,
+        arrivalDt != nullptr ? static_cast<int>(arrivalDt->switch_no) : 0xFF);
 }
 
 void Tracker::settle() {
     PendingMove p = std::move(*mMove);
     mMove.reset();
-    const uint32_t bits = mLocalEventBitsSet - p.bitsAtAccept;
-    detail::onOwnMoveSettled(std::move(p.move), bits, p.copyOf);
+    MoveRecord& m = p.move;
+    const uint32_t sinceAccept = mLocalEventBitsSet - p.bitsAtAccept;
+    // Bits of the departure stage's earlier story events count too (BOSSCLEAR before WARPHOLE).
+    uint32_t sinceVisit = 0;
+    for (const BitNote& note : mBitLog) {
+        if (note.index <= p.bitsAtVisit || (note.index <= p.bitsAtAccept && !note.story)) {
+            continue;
+        }
+        sinceVisit++;
+        if (m.bits.size() < kMaxMoveBits &&
+            std::find(m.bits.begin(), m.bits.end(), note.no) == m.bits.end())
+        {
+            m.bits.push_back(note.no);
+        }
+    }
+    m.transientHint =
+        m.to.layerArg >= 0 &&
+        m.to.layerArg != dComIfG_play_c::getLayerNo_common(m.to.stage, m.to.room, -1);
+    m.key = moveKey(m);
+    std::string bitText;
+    for (const uint16_t no : m.bits) {
+        bitText += fmt::format("{}{:04X}", bitText.empty() ? "" : " ", no);
+    }
+    TwiliLog.info("[story] settle key '{}' hops {} bits {}/{} [{}]{}", m.key, m.hopList.size(),
+        sinceAccept, sinceVisit, bitText, m.transientHint ? " transient layer" : "");
+    detail::onOwnMoveSettled(std::move(p.move), sinceAccept, p.copyOf);
 }
 
 void Tracker::tick() {

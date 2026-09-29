@@ -21,6 +21,10 @@ void tick();
 
 // True if the boot was taken over (skip the original).
 bool takeOverBoot(scene_class* logoScene);
+// The story fields of a script's start (StepsStory.cpp), before the first load.
+void applyStoryStart(const nlohmann::json& start);
+// A stage's save table for those fields, -1 if unknown.
+int stageSaveTbl(const char* stage);
 
 // Scripted input on port 0, neutral otherwise.
 void overridePad(PADStatus* status);

@@ -30,6 +30,42 @@ const ITEMS = {
 };
 const EVENTS = { shieldAttack: 0x2908, copyRodPower: 0x2580 };
 
+// Story event bits (include/d/d_save_bit_labels.inc).
+const STORY_BITS = {
+    day2Done: 0x4510, castleEscape: 0x0502, cellWakeUp: 0x4d08, forestClear: 0x0602,
+    faronSpiritTalk: 0x0c40, eldinSpirit: 0x0708, minesClear: 0x0701, meteorWarped: 0x0880,
+    lanayruSpirit: 0x0c02, lakebedClear: 0x0904, zantAppears: 0x0c01, zeldaHealsMidna: 0x1e08,
+    masterSword: 0x2020, shadowCrystal: 0x0d04, midnaRiding: 0x0c10, arbiterClear: 0x2010,
+    snowpeakClear: 0x2008, timeClear: 0x2004, cityClear: 0x2002, mirrorRestored: 0x2b08,
+    zantDefeated: 0x5410, barrierShattered: 0x4208,
+};
+const B = STORY_BITS;
+const FARON_DONE = [B.day2Done, B.castleEscape, B.cellWakeUp, B.forestClear, B.faronSpiritTalk];
+const ELDIN_DONE = [...FARON_DONE, B.eldinSpirit, B.minesClear];
+const LANAYRU_DONE = [...ELDIN_DONE, B.meteorWarped, B.lanayruSpirit, B.lakebedClear];
+const MDH_DONE = [...LANAYRU_DONE, B.zantAppears, B.zeldaHealsMidna];
+const SWORD_DONE = [...MDH_DONE, B.masterSword, B.shadowCrystal];
+
+// Synthetic story checkpoints: start fields for one area each (a fixture replaces them when present).
+const bossRoom = (stage, eventBits, levels) => ({ stage, room: 50, point: 0, eventBits, levels, stageBoss: [stage] });
+const STORY = {
+    eldinGate: { stage: "F_SP121", room: 2, point: 0, eventBits: FARON_DONE, levels: { transform: [0], darkClear: [0] } },
+    eldinTwilight: { stage: "F_SP109", room: 0, point: 0, eventBits: FARON_DONE, levels: { transform: [0, 1], darkClear: [0] }, vessels: [1] },
+    goronMinesBoss: bossRoom("D_MN04A", FARON_DONE.concat([B.eldinSpirit]), { transform: [0, 1], darkClear: [0, 1] }),
+    lanayruGate: { stage: "F_SP121", room: 9, point: 0, eventBits: ELDIN_DONE, levels: { transform: [0, 1], darkClear: [0, 1] } },
+    lanayruTwilight: { stage: "F_SP115", room: 0, point: 0, eventBits: ELDIN_DONE.concat([B.meteorWarped]), levels: { transform: [0, 1, 2], darkClear: [0, 1] }, vessels: [2] },
+    lakebedBoss: bossRoom("D_MN01A", LANAYRU_DONE, { transform: [0, 1, 2], darkClear: [0, 1, 2] }),
+    zeldaTower: { stage: "R_SP107", room: 3, point: 0, eventBits: LANAYRU_DONE.concat([B.zantAppears]), levels: { transform: [0, 1, 2, 3], darkClear: [0, 1, 2] } },
+    sacredGrove: { stage: "F_SP117", room: 1, point: 1, eventBits: MDH_DONE.concat([B.midnaRiding]), levels: { transform: [0, 1, 2, 3], darkClear: [0, 1, 2] } },
+    forestBoss: bossRoom("D_MN05A", [B.day2Done, B.castleEscape, B.cellWakeUp], { transform: [0], darkClear: [0] }),
+    agBoss: bossRoom("D_MN10A", SWORD_DONE, { transform: [0, 1, 2, 3], darkClear: [0, 1, 2, 3] }),
+    snowpeakBoss: bossRoom("D_MN11A", SWORD_DONE.concat([B.arbiterClear]), { transform: [0, 1, 2, 3], darkClear: [0, 1, 2, 3] }),
+    totBoss: bossRoom("D_MN06A", SWORD_DONE.concat([B.arbiterClear, B.snowpeakClear]), { transform: [0, 1, 2, 3], darkClear: [0, 1, 2, 3] }),
+    cityBoss: bossRoom("D_MN07A", SWORD_DONE.concat([B.arbiterClear, B.snowpeakClear, B.timeClear]), { transform: [0, 1, 2, 3], darkClear: [0, 1, 2, 3] }),
+    palaceZant: { stage: "D_MN08A", room: 10, point: 0, eventBits: SWORD_DONE.concat([B.arbiterClear, B.snowpeakClear, B.timeClear, B.cityClear, B.mirrorRestored]), levels: { transform: [0, 1, 2, 3], darkClear: [0, 1, 2, 3] } },
+    kakariko: { stage: "F_SP109", room: 0, point: 0, eventBits: ELDIN_DONE, levels: { transform: [0, 1], darkClear: [0, 1] } },
+};
+
 // Extra --cvar overrides for every instance.
 const COMMON_CVARS = [];
 
@@ -63,5 +99,5 @@ const connect = [
 
 module.exports = {
     MOD_ID, CONFIG_PREFIX, escapeModId, tt, MODS, STAGES, ITEMS, EVENTS, COMMON_CVARS, RANDOMIZER_MODE_CVARS,
-    warp, waitStage, barrier, meetIn, connect,
+    STORY_BITS, STORY, warp, waitStage, barrier, meetIn, connect,
 };

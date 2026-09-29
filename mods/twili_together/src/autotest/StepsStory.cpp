@@ -3,17 +3,22 @@
 #include "autotest/AutoTest.hpp"
 #include "autotest/AutoTestSteps.hpp"
 
+#include "autotest/State.hpp"
+#include "core/Base64.hpp"
 #include "core/Config.hpp"
 #include "core/Host.hpp"
 #include "core/LocalPlayer.hpp"
 #include "core/Log.hpp"
+#include "story/StoryLog.hpp"
 #include "story/StoryState.hpp"
 #include "sync/RemoteApplyGuard.hpp"
 
 #include "d/actor/d_a_alink.h"
+#include "d/actor/d_a_obj_bosswarp.h"
 #include "d/actor/d_a_tag_event.h"
 #include "d/d_com_inf_game.h"
 #include "d/d_event.h"
+#include "d/d_item.h"
 #include "d/d_save.h"
 #include "d/d_stage.h"
 #include "dolphin/pad.h"
@@ -23,8 +28,108 @@
 #include <fmt/format.h>
 
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 
 namespace twili::autotest {
+
+namespace {
+
+struct StageTbl {
+    const char* prefix;
+    int8_t tbl;
+};
+
+// dStage_stagInfo_GetSaveTbl of each stage (the randomizer's getStageSaveId); prefixes match
+// a dungeon's rooms and boss rooms.
+constexpr StageTbl kStageTbls[] = {
+    {"F_SP00", 0x0}, {"F_SP103", 0x0}, {"F_SP104", 0x0}, {"R_SP01", 0x0}, {"R_SP107", 0x1},
+    {"D_SB10", 0x2}, {"F_SP108", 0x2}, {"R_SP108", 0x2}, {"F_SP109", 0x3}, {"F_SP110", 0x3},
+    {"F_SP111", 0x3}, {"F_SP128", 0x3}, {"R_SP109", 0x3}, {"R_SP110", 0x3}, {"R_SP128", 0x3},
+    {"R_SP209", 0x3}, {"F_SP112", 0x4}, {"F_SP113", 0x4}, {"F_SP115", 0x4}, {"F_SP126", 0x4},
+    {"R_SP127", 0x4}, {"F_SP121", 0x6}, {"F_SP122", 0x6}, {"F_SP123", 0x6}, {"F_SP200", 0x6},
+    {"F_SP117", 0x7}, {"F_SP114", 0x8}, {"F_SP116", 0x9}, {"R_SP116", 0x9}, {"R_SP160", 0x9},
+    {"R_SP161", 0x9}, {"F_SP118", 0xA}, {"F_SP124", 0xA}, {"F_SP125", 0xA}, {"F_SP127", 0xB},
+    {"D_MN05", 0x10}, {"D_MN04", 0x11}, {"D_MN01", 0x12}, {"D_MN10", 0x13}, {"D_MN11", 0x14},
+    {"D_MN06", 0x15}, {"D_MN07", 0x16}, {"D_MN08", 0x17}, {"D_MN09", 0x18}, {"D_SB00", 0x19},
+    {"D_SB01", 0x19}, {"D_SB02", 0x19}, {"D_SB03", 0x1A}, {"D_SB04", 0x1A}, {"D_SB05", 0x1B},
+    {"D_SB06", 0x1B}, {"D_SB07", 0x1B}, {"D_SB08", 0x1B}, {"D_SB09", 0x1B},
+};
+
+}  // namespace
+
+int stageSaveTbl(const char* stage) {
+    for (const StageTbl& t : kStageTbls) {
+        const size_t n = std::strlen(t.prefix);
+        const bool dungeon = t.prefix[0] == 'D' && t.prefix[2] == 'M';
+        if (std::strncmp(stage, t.prefix, n) == 0 && (dungeon || stage[n] == '\0')) {
+            return t.tbl;
+        }
+    }
+    return -1;
+}
+
+// The story fields of `start`, applied after dComIfGs_init and before the first load.
+void applyStoryStart(const nlohmann::json& start) {
+    using nlohmann::json;
+    // A captured save first; the synthetic fields apply on top.
+    if (const auto it = start.find("fixtureData"); it != start.end() && it->is_string()) {
+        std::vector<uint8_t> bytes;
+        if (base64::decode(it->get<std::string>(), bytes) && bytes.size() == sizeof(dSv_save_c)) {
+            std::memcpy(dComIfGs_getSaveData(), bytes.data(), bytes.size());
+            TwiliLog.info("[autotest] start: fixture save loaded ({} bytes)", bytes.size());
+        } else {
+            TwiliLog.warn("[autotest] start: fixture save unusable ({} bytes, want {})",
+                bytes.size(), sizeof(dSv_save_c));
+        }
+    }
+    for (const auto& sw : start.value("saveSwitches", json::array())) {
+        const int tbl = stageSaveTbl(sw.value("stage", std::string{}).c_str());
+        if (tbl >= 0) {
+            dComIfGs_onStageSwitch(tbl, sw.value("no", 0));
+        }
+    }
+    for (const auto& item : start.value("items", json::array())) {
+        if (item.is_number_integer()) {
+            execItemGet(static_cast<u8>(item.get<int>()));
+            dComIfGs_onItemFirstBit(static_cast<u8>(item.get<int>()));
+        }
+    }
+    if (const auto it = start.find("collect"); it != start.end() && it->is_object()) {
+        for (const auto& n : it->value("crystal", json::array())) {
+            dComIfGs_onCollectCrystal(static_cast<u8>(n.get<int>()));
+        }
+        for (const auto& n : it->value("mirror", json::array())) {
+            dComIfGs_onCollectMirror(static_cast<u8>(n.get<int>()));
+        }
+    }
+    if (const auto it = start.find("lightDrops"); it != start.end() && it->is_object()) {
+        for (const auto& [area, num] : it->items()) {
+            dComIfGs_setLightDropNum(static_cast<u8>(std::stoi(area)), static_cast<u8>(num.get<int>()));
+        }
+    }
+    for (const auto& area : start.value("vessels", json::array())) {
+        dComIfGs_onLightDropGetFlag(static_cast<u8>(area.get<int>()));
+    }
+    if (start.contains("transformStatus")) {
+        dComIfGs_setTransformStatus(start.value("transformStatus", std::string{}) == "wolf" ? 1 : 0);
+    }
+    for (const auto& stage : start.value("stageBoss", json::array())) {
+        const int tbl = stageSaveTbl(stage.get<std::string>().c_str());
+        // Not dComIfGs_onStageBossEnemy: it reads the stage info, null before the first load.
+        if (tbl >= 0) {
+            dComIfGs_getSaveData()->getSave(tbl).getBit().onStageBossEnemy();
+        }
+    }
+    if (start.contains("midna")) {
+        if (start.value("midna", std::string{}) == "ride") {
+            dComIfGs_onEventBit(dSv_event_flag_c::M_067);
+        } else {
+            dComIfGs_offEventBit(dSv_event_flag_c::M_067);
+        }
+    }
+}
+
 namespace {
 
 using nlohmann::json;
@@ -194,10 +299,87 @@ std::string selfTest() {
     return failure;
 }
 
+struct ProfileFind {
+    int16_t profile;
+    fopAc_ac_c* nearest;
+    float dist;
+};
+
+void* findNearestProfile(void* proc, void* data) {
+    auto* actor = static_cast<fopAc_ac_c*>(proc);
+    auto* find = static_cast<ProfileFind*>(data);
+    daPy_py_c* player = dComIfGp_getLinkPlayer();
+    if (fopAcM_GetName(actor) != find->profile || player == nullptr) {
+        return nullptr;
+    }
+    const float d = actor->current.pos.abs(player->current.pos);
+    if (find->nearest == nullptr || d < find->dist) {
+        find->nearest = actor;
+        find->dist = d;
+    }
+    return nullptr;
+}
+
+void movePlayerTo(const cXyz& pos) {
+    daPy_py_c* player = dComIfGp_getLinkPlayer();
+    cXyz at = pos;
+    player->setPlayerPosAndAngle(&at, player->shape_angle.y, TRUE);
+    interp::requestPresentationSync();
+}
+
+// A defeated boss's warp hole plays its own BOSS_WARPIN (the WARP_CHECK choice skipped).
+std::optional<bool> triggerBossWarp(StepContext& ctx) {
+    auto* warp = static_cast<daObjBossWarp_c*>(fopAcM_SearchByName(fpcNm_Obj_BossWarp_e));
+    if (warp == nullptr || warp->mAction != daObjBossWarp_c::ACT_WAIT_WARP ||
+        dComIfGp_event_runCheck())
+    {
+        if (ctx.seconds > ctx.timeout(30.0)) {
+            ctx.fail(fmt::format("triggerStory bossWarp: no waiting warp hole (found {}, action {})",
+                warp != nullptr, warp != nullptr ? warp->mAction : -1));
+        }
+        return false;
+    }
+    movePlayerTo(warp->current.pos);
+    warp->setAction(daObjBossWarp_c::ACT_ORDER_WARP_EVENT);
+    fopAcM_orderOtherEventId(
+        warp, warp->mBossWarpInEventId, warp->mBossWarpInMapToolId, 0xFFFF, 0, 1);
+    warp->eventInfo.onCondition(2);
+    TwiliLog.info("[autotest] triggerStory: boss warp in {} ordered BOSS_WARPIN (scene list {})",
+        currentStage(), warp->getSceneListNo());
+    return true;
+}
+
 std::optional<bool> triggerStory(StepContext& ctx) {
     const json& step = ctx.step;
     const std::string via = step.value("via", std::string("requester"));
+    if (via == "bossWarp") {
+        return triggerBossWarp(ctx);
+    }
     if (ctx.begun) {
+        return true;
+    }
+    // The area's tears complete: a reload runs kytag04's own warp to the spring.
+    if (via == "tearsFull") {
+        const int area = step.value("area", static_cast<int>(dComIfGp_getStartStageDarkArea()));
+        const int num = step.value("num", 16);
+        dComIfGs_setLightDropNum(static_cast<u8>(area), static_cast<u8>(num));
+        dComIfGs_setRestartRoomParam(0);
+        dComIfGp_setNextStage(currentStage(), dComIfGp_getStartStagePoint(),
+            static_cast<s8>(dComIfGp_roomControl_getStayNo()), -1, 0.0f, 0, 1, 0, 0, 1, 0);
+        TwiliLog.info("[autotest] triggerStory: area {} tears set to {}, reloading {}", area, num,
+            currentStage());
+        return true;
+    }
+    if (via == "actor") {
+        ProfileFind find{static_cast<int16_t>(step.value("profile", -1)), nullptr, 0.0f};
+        fopAcM_Search(&findNearestProfile, &find);
+        if (find.nearest == nullptr) {
+            ctx.fail(fmt::format("triggerStory actor: no actor of profile {}", find.profile));
+            return false;
+        }
+        movePlayerTo(find.nearest->current.pos);
+        TwiliLog.info("[autotest] triggerStory: moved onto profile {} ({:.0f} away)", find.profile,
+            find.dist);
         return true;
     }
     // Arrive at `point` / `layer`, whose PLYR entry starts the map event.
@@ -253,18 +435,26 @@ std::optional<bool> expectStoryMove(StepContext& ctx) {
     const std::string curated = step.value("curated", std::string{});
     const uint32_t qualHas = step.value("qualHas", 0u);
     const bool wantCached = step.value("cached", false);
+    const story::MoveRecord& m = st.lastMove;
+    const bool placeOk =
+        (!step.contains("toStage") ||
+            std::strncmp(m.to.stage, step.value("toStage", std::string{}).c_str(), 8) == 0) &&
+        (!step.contains("toRoom") || m.to.room == step.value("toRoom", -1)) &&
+        (!step.contains("toPoint") || m.to.point == step.value("toPoint", -1));
     if (count > 0 && (curated.empty() || st.lastMoveCurated == curated) &&
-        (st.lastMoveQual & qualHas) == qualHas && (!wantCached || st.lastMoveFromCache))
+        (st.lastMoveQual & qualHas) == qualHas && (!wantCached || st.lastMoveFromCache) && placeOk)
     {
-        TwiliLog.info("[autotest] story move {} (curated '{}', qual 0x{:X})", role,
-            st.lastMoveCurated, st.lastMoveQual);
+        TwiliLog.info("[autotest] story move {} (curated '{}', qual 0x{:X}) to {} room {} point {} "
+                      "layer {} key '{}'",
+            role, st.lastMoveCurated, st.lastMoveQual, m.to.stage, m.to.room, m.to.point,
+            m.to.layer, m.key);
         return true;
     }
     if (ctx.seconds > ctx.timeout(60.0)) {
         ctx.fail(fmt::format("expectStoryMove {}: {} move(s), last curated '{}' qual 0x{:X} "
-                             "cached {} ({})",
-            role, count, st.lastMoveCurated, st.lastMoveQual, st.lastMoveFromCache,
-            sd::debugText()));
+                             "cached {} to {} room {} point {} ({})",
+            role, count, st.lastMoveCurated, st.lastMoveQual, st.lastMoveFromCache, m.to.stage,
+            m.to.room, m.to.point, sd::debugText()));
     }
     return false;
 }
@@ -484,6 +674,12 @@ std::optional<bool> storySteps(const std::string& op, StepContext& ctx) {
         const bool settled = !dComIfGp_isEnableNextStage() && !dComIfGp_event_runCheck() &&
                              !story::tracker().movePending() && !story::loadActive() &&
                              !sd::followChainOpen() && story::tracker().quietTicks() >= 60;
+        // pressA: advances the text of the scenes on the way.
+        if (!settled && step.value("pressA", false) && dComIfGp_event_runCheck() && !padBusy() &&
+            ctx.ticks % 20 == 0)
+        {
+            pulsePad(0.0f, 0.0f, PAD_BUTTON_A, 3);
+        }
         if (settled) {
             TwiliLog.info("[autotest] story settled in {} room {} layer {}", currentStage(),
                 dComIfGp_roomControl_getStayNo(), dComIfG_play_c::getLayerNo(0));
@@ -513,20 +709,65 @@ std::optional<bool> storySteps(const std::string& op, StepContext& ctx) {
         return true;
     }
 
-    if (op == "expectTransformLevel") {
+    if (op == "expectTransformLevel" || op == "expectDarkClear") {
         const int level = step.value("level", 0);
         const bool want = step.value("set", true);
-        if ((dComIfGs_isTransformLV(level) != FALSE) == want) {
+        const bool have = op == "expectTransformLevel" ? dComIfGs_isTransformLV(level) != FALSE :
+                                                         dComIfGs_isDarkClearLV(level) != FALSE;
+        if (have == want) {
             return true;
         }
         if (ctx.seconds > ctx.timeout(30.0)) {
-            ctx.fail(fmt::format("expectTransformLevel {} never became {}", level, want));
+            ctx.fail(fmt::format("{} {} never became {}", op, level, want));
         }
         return false;
     }
 
     if (op == "dismissSaveRequest") {
         return dismissSaveRequest(ctx);
+    }
+
+    // The whole save plus where we stand, for a scenario's start.fixture.
+    if (op == "saveFixture") {
+        namespace fs = std::filesystem;
+        const std::string name = step.value("name", std::string("fixture"));
+        const fs::path dir = fs::path(detail::state().resultPath).parent_path() / "fixtures";
+        std::error_code ec;
+        fs::create_directories(dir, ec);
+        const auto* bytes = reinterpret_cast<const uint8_t*>(dComIfGs_getSaveData());
+        const daPy_py_c* player = dComIfGp_getLinkPlayer();
+        const json fixture = {
+            {"stage", currentStage()},
+            {"room", dComIfGp_roomControl_getStayNo()},
+            {"point", dComIfGp_getStartStagePoint()},
+            {"layer", dComIfG_play_c::getLayerNo(0)},
+            {"pos", player != nullptr ? json::array({player->current.pos.x, player->current.pos.y,
+                                            player->current.pos.z}) :
+                                        json::array()},
+            {"save", base64::encode({bytes, sizeof(dSv_save_c)})},
+        };
+        std::ofstream out(dir / (name + ".json"), std::ios::trunc);
+        out << fixture.dump(1);
+        if (!out) {
+            ctx.fail("saveFixture: cannot write " + (dir / (name + ".json")).string());
+            return false;
+        }
+        TwiliLog.info("[autotest] fixture '{}' saved in {}", name, dir.string());
+        return true;
+    }
+
+    if (op == "expectLightDrops") {
+        const int area = step.value("area", 0);
+        const int want = step.value("num", 0);
+        const int have = dComIfGs_getLightDropNum(static_cast<u8>(area));
+        if (have == want) {
+            TwiliLog.info("[autotest] area {} has {} tear(s)", area, have);
+            return true;
+        }
+        if (ctx.seconds > ctx.timeout(30.0)) {
+            ctx.fail(fmt::format("expectLightDrops: area {} has {} (want {})", area, have, want));
+        }
+        return false;
     }
 
     if (op == "storyPrompts") {

@@ -166,6 +166,7 @@ bool takeOverBoot(scene_class* logoScene) {
             }
         }
     }
+    applyStoryStart(s.start);
     if (s.start.contains("hour")) {
         const float hour = s.start.value("hour", 12.0f);
         dComIfGs_setTime(15.0f * hour);

@@ -99,9 +99,41 @@ Entrance Entrance::fromJson(const nlohmann::json& j) {
     return e;
 }
 
+nlohmann::json Hop::toJson() const {
+    return {{"at", at.toJson()}, {"m", arrivalMap}, {"sw", arrivalSwitch}, {"name", arrivalName}};
+}
+
+Hop Hop::fromJson(const nlohmann::json& j) {
+    Hop h;
+    if (!j.is_object()) {
+        return h;
+    }
+    if (const auto it = j.find("at"); it != j.end()) {
+        h.at = Entrance::fromJson(*it);
+    }
+    h.arrivalMap = static_cast<uint8_t>(j.value("m", 0xFF) & 0xFF);
+    h.arrivalSwitch = static_cast<uint8_t>(j.value("sw", 0xFF) & 0xFF);
+    h.arrivalName = j.value("name", std::string{}).substr(0, 32);
+    return h;
+}
+
+const char* reqKindName(ReqKind kind) {
+    switch (kind) {
+    case ReqKind::Player:
+        return "player";
+    case ReqKind::Tag:
+        return "tag";
+    case ReqKind::Actor:
+        return "actor";
+    default:
+        return "none";
+    }
+}
+
 nlohmann::json EventRef::toJson() const {
     return {{"name", name}, {"ev", eventId}, {"m", mapToolId}, {"lt", listType}, {"type", mapType},
-        {"sw", switchNo}, {"req", requester}, {"mode", mode}, {"arrival", arrivalDemo}};
+        {"sw", switchNo}, {"req", requester}, {"rk", static_cast<int>(reqKind)}, {"mode", mode},
+        {"arrival", arrivalDemo}};
 }
 
 EventRef EventRef::fromJson(const nlohmann::json& j) {
@@ -116,12 +148,19 @@ EventRef EventRef::fromJson(const nlohmann::json& j) {
     e.mapType = static_cast<uint8_t>(j.value("type", 0xFF) & 0xFF);
     e.switchNo = static_cast<uint8_t>(j.value("sw", 0xFF) & 0xFF);
     e.requester = static_cast<int16_t>(j.value("req", -1));
+    const int rk = j.value("rk", 0);
+    e.reqKind = rk >= 0 && rk <= static_cast<int>(ReqKind::Actor) ? static_cast<ReqKind>(rk) :
+                                                                   ReqKind::None;
     e.mode = static_cast<uint8_t>(j.value("mode", 0) & 0xFF);
     e.arrivalDemo = j.value("arrival", false);
     return e;
 }
 
 nlohmann::json MoveRecord::toJson() const {
+    nlohmann::json hl = nlohmann::json::array();
+    for (const Hop& h : hopList) {
+        hl.push_back(h.toJson());
+    }
     return {
         {"mid", id},
         {"from", from.toJson()},
@@ -134,6 +173,10 @@ nlohmann::json MoveRecord::toJson() const {
         {"curated", curated >= 0 ? kStoryMoves[curated].id : ""},
         {"qual", qual},
         {"hops", hops},
+        {"hl", std::move(hl)},
+        {"bits", bits},
+        {"key", key},
+        {"th", transientHint},
     };
 }
 
@@ -179,6 +222,24 @@ MoveRecord MoveRecord::fromJson(const nlohmann::json& j) {
     }
     m.qual = j.value("qual", 0u);
     m.hops = j.value("hops", 1);
+    if (const auto it = j.find("hl"); it != j.end() && it->is_array()) {
+        for (const auto& h : *it) {
+            if (m.hopList.size() < kMaxHopRecords) {
+                m.hopList.push_back(Hop::fromJson(h));
+            }
+        }
+    }
+    if (const auto it = j.find("bits"); it != j.end() && it->is_array()) {
+        for (const auto& b : *it) {
+            if (b.is_number_unsigned() && b.get<unsigned>() <= 0xFFFF &&
+                m.bits.size() < kMaxMoveBits)
+            {
+                m.bits.push_back(static_cast<uint16_t>(b.get<unsigned>()));
+            }
+        }
+    }
+    m.key = j.value("key", std::string{}).substr(0, 96);
+    m.transientHint = j.value("th", false);
     return m;
 }
 
@@ -276,6 +337,14 @@ int matchCuratedMove(const MoveRecord& m) {
         return i;
     }
     return -1;
+}
+
+std::string moveKey(const MoveRecord& m) {
+    const std::string what =
+        m.event.name.empty() ? "req:" + std::to_string(m.event.requester) : m.event.name;
+    return std::string(reqKindName(m.event.reqKind)) + "|" + what + "|" +
+           fixedString(m.from.stage, sizeof(m.from.stage)) + "/" + std::to_string(m.from.room) +
+           "|" + fixedString(m.to.stage, sizeof(m.to.stage)) + "/" + std::to_string(m.to.room);
 }
 
 const StoryMoveDef* curatedMove(int index) {

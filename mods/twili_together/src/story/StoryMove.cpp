@@ -7,6 +7,7 @@
 #include "core/Log.hpp"
 #include "core/SaveGate.hpp"
 #include "core/Session.hpp"
+#include "story/StoryLog.hpp"
 #include "sync/WorldSync.hpp"
 #include "teleport/Teleport.hpp"
 #include "ui/StoryPrompt.hpp"
@@ -498,6 +499,9 @@ void onOwnMoveSettled(MoveRecord move, uint32_t localBitsDuring, uint32_t copyOf
     if (team.valid && move.to.sameStageRoom(team.move.to.stage, team.move.to.room)) {
         team.satisfied = true;
     }
+    if (copyOf == 0) {
+        storylog::note(move);
+    }
     if (copyOf != 0 || move.qual == 0 || !syncing) {
         return;
     }
@@ -512,6 +516,7 @@ void onOwnMoveSettled(MoveRecord move, uint32_t localBitsDuring, uint32_t copyOf
     s_state.movesSent++;
     s_state.lastMoveCurated = move.curated >= 0 ? curated : "";
     s_state.lastMoveQual = move.qual;
+    s_state.lastMove = move;
 }
 
 void handleStoryMove(const nlohmann::json& packet) {
@@ -536,11 +541,16 @@ void handleStoryMove(const nlohmann::json& packet) {
     if (m.curated < 0) {
         m.curated = matchCuratedMove(m);
     }
+    if (m.key.empty()) {
+        m.key = moveKey(m);
+    }
+    storylog::note(m);
 
     s_state.movesReceived++;
     s_state.lastMoveCurated = m.curated >= 0 ? kStoryMoves[m.curated].id : "";
     s_state.lastMoveQual = m.qual;
     s_state.lastMoveFromCache = fromCache;
+    s_state.lastMove = m;
     s_state.clientMoves[m.originClientId] = {
         m.curated >= 0 ? withName(kStoryMoves[m.curated].prompt, m.originName) :
                          fmt::format("{} moved to {}", m.originName, placeName(m)),
@@ -819,8 +829,8 @@ void onStageSaveTableLoaded() {
     tracker().onStageSaveTableLoaded();
 }
 
-void noteLocalEventBit() {
-    tracker().noteLocalEventBit();
+void noteLocalEventBit(uint16_t no) {
+    tracker().noteLocalEventBit(no);
 }
 
 bool handlePacket(const std::string& type, const nlohmann::json& packet) {
@@ -836,6 +846,7 @@ bool handlePacket(const std::string& type, const nlohmann::json& packet) {
 
 void tick() {
     tracker().tick();
+    storylog::tick();
     if (!isSaveLoaded()) {
         // A save switched mid-session must not inherit the old one's story state.
         if (s_state.hadSave) {
@@ -870,6 +881,7 @@ void shutdown() {
     // The host closes our dialogs itself.
     s_state = State{};
     tracker().clear();
+    storylog::shutdown();
 }
 
 }  // namespace twili::story
