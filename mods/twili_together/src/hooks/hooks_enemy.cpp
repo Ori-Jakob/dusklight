@@ -1,6 +1,7 @@
 #include "hooks/Hooks.hpp"
 
 #include "core/Session.hpp"
+#include "enemy/EnemyDamage.hpp"
 #include "enemy/EnemyScaling.hpp"
 #include "enemy/EnemySync.hpp"
 
@@ -10,6 +11,7 @@
 #include "d/actor/d_a_e_bs.h"
 #include "d/actor/d_a_e_oc.h"
 #include "d/actor/d_a_e_s1.h"
+#include "d/d_cc_uty.h"
 #include "f_op/f_op_actor_mng.h"
 
 namespace twili::hooks {
@@ -23,10 +25,14 @@ DEFINE_HOOK_SYMBOL("src/d/actor/d_a_e_bs.cpp#damage_check", void(e_bs_class*), E
 DEFINE_HOOK(&daE_OC_c::executeFallDead, EocExecuteFallDead);
 DEFINE_HOOK_SYMBOL("src/d/actor/d_a_e_s1.cpp#all_fail", void(e_s1_class*), Es1AllFail);
 DEFINE_HOOK_SYMBOL("src/d/actor/d_a_e_s1.cpp#e_s1_shout", void(e_s1_class*), Es1Shout);
+DEFINE_HOOK(&cc_at_check, CcAtCheck);
 
 namespace {
 
 const e_s1_class* s_shoutReset = nullptr;
+// cc_at_check does not recurse.
+fopAc_ac_c* s_hitEnemy = nullptr;
+s16 s_hitHealthBefore = 0;
 
 // The append is freed right after this returns.
 void onActorCreatePost(ModContext*, void* args, void* retval, void*) {
@@ -36,6 +42,7 @@ void onActorCreatePost(ModContext*, void* args, void* retval, void*) {
     auto* actor = static_cast<fopAc_ac_c*>(mods::arg<void*>(args, 0));
     enemy_scaling::onActorCreated(actor);
     enemy_sync::onActorCreated(actor);
+    enemy_damage::onActorCreated(actor);
 }
 
 void onActorDeletePost(ModContext*, void* args, void* retval, void*) {
@@ -45,6 +52,7 @@ void onActorDeletePost(ModContext*, void* args, void* retval, void*) {
     auto* actor = static_cast<fopAc_ac_c*>(mods::arg<void*>(args, 0));
     enemy_scaling::onActorDeleted(actor);
     enemy_sync::onActorDeleted(actor);
+    enemy_damage::onActorDeleted(actor);
 }
 
 // Deaths without a puff delete from inside these scopes (B2, B3).
@@ -114,7 +122,36 @@ void onEs1ShoutPost(ModContext*, void* args, void*, void*) {
     s_shoutReset = nullptr;
 }
 
+HookAction onCcAtCheckPre(ModContext*, void* args, void*, void*) {
+    s_hitEnemy = mods::arg<fopAc_ac_c*>(args, 0);
+    s_hitHealthBefore = s_hitEnemy != nullptr ? s_hitEnemy->health : 0;
+    return HOOK_CONTINUE;
+}
+
+void onCcAtCheckPost(ModContext*, void* args, void*, void*) {
+    fopAc_ac_c* enemy = mods::arg<fopAc_ac_c*>(args, 0);
+    if (Session::active() && enemy != nullptr && enemy == s_hitEnemy &&
+        enemy->health < s_hitHealthBefore)
+    {
+        enemy_damage::onLocalHit(enemy);
+    }
+    s_hitEnemy = nullptr;
+}
+
 }  // namespace
+
+ModResult installEnemyDamage(std::string& error) {
+    const ModResult results[] = {
+        addPre<CcAtCheck>(onCcAtCheckPre, kObserve, "cc_at_check", error),
+        addPost<CcAtCheck>(onCcAtCheckPost, kDefault, "cc_at_check", error),
+    };
+    for (const ModResult r : results) {
+        if (r != MOD_OK) {
+            return r;
+        }
+    }
+    return MOD_OK;
+}
 
 ModResult installEnemy(std::string& error) {
     const ModResult results[] = {

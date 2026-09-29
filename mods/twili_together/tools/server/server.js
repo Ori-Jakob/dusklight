@@ -43,7 +43,7 @@ const TEAM_PACKET_TYPES = new Set([
 ]);
 const PRESENCE_PACKET_TYPES = new Set(["PLAYER_UPDATE", "PLAYER_SFX"]);
 // Teammates in the sender's stage and layer only; never cached or queued.
-const TEAM_PRESENCE_PACKET_TYPES = new Set(["ENEMY_DEFEATED", "STORY_EVENT"]);
+const TEAM_PRESENCE_PACKET_TYPES = new Set(["ENEMY_DEFEATED", "ENEMY_DAMAGE", "STORY_EVENT"]);
 // The whole team; the latest arrive is replayed on catch-up (see sendTeamStoryMove).
 const TEAM_STORY_PACKET_TYPES = new Set(["STORY_MOVE"]);
 // Every client obeys these, so a relayed copy could rewrite the roster or disconnect the room.
@@ -121,6 +121,8 @@ function packetSummary(packet) {
             return `${packet.type} sound=0x${hex(packet.soundId)} kind=${text(packet.kind)}`;
         case "ENEMY_DEFEATED":
             return `${packet.type} stage=${text(packet.stageName)} layer=${text(packet.layerNo)} kills=${Array.isArray(packet.kills) ? packet.kills.length : "?"}`;
+        case "ENEMY_DAMAGE":
+            return `${packet.type} stage=${text(packet.stageName)} layer=${text(packet.layerNo)} hits=${Array.isArray(packet.hits) ? packet.hits.length : "?"}`;
         case "STORY_EVENT":
             return `${packet.type} ph=${text(packet.ph)} id=${text(packet.id)}` +
                 (packet.ph === "start" ? ` ${text(packet.stage)}/${text(packet.room)}/${text(packet.layer)} m=${text(packet.m)} req=${text(packet.req)}` : "");
@@ -184,6 +186,7 @@ function defaultRoomState() {
         syncWorldState: true,
         shareWoodenShield: true,
         syncNPCs: false,
+        syncEnemyDamage: true,
         cutsceneSync: true,
         hidePlayersInCutscene: false,
         enemyHealthMultiplier: 100,

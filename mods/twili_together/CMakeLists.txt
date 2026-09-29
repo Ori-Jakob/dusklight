@@ -47,6 +47,8 @@ set(TWILI_SOURCES
     src/core/Session.cpp
     src/core/Visibility.cpp
     src/enemy/EnemyDefeated.cpp
+    src/enemy/EnemyDamage.cpp
+    src/enemy/EnemyDamagePacket.cpp
     src/enemy/EnemyScaling.cpp
     src/enemy/EnemySync.cpp
     src/fx/ItemFx.cpp

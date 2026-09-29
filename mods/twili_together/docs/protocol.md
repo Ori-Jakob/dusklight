@@ -81,6 +81,7 @@ keys and wrong types are ignored, numbers are clamped. The state:
 | `syncWorldState` | true | teams share flags, items and save progress |
 | `shareWoodenShield` | true | wooden shields sync like other items |
 | `syncNPCs` | false | enemy deaths sync within a stage |
+| `syncEnemyDamage` | true | with `syncNPCs`: teammates' hits on an enemy weaken our copy too |
 | `cutsceneSync` | true | story cutscenes pull in teammates in the same room |
 | `hidePlayersInCutscene` | false | hide other players during your cutscenes |
 | `pvpMode`, `pvpFriendlyFire`, `pvpLethal` | false | PvP rules |
@@ -188,6 +189,7 @@ cache and empties the queue.
 | Packet | Goes to | Notes |
 | --- | --- | --- |
 | `ENEMY_DEFEATED` | teammates in the same stage and layer | `{v: 2, stageName, layerNo, kills: [...]}`; a kill is the enemy's spawn key `{roomNo, procName, params, setId, home, dup}` (`dup` 0, or 1 to 4 for an Enemy Count extra) plus `fxSize`, `fxType`, `zoneActor`. Never cached, a replay would delete an enemy that respawned |
+| `ENEMY_DAMAGE` | teammates in the same stage and layer | `{v: 1, quiet: true, stageName, layerNo, hits: [...]}`; a hit is a spawn key as in `ENEMY_DEFEATED` plus `dmg` (1 to 30000), `pct` (the sender's health percent for that enemy, 100 to 500) and `hpAfter` (the sender's health left, at 100%, for logs). The receiver lowers its copy's health by `dmg` converted to its own percent, never below 2 (11 for Wooden Puppets and Skulltulas): deaths stay with `ENEMY_DEFEATED`. Never cached |
 | `STORY_EVENT` | teammates in the same stage and layer | `ph` = `start`, `joined` or `end`; a story cutscene teammates in the same room may watch too |
 | `STORY_MOVE` | the whole team | `ph: "arrive"`: a story event moved the sender to another stage. Teammates get a prompt to follow. The latest one per team is replayed on catch-up |
 

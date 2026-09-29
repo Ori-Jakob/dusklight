@@ -18,6 +18,7 @@
 #include "core/Layout.hpp"
 #include "core/Log.hpp"
 #include "core/Session.hpp"
+#include "enemy/EnemyDamage.hpp"
 #include "enemy/EnemyScaling.hpp"
 #include "enemy/EnemySync.hpp"
 #include "hooks/Hooks.hpp"
@@ -94,6 +95,9 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     // Optional: without them enemy sync and scaling, or story sync, stay off.
     std::string enemyError;
     hooks::install(hooks::Group::Enemy, enemyError);
+    // Optional: without it our hits are not shared (teammates' still apply).
+    std::string enemyDamageError;
+    hooks::install(hooks::Group::EnemyDamage, enemyDamageError);
     std::string storyError;
     hooks::install(hooks::Group::Story, storyError);
     // Optional: without it PvP hits are not taken.
@@ -135,6 +139,7 @@ MOD_EXPORT ModResult mod_shutdown(ModError*) {
     ui::shutdown();
     sync::shutdown();
     story::shutdown();
+    enemy_damage::shutdown();
     enemy_sync::shutdown();
     enemy_scaling::shutdown();
     Session::shutdown();

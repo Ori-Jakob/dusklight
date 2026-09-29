@@ -3,6 +3,7 @@
 #include "core/Config.hpp"
 #include "core/Log.hpp"
 #include "core/SaveGate.hpp"
+#include "enemy/EnemyDamage.hpp"
 #include "enemy/EnemyScaling.hpp"
 #include "enemy/EnemySync.hpp"
 #include "game/GameIdentity.hpp"
@@ -89,6 +90,7 @@ void Session::resetSessionState() {
     sync::resetSession();
     team_game::resetSession();
     enemy_sync::resetSession();
+    enemy_damage::resetSession();
     story::resetSession();
     pvp::resetSession();
 }
@@ -219,6 +221,7 @@ void Session::update() {
     }
     // Before stage tracking: a kill made right before a stage change goes where the enemy lived.
     enemy_sync::flush();
+    enemy_damage::poll();
     // Detects our game even while offline, so it is known at the handshake.
     team_game::tick();
     if (isConnected()) {
@@ -232,6 +235,7 @@ void Session::update() {
     }
     // Connected or not: a stage change already under way is seen through.
     enemy_sync::tick();
+    enemy_damage::tick();
     teleport::tick();
     story::tick();
     enemy_scaling::tick();
@@ -297,6 +301,7 @@ void Session::onMessage(const nlohmann::json& packet) {
     } else if (team_game::handlePacket(type, packet)) {
     } else if (teleport::handlePacket(type, packet)) {
     } else if (enemy_sync::handlePacket(type, packet)) {
+    } else if (enemy_damage::handlePacket(type, packet)) {
     } else if (story::handlePacket(type, packet)) {
     } else if (pvp::handlePacket(type, packet)) {
     } else if (type == "AUTOTEST_SIGNAL") {

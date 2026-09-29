@@ -22,6 +22,7 @@ enum class Var : uint8_t {
     SyncWorldState,
     ShareWoodenShield,
     SyncEnemyDeaths,
+    SyncEnemyDamage,
     CutsceneSync,
     HidePlayersInCutscene,
     EnemyHealthMultiplier,

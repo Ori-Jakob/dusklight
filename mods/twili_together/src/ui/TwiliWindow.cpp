@@ -279,6 +279,8 @@ struct RoomBool {
     bool RoomState::*field;
     const char* label;
     const char* help;
+    // Greyed out while this setting is off.
+    Var needs = Var::Count;
 };
 
 struct RoomInt {
@@ -299,6 +301,11 @@ const RoomBool kSyncOptions[] = {
     {Var::SyncEnemyDeaths, &RoomState::syncNPCs, "Sync Enemy Deaths",
         "<p>When a teammate in your area defeats a regular enemy, it disappears for you too. "
         "Bosses and mini-bosses are excluded, and drops go to whoever defeated it.</p>"},
+    {Var::SyncEnemyDamage, &RoomState::syncEnemyDamage, "Share Enemy Damage",
+        "<p>Teammates wear down the same enemies: your hits weaken their copy too. The player who "
+        "lands the last blow gets the drop. Enemies go down faster with more players; consider "
+        "raising Enemy Health. Needs Sync Enemy Deaths.</p>",
+        Var::SyncEnemyDeaths},
     {Var::CutsceneSync, &RoomState::cutsceneSync, "Cutscene Sync",
         "<p>When a story cutscene starts for a teammate, players in the same room who are "
         "standing safely watch it too. Needs Sync World State.</p>"},
@@ -349,6 +356,11 @@ void setRoomBool(ModContext*, void* data, const UiControlValue* value) {
     }
 }
 
+bool roomBoolDisabled(ModContext*, void* data) {
+    const auto* opt = static_cast<const RoomBool*>(data);
+    return roomLocked() || (opt->needs != Var::Count && !config::getBool(opt->needs));
+}
+
 bool roomBoolModified(ModContext*, void* data) {
     const auto* opt = static_cast<const RoomBool*>(data);
     return config::getBool(opt->var) != RoomState{}.*(opt->field);
@@ -381,7 +393,7 @@ void addRoomBools(UiElementHandle pane, const char* section, const RoomBool* opt
         control.help_rml = opts[i].help;
         control.get = getRoomBool;
         control.set = setRoomBool;
-        control.is_disabled = roomLockedPredicate;
+        control.is_disabled = roomBoolDisabled;
         control.is_modified = roomBoolModified;
         control.user_data = const_cast<RoomBool*>(&opts[i]);
         addControl(pane, control);

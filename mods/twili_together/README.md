@@ -102,6 +102,7 @@ the others see the owner's values, greyed out.
 | Sync World State | on | teams share flags, items, keys and save progress |
 | Share Wooden Shields | on | off: a burnt wooden shield stays burnt for everyone who lost it |
 | Sync Enemy Deaths | off | a regular enemy a teammate defeats near you disappears for you too (not bosses; the drop goes to whoever defeated it) |
+| Share Enemy Damage | on | with Sync Enemy Deaths: teammates wear down the same enemies, so your hits weaken their copy too |
 | Cutscene Sync | on | teammates standing safely in the same room watch a story cutscene together |
 | Hide Players in Cutscenes | off | hide other players, tags and markers during your cutscenes |
 | PvP Mode | off | players can hurt each other |

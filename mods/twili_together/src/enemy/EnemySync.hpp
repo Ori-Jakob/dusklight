@@ -82,6 +82,11 @@ struct Stats {
 const Stats& stats();
 
 namespace detail {
+bool intField(const nlohmann::json& j, const char* key, int64_t lo, int64_t hi, int64_t& out);
+bool parseKey(const nlohmann::json& j, SpawnKey& out);
+nlohmann::json keyJson(const SpawnKey& key);
+// Sender, team, protocol, packet version, and our current stage and layer.
+bool acceptFromTeammate(const nlohmann::json& packet, int version);
 // We are where the server routes us and a teammate is there too.
 bool canSendHere(const char* stage, int layer);
 // False (nothing sent) unless canSendHere.

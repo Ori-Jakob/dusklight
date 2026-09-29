@@ -18,18 +18,6 @@
 namespace twili::enemy_sync {
 namespace {
 
-// Every field is checked for type and range; a kill with a bad field is skipped on its own.
-bool intField(const nlohmann::json& j, const char* key, int64_t lo, int64_t hi, int64_t& out) {
-    const auto it = j.find(key);
-    if (it == j.end() || !it->is_number_integer()) {
-        return false;
-    }
-    out = it->is_number_unsigned() && it->get<uint64_t>() > uint64_t(INT64_MAX) ?
-              INT64_MAX :
-              it->get<int64_t>();
-    return out >= lo && out <= hi;
-}
-
 bool coordField(const nlohmann::json& j, const char* key, float& out) {
     const auto it = j.find(key);
     if (it == j.end() || !it->is_number()) {
@@ -44,33 +32,15 @@ bool coordField(const nlohmann::json& j, const char* key, float& out) {
 }
 
 bool parseKill(const nlohmann::json& k, Kill& out) {
-    if (!k.is_object()) {
+    if (!detail::parseKey(k, out.key)) {
         return false;
     }
-    int64_t roomNo, procName, params, setId, dup;
-    if (!intField(k, "roomNo", -1, 63, roomNo) || !intField(k, "procName", 0, 0x7FFF, procName) ||
-        !intField(k, "params", 0, 0xFFFFFFFFll, params) || !intField(k, "setId", 0, 0xFFFF, setId) ||
-        !intField(k, "dup", 0, kMaxDup, dup))
-    {
-        return false;
-    }
-    const auto home = k.find("home");
-    if (home == k.end() || !home->is_object() || !coordField(*home, "x", out.key.home[0]) ||
-        !coordField(*home, "y", out.key.home[1]) || !coordField(*home, "z", out.key.home[2]))
-    {
-        return false;
-    }
-    out.key.roomNo = static_cast<int8_t>(roomNo);
-    out.key.procName = static_cast<int16_t>(procName);
-    out.key.params = static_cast<uint32_t>(params);
-    out.key.setId = static_cast<uint16_t>(setId);
-    out.key.dup = static_cast<uint8_t>(dup);
     // Cosmetic: clamped rather than rejected.
     int64_t v;
-    out.fxSize = intField(k, "fxSize", INT64_MIN, INT64_MAX, v) ?
+    out.fxSize = detail::intField(k, "fxSize", INT64_MIN, INT64_MAX, v) ?
                      static_cast<uint8_t>(std::clamp<int64_t>(v, 0, 255)) :
                      10;
-    out.fxType = intField(k, "fxType", INT64_MIN, INT64_MAX, v) ?
+    out.fxType = detail::intField(k, "fxType", INT64_MIN, INT64_MAX, v) ?
                      static_cast<uint8_t>(std::clamp<int64_t>(v, 0, 3)) :
                      0;
     const auto zone = k.find("zoneActor");
@@ -80,23 +50,8 @@ bool parseKill(const nlohmann::json& k, Kill& out) {
 
 void handleEnemyDefeated(const nlohmann::json& packet) {
     const Session& session = Session::instance();
-    if (!session.isConnected() || !session.roomState().syncNPCs || !isSaveLoaded()) {
-        return;
-    }
-    const uint32_t id = packet.value("clientId", 0u);
-    if (id == 0 || id == session.selfClientId() ||
-        packet.value("senderSessionKey", std::string{}) == session.sessionKey() ||
-        packet.value("teamId", std::string{}) != session.selfTeamId() ||
-        packet.value("protocolVersion", -1) != Session::kProtocolVersion ||
-        packet.value("v", 0) != kVersion)
-    {
-        return;
-    }
-    // Checked again against where we are now: we may have moved on meanwhile.
-    const char* stage = dComIfGp_getStartStageName();
-    const std::string pStage = packet.value("stageName", std::string{});
-    if (stage == nullptr || pStage.size() > 7 || std::strncmp(stage, pStage.c_str(), 8) != 0 ||
-        packet.value("layerNo", -128) != dComIfG_play_c::getLayerNo(0))
+    if (!session.isConnected() || !session.roomState().syncNPCs || !isSaveLoaded() ||
+        !detail::acceptFromTeammate(packet, kVersion))
     {
         return;
     }
@@ -115,6 +70,73 @@ void handleEnemyDefeated(const nlohmann::json& packet) {
 }
 
 }  // namespace
+
+// Every field is checked for type and range; an entry with a bad field is skipped on its own.
+bool detail::intField(
+    const nlohmann::json& j, const char* key, int64_t lo, int64_t hi, int64_t& out) {
+    const auto it = j.find(key);
+    if (it == j.end() || !it->is_number_integer()) {
+        return false;
+    }
+    out = it->is_number_unsigned() && it->get<uint64_t>() > uint64_t(INT64_MAX) ?
+              INT64_MAX :
+              it->get<int64_t>();
+    return out >= lo && out <= hi;
+}
+
+bool detail::parseKey(const nlohmann::json& k, SpawnKey& out) {
+    if (!k.is_object()) {
+        return false;
+    }
+    int64_t roomNo, procName, params, setId, dup;
+    if (!intField(k, "roomNo", -1, 63, roomNo) || !intField(k, "procName", 0, 0x7FFF, procName) ||
+        !intField(k, "params", 0, 0xFFFFFFFFll, params) || !intField(k, "setId", 0, 0xFFFF, setId) ||
+        !intField(k, "dup", 0, kMaxDup, dup))
+    {
+        return false;
+    }
+    const auto home = k.find("home");
+    if (home == k.end() || !home->is_object() || !coordField(*home, "x", out.home[0]) ||
+        !coordField(*home, "y", out.home[1]) || !coordField(*home, "z", out.home[2]))
+    {
+        return false;
+    }
+    out.roomNo = static_cast<int8_t>(roomNo);
+    out.procName = static_cast<int16_t>(procName);
+    out.params = static_cast<uint32_t>(params);
+    out.setId = static_cast<uint16_t>(setId);
+    out.dup = static_cast<uint8_t>(dup);
+    return true;
+}
+
+nlohmann::json detail::keyJson(const SpawnKey& k) {
+    return {
+        {"roomNo", static_cast<int>(k.roomNo)},
+        {"procName", k.procName},
+        {"params", k.params},
+        {"setId", k.setId},
+        {"dup", static_cast<int>(k.dup)},
+        {"home", {{"x", k.home[0]}, {"y", k.home[1]}, {"z", k.home[2]}}},
+    };
+}
+
+bool detail::acceptFromTeammate(const nlohmann::json& packet, int version) {
+    const Session& session = Session::instance();
+    const uint32_t id = packet.value("clientId", 0u);
+    if (id == 0 || id == session.selfClientId() ||
+        packet.value("senderSessionKey", std::string{}) == session.sessionKey() ||
+        packet.value("teamId", std::string{}) != session.selfTeamId() ||
+        packet.value("protocolVersion", -1) != Session::kProtocolVersion ||
+        packet.value("v", 0) != version)
+    {
+        return false;
+    }
+    // Checked again against where we are now: we may have moved on meanwhile.
+    const char* stage = dComIfGp_getStartStageName();
+    const std::string pStage = packet.value("stageName", std::string{});
+    return stage != nullptr && pStage.size() <= 7 && std::strncmp(stage, pStage.c_str(), 8) == 0 &&
+           packet.value("layerNo", -128) == dComIfG_play_c::getLayerNo(0);
+}
 
 bool detail::canSendHere(const char* stage, int layer) {
     const Session& session = Session::instance();
@@ -139,17 +161,11 @@ bool detail::sendDefeated(const char* stage, int layer, const Kill* kills, size_
     nlohmann::json list = nlohmann::json::array();
     for (size_t i = 0; i < count; ++i) {
         const Kill& k = kills[i];
-        list.push_back({
-            {"roomNo", static_cast<int>(k.key.roomNo)},
-            {"procName", k.key.procName},
-            {"params", k.key.params},
-            {"setId", k.key.setId},
-            {"dup", static_cast<int>(k.key.dup)},
-            {"home", {{"x", k.key.home[0]}, {"y", k.key.home[1]}, {"z", k.key.home[2]}}},
-            {"fxSize", static_cast<int>(k.fxSize)},
-            {"fxType", static_cast<int>(k.fxType)},
-            {"zoneActor", k.zoneActor},
-        });
+        nlohmann::json j = detail::keyJson(k.key);
+        j["fxSize"] = static_cast<int>(k.fxSize);
+        j["fxType"] = static_cast<int>(k.fxType);
+        j["zoneActor"] = k.zoneActor;
+        list.push_back(std::move(j));
     }
     nlohmann::json packet = {
         {"type", "ENEMY_DEFEATED"},

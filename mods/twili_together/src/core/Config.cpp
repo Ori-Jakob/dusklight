@@ -32,6 +32,7 @@ constexpr VarDef kVars[] = {
     {Var::SyncWorldState, "sync_world_state", CONFIG_VAR_BOOL, true},
     {Var::ShareWoodenShield, "share_wooden_shield", CONFIG_VAR_BOOL, true},
     {Var::SyncEnemyDeaths, "sync_enemy_deaths", CONFIG_VAR_BOOL},
+    {Var::SyncEnemyDamage, "sync_enemy_damage", CONFIG_VAR_BOOL, true},
     {Var::CutsceneSync, "cutscene_sync", CONFIG_VAR_BOOL, true},
     {Var::HidePlayersInCutscene, "hide_players_in_cutscene", CONFIG_VAR_BOOL},
     {Var::EnemyHealthMultiplier, "enemy_health_multiplier", CONFIG_VAR_INT, false, 100},

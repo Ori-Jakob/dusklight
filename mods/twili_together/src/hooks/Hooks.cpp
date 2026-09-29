@@ -15,6 +15,7 @@ ModResult installClothes(std::string& error);
 ModResult installFx(std::string& error);
 ModResult installMap(std::string& error);
 ModResult installEnemy(std::string& error);
+ModResult installEnemyDamage(std::string& error);
 ModResult installStory(std::string& error);
 ModResult installPvp(std::string& error);
 #if TWILI_ENABLE_AUTOTEST
@@ -52,6 +53,7 @@ constexpr std::array<GroupInfo, static_cast<size_t>(Group::Count)> kGroups{{
     {"fx", installFx},
     {"pvp", installPvp},
     {"enemy", installEnemy},
+    {"enemy damage", installEnemyDamage},
     {"story", installStory},
     {"map", installMap},
 #if TWILI_ENABLE_AUTOTEST

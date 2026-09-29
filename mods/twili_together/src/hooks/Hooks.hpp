@@ -18,6 +18,7 @@ enum class Group : uint8_t {
     Fx,
     Pvp,
     Enemy,
+    EnemyDamage,
     Story,
     Map,
     Autotest,

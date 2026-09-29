@@ -160,7 +160,7 @@ World sync (`StepsWorld.cpp`):
 
 | op | fields | does |
 | --- | --- | --- |
-| `setRoomOption` / `waitRoomOption` | `name` (`syncWorldState`, `shareWoodenShield`, `teleportMode`, `hidePlayersInCutscene`, `syncNPCs`, `pvpMode`, `pvpFriendlyFire`, `pvpLethal`, `showLocationsMode`, `cutsceneSync`), `value`, `timeoutSec` | sets our room-setting default (the owner's is the room's, so every instance sets it) / waits until the room reports that value |
+| `setRoomOption` / `waitRoomOption` | `name` (`syncWorldState`, `shareWoodenShield`, `teleportMode`, `hidePlayersInCutscene`, `syncNPCs`, `syncEnemyDamage`, `pvpMode`, `pvpFriendlyFire`, `pvpLethal`, `showLocationsMode`, `cutsceneSync`), `value`, `timeoutSec` | sets our room-setting default (the owner's is the room's, so every instance sets it) / waits until the room reports that value |
 | `forceLayout` | `layout` (16 hex digits) | before `connect`: announce another save layout, as a different game build would |
 | `waitLayoutMismatch` | `peer`, `timeoutSec` | until the incompatible-layout toast was shown for that peer |
 | `expectNoItem` | `item`, `forSec` (5) | fails if the item's first-get bit gets set within `forSec` |
@@ -255,6 +255,9 @@ Life, PvP and enemies (`StepsPvp.cpp`, `StepsEnemy.cpp`):
 
 Epona (`StepsHorse.cpp`):
 
+| `damageEnemy` | `tag`, `amount` | lowers health as an attributed hit of ours (unlike `setEnemyHealth`), so it is shared |
+| `sendEnemyDamageForTest` | `tag`, `dmg`, `pct` | sends an ENEMY_DAMAGE for the tagged enemy with any sender percent (not counted as sent) |
+| `expectEnemyDamage` | `sent`, `received`, `applied`, `floored`, `dropped`, `timeoutSec` | the shared-damage counters given (hits, not packets) |
 | op | fields | does |
 | --- | --- | --- |
 | `spawnHorse` | `dist` (250), `side`, `timeoutSec` | our Epona shown in front of our Link (created when the stage has none) |

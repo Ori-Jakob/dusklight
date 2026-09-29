@@ -28,6 +28,7 @@ constexpr RoomOption kRoomOptions[] = {
     {"teleportMode", Var::TeleportMode, &RoomState::teleportMode},
     {"hidePlayersInCutscene", Var::HidePlayersInCutscene, &RoomState::hidePlayersInCutscene},
     {"syncNPCs", Var::SyncEnemyDeaths, &RoomState::syncNPCs},
+    {"syncEnemyDamage", Var::SyncEnemyDamage, &RoomState::syncEnemyDamage},
     {"pvpMode", Var::PvpMode, &RoomState::pvpMode},
     {"pvpFriendlyFire", Var::PvpFriendlyFire, &RoomState::pvpFriendlyFire},
     {"pvpLethal", Var::PvpLethal, &RoomState::pvpLethal},

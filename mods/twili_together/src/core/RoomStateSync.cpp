@@ -28,6 +28,7 @@ RoomState Session::roomStateFromSettings() const {
     state.syncWorldState = config::getBool(Var::SyncWorldState);
     state.shareWoodenShield = config::getBool(Var::ShareWoodenShield);
     state.syncNPCs = config::getBool(Var::SyncEnemyDeaths);
+    state.syncEnemyDamage = config::getBool(Var::SyncEnemyDamage);
     state.cutsceneSync = config::getBool(Var::CutsceneSync);
     state.hidePlayersInCutscene = config::getBool(Var::HidePlayersInCutscene);
     state.enemyHealthMultiplier = static_cast<int>(config::getInt(Var::EnemyHealthMultiplier));

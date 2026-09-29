@@ -20,6 +20,8 @@ struct RoomState {
     bool shareWoodenShield = true;
     // Enemy-death sync ("Sync Enemy Deaths").
     bool syncNPCs = false;
+    // Needs syncNPCs ("Share Enemy Damage").
+    bool syncEnemyDamage = true;
     bool cutsceneSync = true;
     bool hidePlayersInCutscene = false;
     int enemyHealthMultiplier = 100;  // percent
@@ -30,7 +32,8 @@ struct RoomState {
                pvpLethal == o.pvpLethal && showLocationsMode == o.showLocationsMode &&
                teleportMode == o.teleportMode && teleportAcrossTeams == o.teleportAcrossTeams &&
                syncWorldState == o.syncWorldState && shareWoodenShield == o.shareWoodenShield &&
-               syncNPCs == o.syncNPCs && cutsceneSync == o.cutsceneSync &&
+               syncNPCs == o.syncNPCs && syncEnemyDamage == o.syncEnemyDamage &&
+               cutsceneSync == o.cutsceneSync &&
                hidePlayersInCutscene == o.hidePlayersInCutscene &&
                enemyHealthMultiplier == o.enemyHealthMultiplier;
     }
@@ -47,6 +50,7 @@ struct RoomState {
             {"syncWorldState", syncWorldState},
             {"shareWoodenShield", shareWoodenShield},
             {"syncNPCs", syncNPCs},
+            {"syncEnemyDamage", syncEnemyDamage},
             {"cutsceneSync", cutsceneSync},
             {"hidePlayersInCutscene", hidePlayersInCutscene},
             {"enemyHealthMultiplier", enemyHealthMultiplier},
@@ -66,6 +70,7 @@ struct RoomState {
         syncWorldState = j.value("syncWorldState", syncWorldState);
         shareWoodenShield = j.value("shareWoodenShield", shareWoodenShield);
         syncNPCs = j.value("syncNPCs", syncNPCs);
+        syncEnemyDamage = j.value("syncEnemyDamage", syncEnemyDamage);
         cutsceneSync = j.value("cutsceneSync", cutsceneSync);
         hidePlayersInCutscene = j.value("hidePlayersInCutscene", hidePlayersInCutscene);
         enemyHealthMultiplier = j.value("enemyHealthMultiplier", enemyHealthMultiplier);

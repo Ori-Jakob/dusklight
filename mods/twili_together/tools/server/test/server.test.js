@@ -372,6 +372,38 @@ test("ENEMY_DEFEATED reaches only teammates in the sender's stage and layer, sta
     }
 }));
 
+test("ENEMY_DAMAGE reaches only teammates in the sender's stage and layer, stamped", () => withServer(async (mk) => {
+    const a = mk();
+    const b = mk();
+    const otherTeam = mk();
+    const otherLayer = mk();
+    const noSave = mk();
+    await a.join({ teamId: "red", sessionKey: "ka" });
+    await b.join({ teamId: "red" });
+    await otherTeam.join({ teamId: "blue" });
+    await otherLayer.join({ teamId: "red" });
+    await noSave.join({ teamId: "red" });
+    a.enterStage("F_SP108", 0);
+    b.enterStage("F_SP108", 0);
+    otherTeam.enterStage("F_SP108", 0);
+    otherLayer.enterStage("F_SP108", 1);
+    noSave.enterStage("F_SP108", 0, { isSaveLoaded: false });
+    await settle();
+    const hits = [{ roomNo: 0, procName: 485, params: 0xffffff00, setId: 0xffff, dup: 1, home: { x: 1, y: 2, z: 3 },
+        dmg: 20, pct: 200, hpAfter: 30 }];
+    a.send({ type: "ENEMY_DAMAGE", v: 1, quiet: true, teamId: "blue", addToQueue: true, stageName: "F_SP108", layerNo: 0, hits });
+    const got = await b.waitType("ENEMY_DAMAGE");
+    assert.equal(got.clientId, a.id);
+    assert.equal(got.teamId, "red", "server overrides a spoofed teamId with the sender's real team");
+    assert.equal(got.senderSessionKey, "ka");
+    assert.equal(got.addToQueue, false);
+    assert.deepEqual(got.hits, hits);
+    for (const [c, what] of [[otherTeam, "another team"], [otherLayer, "another layer"], [noSave, "a client with no save"],
+        [a, "the sender"]]) {
+        await c.expectNone((p) => p.type === "ENEMY_DAMAGE", `ENEMY_DAMAGE to ${what}`);
+    }
+}));
+
 test("queued team packets are numbered by the server, live and in the replay", () => withServer(async (mk) => {
     const a = mk();
     const b = mk();
@@ -424,6 +456,22 @@ test("ENEMY_DEFEATED is never queued for a teammate who joins later", () => with
     b.send({ type: "REQUEST_WORLD_STATE", catchUp: true });
     await b.waitType("SET_FLAG", (p) => p.flagNo === 3 && p.fromQueue === true);
     await b.expectNone((p) => p.type === "ENEMY_DEFEATED", "replayed ENEMY_DEFEATED");
+}));
+
+test("ENEMY_DAMAGE is never queued for a teammate who joins later", () => withServer(async (mk) => {
+    const a = mk();
+    await a.join({ teamId: "t" });
+    a.enterStage("F_SP108", 0);
+    await settle();
+    a.send({ type: "ENEMY_DAMAGE", v: 1, addToQueue: true, stageName: "F_SP108", layerNo: 0, hits: [] });
+    a.send({ type: "SET_FLAG", flagNo: 3, addToQueue: true });
+    await settle();
+    const b = mk();
+    await b.join({ teamId: "t" });
+    b.enterStage("F_SP108", 0);
+    b.send({ type: "REQUEST_WORLD_STATE", catchUp: true });
+    await b.waitType("SET_FLAG", (p) => p.flagNo === 3 && p.fromQueue === true);
+    await b.expectNone((p) => p.type === "ENEMY_DAMAGE", "replayed ENEMY_DAMAGE");
 }));
 
 test("STORY_EVENT reaches only teammates in the sender's stage and layer, stamped and never queued", () => withServer(async (mk) => {
@@ -905,9 +953,11 @@ test("room state values are type-checked", () => withServer(async (mk) => {
     const b = mk();
     await a.join();
     await b.join();
-    a.send({ type: "UPDATE_ROOM_STATE", state: { pvpMode: "yes", syncWorldState: null, enemyHealthMultiplier: 1e9 } });
+    a.send({ type: "UPDATE_ROOM_STATE", state: { pvpMode: "yes", syncWorldState: null, enemyHealthMultiplier: 1e9,
+        syncEnemyDamage: 0 } });
     const got = await b.waitType("UPDATE_ROOM_STATE");
     assert.equal(typeof got.state.pvpMode, "boolean");
+    assert.equal(got.state.syncEnemyDamage, true, "on by default, and a number is no boolean");
     assert.equal(got.state.syncWorldState, true, "invalid value keeps the previous setting");
     assert.equal(got.state.enemyHealthMultiplier, 500, "multiplier is clamped to the UI range");
 }));
@@ -1084,11 +1134,11 @@ test("hostile field types and unserializable packets do not kill the server", ()
     const evil = { toString: 1 };
     for (const type of ["UPDATE_CLIENT_STATE", "SET_FLAG", "UNSET_FLAG", "SET_EVENT_BIT", "UNSET_EVENT_BIT", "GIVE_ITEM",
         "UPDATE_DUNGEON_ITEMS", "UPDATE_WORLD_STATE", "REQUEST_WORLD_STATE", "UPDATE_ROOM_STATE", "PLAYER_SFX",
-        "ENEMY_DEFEATED", "STORY_EVENT", "STORY_MOVE"]) {
+        "ENEMY_DEFEATED", "ENEMY_DAMAGE", "STORY_EVENT", "STORY_MOVE"]) {
         a.send({
             type, no: evil, itemNo: evil, flagNo: evil, roomNo: evil, stageName: evil, saveTblNo: evil, layerNo: evil,
             isSaveLoaded: evil, category: evil, keyDelta: evil, dungeonItemBits: evil, targetClientId: evil,
-            soundId: evil, kind: evil, kills: evil, state: { pvpMode: evil, nested: [evil] },
+            soundId: evil, kind: evil, kills: evil, hits: evil, state: { pvpMode: evil, nested: [evil] },
             ph: evil, id: evil, stage: evil, room: evil, layer: evil, m: evil, req: evil, from: evil, to: evil,
             curated: evil, qual: evil,
         });
@@ -2008,12 +2058,14 @@ test("team traffic flows only between members on the team game; presence reaches
     a.send({ type: "SET_FLAG", flagNo: 1, addToQueue: true });
     a.send({ type: "GIVE_ITEM", itemNo: 0x40, addToQueue: true });
     a.send({ type: "ENEMY_DEFEATED", stageName: "F_SP103", layerNo: 0, kills: [] });
+    a.send({ type: "ENEMY_DAMAGE", stageName: "F_SP103", layerNo: 0, hits: [] });
     a.send({ type: "STORY_MOVE", ph: "arrive", from: {}, to: {} });
     await b.waitType("SET_FLAG");
     await b.waitType("GIVE_ITEM");
     await b.waitType("ENEMY_DEFEATED");
+    await b.waitType("ENEMY_DAMAGE");
     await b.waitType("STORY_MOVE");
-    await off.expectNone((p) => ["SET_FLAG", "GIVE_ITEM", "ENEMY_DEFEATED", "STORY_MOVE"].includes(p.type),
+    await off.expectNone((p) => ["SET_FLAG", "GIVE_ITEM", "ENEMY_DEFEATED", "ENEMY_DAMAGE", "STORY_MOVE"].includes(p.type),
         "team traffic to a mismatched member");
 
     off.send({ type: "SET_FLAG", flagNo: 9, addToQueue: true });

@@ -5,6 +5,7 @@
 #include "core/Config.hpp"
 #include "core/Log.hpp"
 #include "core/Session.hpp"
+#include "enemy/EnemyDamage.hpp"
 #include "enemy/EnemyScaling.hpp"
 #include "enemy/EnemySync.hpp"
 
@@ -200,6 +201,32 @@ std::optional<bool> expectEnemySync(StepContext& ctx) {
     return false;
 }
 
+std::optional<bool> expectEnemyDamage(StepContext& ctx) {
+    const enemy_damage::Stats& st = enemy_damage::stats();
+    const std::pair<const char*, uint32_t> counters[] = {
+        {"sent", st.sent},
+        {"received", st.received},
+        {"applied", st.applied},
+        {"floored", st.floored},
+        {"dropped", st.dropped},
+    };
+    bool match = true;
+    for (const auto& [name, value] : counters) {
+        if (ctx.step.contains(name) && ctx.step[name].get<uint32_t>() != value) {
+            match = false;
+        }
+    }
+    if (match) {
+        return true;
+    }
+    if (ctx.seconds > ctx.timeout(10.0)) {
+        ctx.fail(fmt::format("enemy damage stats sent={} received={} applied={} floored={} "
+                             "dropped={}, step wants {}",
+            st.sent, st.received, st.applied, st.floored, st.dropped, ctx.step.dump()));
+    }
+    return false;
+}
+
 std::optional<bool> expectEnemiesGone(StepContext& ctx) {
     if (!ctx.begun) {
         sGoneAt.clear();
@@ -327,6 +354,34 @@ std::optional<bool> enemySteps(const std::string& op, StepContext& ctx) {
         }
         ac->health = static_cast<s16>(ctx.step.value("health", 0));
         return true;
+    }
+
+    // An attributed hit (a cc_at_check that lowered health), unlike setEnemyHealth.
+    if (op == "damageEnemy") {
+        fopAc_ac_c* ac = runningActor(taggedId(ctx.step));
+        if (ac == nullptr) {
+            ctx.fail("damageEnemy: enemy '" + tagOf(ctx) + "' is not running");
+            return false;
+        }
+        enemy_damage::noteLocalHitForTest(ac);
+        ac->health = static_cast<s16>(ac->health - ctx.step.value("amount", 1));
+        return true;
+    }
+
+    if (op == "sendEnemyDamageForTest") {
+        fopAc_ac_c* ac = runningActor(taggedId(ctx.step));
+        if (ac == nullptr || !enemy_damage::sendForTest(ac, ctx.step.value("dmg", 1),
+                                 ctx.step.value("pct", 100)))
+        {
+            ctx.fail("sendEnemyDamageForTest: '" + tagOf(ctx) +
+                     "' is not a running shared enemy, or no teammate is here");
+            return false;
+        }
+        return true;
+    }
+
+    if (op == "expectEnemyDamage") {
+        return expectEnemyDamage(ctx);
     }
 
     if (op == "deleteEnemy") {

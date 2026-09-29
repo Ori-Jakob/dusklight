@@ -48,6 +48,39 @@ const syncOn = (owner) => [
     { op: "waitRoomOption", name: "syncNPCs", timeoutSec: 30 },
 ];
 
+// Share Enemy Damage is on by default; it needs Sync Enemy Deaths.
+const damageOn = (owner) => [
+    ...syncOn(owner),
+    ...(owner ? [{ op: "setRoomOption", name: "syncEnemyDamage" }] : []),
+    { op: "waitRoomOption", name: "syncEnemyDamage", timeoutSec: 30 },
+];
+
+// Two instances in the Forest Temple entrance, A owns the room; `steps(isA, other)` after connecting.
+const pair = (name, description, steps, cvars = CVARS) => ({
+    name,
+    description,
+    timeoutSec: 300,
+    cvars,
+    instances: ["A", "B"].map((inst) => {
+        const isA = inst === "A";
+        const other = isA ? "B" : "A";
+        return {
+            name: inst,
+            start: STAGES.forestTemple,
+            launchDelayMs: isA ? 20000 : 1500,
+            steps: [
+                waitStage(STAGES.forestTemple),
+                ...connect,
+                ...steps(isA, other),
+                ...barrier("done", other),
+                { op: "quit" },
+            ],
+        };
+    }),
+});
+
+const health = (tag, value, extra = {}) => ({ op: "expectEnemyHealth", tag, health: value, timeoutSec: 10, ...extra });
+
 module.exports = [
     {
         name: "enemy-health",
@@ -298,6 +331,110 @@ module.exports = [
                     ...barrier("gone", other),
                     { op: "expectEnemySync", ...(isA ? { sent: 3, received: 0 } : { sent: 0, received: 3, applied: 3 }) },
                     ...barrier("done", other),
+                    { op: "quit" },
+                ],
+            };
+        }),
+    },
+    pair("enemy-damage-share",
+        "at 200% health, a teammate's hits lower our copy of a Bokoblin (both ways), a health write without a hit is not shared, a Tektite is not shared, a remote hit stops at the floor of 2, and the kill still syncs",
+        (isA, other) => [
+            ...(isA ? [{ op: "setEnemyHealthPercent", value: 200 }] : []),
+            { op: "expectEnemyHealthPercent", value: 200, timeoutSec: 30 },
+            ...damageOn(isA),
+            { op: "waitPeers", count: 1, sameStage: true, timeoutSec: 120 },
+            ...barrier("ready", other),
+            ...spawnAndSettle([["boko", BOKOBLIN, 0, 250], ["tek", TEKTITE, 250, 250], ["boko2", BOKOBLIN, -250, 250]]),
+            health("boko", 80, { max: 80 }),
+            ...barrier("spawned", other),
+            ...(isA ? [{ op: "damageEnemy", tag: "boko", amount: 30 }] : []),
+            health("boko", 50),
+            ...barrier("a-hit", other),
+            ...(isA ? [] : [{ op: "damageEnemy", tag: "boko", amount: 30 }]),
+            health("boko", 20),
+            ...barrier("b-hit", other),
+            // Outside the attribution window of A's own hit: a write without a hit stays local.
+            { op: "wait", frames: 30 },
+            ...(isA ? [{ op: "setEnemyHealth", tag: "boko", health: 5 }, { op: "damageEnemy", tag: "tek", amount: 20 }] : []),
+            { op: "wait", frames: 60 },
+            health("boko", isA ? 5 : 20, { timeoutSec: 0 }),
+            health("tek", isA ? 60 : 80, { timeoutSec: 0 }),
+            ...barrier("unshared", other),
+            ...(isA ? [{ op: "damageEnemy", tag: "boko2", amount: 60 }] : []),
+            health("boko2", 20),
+            ...barrier("boko2-hit", other),
+            ...(isA ? [] : [{ op: "damageEnemy", tag: "boko2", amount: 10 }]),
+            health("boko2", 10),
+            ...barrier("boko2-hit2", other),
+            // More than B has left: B's copy stops at the floor instead of dying.
+            ...(isA ? [{ op: "sendEnemyDamageForTest", tag: "boko2", dmg: 50, pct: 200 }] : [health("boko2", 2)]),
+            ...barrier("floored", other),
+            ...(isA ? [{ op: "killEnemy", tag: "boko2", how: "real" }] : []),
+            { op: "expectEnemyGone", tag: "boko2", timeoutSec: 15 },
+            { op: "expectEnemyDamage", ...(isA ? { sent: 2, received: 2, applied: 2, floored: 0, dropped: 0 } : { sent: 2, received: 3, applied: 3, floored: 1, dropped: 0 }) },
+        ]),
+    pair("enemy-damage-scale",
+        "a hit converts between the sender's and our health percent, and a rescale is never sent as damage",
+        (isA, other) => [
+            ...(isA ? [{ op: "setEnemyHealthPercent", value: 200 }] : []),
+            { op: "expectEnemyHealthPercent", value: 200, timeoutSec: 30 },
+            ...damageOn(isA),
+            { op: "waitPeers", count: 1, sameStage: true, timeoutSec: 120 },
+            ...barrier("ready", other),
+            ...spawnAndSettle([["boko", BOKOBLIN, 0, 250]]),
+            health("boko", 80, { max: 80 }),
+            ...barrier("spawned", other),
+            // 30 at 300% is 20 at our 200%.
+            ...(isA ? [{ op: "sendEnemyDamageForTest", tag: "boko", dmg: 30, pct: 300 }] : [health("boko", 60)]),
+            ...barrier("converted", other),
+            ...(isA ? [{ op: "damageEnemy", tag: "boko", amount: 10 }] : []),
+            health("boko", isA ? 70 : 50),
+            ...barrier("hit", other),
+            ...(isA ? [{ op: "setEnemyHealthPercent", value: 300 }] : []),
+            health("boko", isA ? 105 : 75, { max: 120, timeoutSec: 20 }),
+            ...barrier("rescaled", other),
+            ...(isA ? [{ op: "damageEnemy", tag: "boko", amount: 30 }] : []),
+            health("boko", isA ? 75 : 45),
+            ...barrier("hit2", other),
+            { op: "wait", frames: 30 },
+            { op: "expectEnemyDamage", ...(isA ? { sent: 2, received: 0 } : { sent: 0, received: 3, applied: 3, floored: 0, dropped: 0 }) },
+        ]),
+    {
+        name: "enemy-damage-scope",
+        description: "a hit reaches a teammate's copy but not another team's, and nobody's once the owner turns Share Enemy Damage off",
+        timeoutSec: 360,
+        cvars: CVARS,
+        instances: [
+            ["A", "red", ["B", "C"]],
+            ["B", "red", ["A", "C"]],
+            ["C", "blue", ["A", "B"]],
+        ].map(([name, team, others]) => {
+            const isA = name === "A";
+            return {
+                name,
+                start: STAGES.forestTemple,
+                launchDelayMs: isA ? 20000 : 3000,
+                steps: [
+                    waitStage(STAGES.forestTemple),
+                    { op: "connect", team },
+                    { op: "waitConnected", timeoutSec: 20 },
+                    ...damageOn(isA),
+                    { op: "waitPeers", count: 2, sameStage: true, timeoutSec: 150 },
+                    ...barrierAll("ready", others),
+                    ...spawnAndSettle([["one", BOKOBLIN, 0, 250]]),
+                    ...barrierAll("spawned", others),
+                    ...(isA ? [{ op: "damageEnemy", tag: "one", amount: 10 }] : []),
+                    ...(name === "C" ? [{ op: "wait", frames: 60 }, health("one", 40, { timeoutSec: 0 })] : [health("one", 30)]),
+                    ...barrierAll("hit", others),
+                    ...(isA ? [{ op: "setRoomOption", name: "syncEnemyDamage", value: false }] : []),
+                    { op: "waitRoomOption", name: "syncEnemyDamage", value: false, timeoutSec: 30 },
+                    ...barrierAll("share-off", others),
+                    ...(isA ? [{ op: "damageEnemy", tag: "one", amount: 10 }] : []),
+                    ...barrierAll("hit2", others),
+                    { op: "wait", frames: 90 },
+                    health("one", isA ? 20 : name === "B" ? 30 : 40, { timeoutSec: 0 }),
+                    { op: "expectEnemyDamage", ...(isA ? { sent: 1, received: 0 } : name === "B" ? { sent: 0, received: 1, applied: 1 } : { sent: 0, received: 0, applied: 0 }) },
+                    ...barrierAll("done", others),
                     { op: "quit" },
                 ],
             };
