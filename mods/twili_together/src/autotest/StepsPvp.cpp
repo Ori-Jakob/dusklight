@@ -1,5 +1,6 @@
 // Steps for life and PvP; reference in the runner README.
 
+#include "autotest/AutoTest.hpp"
 #include "autotest/AutoTestSteps.hpp"
 
 #include "actors/DummyPlayer.hpp"
@@ -7,14 +8,21 @@
 #include "core/Log.hpp"
 #include "core/Session.hpp"
 #include "pvp/Pvp.hpp"
+#include "ui/HitMarkers.hpp"
 
+#include "SSystem/SComponent/c_lib.h"
 #include "SSystem/SComponent/c_math.h"
 #include "d/actor/d_a_alink.h"
+#include "d/actor/d_a_horse.h"
+#include "d/d_attention.h"
 #include "d/d_camera.h"
 #include "d/d_com_inf_game.h"
+#include "d/d_s_play.h"
 
 #include <fmt/format.h>
 
+#include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <initializer_list>
@@ -32,11 +40,14 @@ bool peerInMyLayer(const Client& c) {
            c.layerNo == static_cast<int8_t>(dComIfG_play_c::getLayerNo(0));
 }
 
-fopAc_ac_c* firstPeerDummy() {
+fopAc_ac_c* firstPeerDummy(uint32_t* clientId = nullptr) {
     auto& b = Session::instance();
     for (const auto& [id, c] : b.clients()) {
         if (peerInMyLayer(c)) {
             if (fopAc_ac_c* dummy = b.dummyActorForClient(id)) {
+                if (clientId != nullptr) {
+                    *clientId = id;
+                }
                 return dummy;
             }
         }
@@ -195,13 +206,15 @@ bool expectPvpStats(StepContext& ctx) {
     const Client* c = findPeer(target);
     const pvp::AttackStats* found = c != nullptr ? pvp::attackStats(c->clientId) : nullptr;
     const pvp::AttackStats st = found != nullptr ? *found : pvp::AttackStats{};
-    const std::string why = countMismatch(
-        step, {{"sent", st.sent}, {"applied", st.applied}, {"blocked", st.blocked},
-                  {"dropped", st.dropped}, {"refused", st.refused}, {"damage", st.damage}});
+    const std::string why =
+        countMismatch(step, {{"sent", st.sent}, {"applied", st.applied}, {"blocked", st.blocked},
+                                {"dropped", st.dropped}, {"refused", st.refused},
+                                {"damage", st.damage}, {"hitStops", st.hitStops}});
     if (why.empty()) {
         TwiliLog.info("[autotest] PvP stats on {}: sent {} applied {} blocked {} dropped {} "
-                      "refused {} damage {}",
-            target, st.sent, st.applied, st.blocked, st.dropped, st.refused, st.damage);
+                      "refused {} damage {} hit-stops {}",
+            target, st.sent, st.applied, st.blocked, st.dropped, st.refused, st.damage,
+            st.hitStops);
         return true;
     }
     if (ctx.seconds >= ctx.timeout(0.0)) {
@@ -281,6 +294,184 @@ bool expectDummyHurtbox(StepContext& ctx) {
     return false;
 }
 
+// Until the scene pauses right after a hit of ours on `target` (hit-stop), briefly.
+int sHitStopMax = 0;
+
+bool expectHitStop(StepContext& ctx) {
+    const json& step = ctx.step;
+    const Client* c = findPeer(step.value("target", std::string{}));
+    const pvp::AttackStats* st = c != nullptr ? pvp::attackStats(c->clientId) : nullptr;
+    const int pause = dScnPly_c::pauseTimer;
+    if (!ctx.begun) {
+        sHitStopMax = 0;
+    }
+    sHitStopMax = std::max(sHitStopMax, pause);
+    if (step.value("none", false)) {
+        if (pause != 0) {
+            ctx.fail(fmt::format("expectHitStop: the scene paused for {} ticks", pause));
+            return false;
+        }
+        return ctx.ticks >= step.value("frames", 30);
+    }
+    const uint32_t hitStops = st != nullptr ? st->hitStops : 0;
+    if (sHitStopMax > 0 && hitStops >= static_cast<uint32_t>(step.value("count", 1))) {
+        if (sHitStopMax > step.value("maxFrames", 3)) {
+            ctx.fail(fmt::format("expectHitStop: paused for {} ticks", sHitStopMax));
+            return false;
+        }
+        TwiliLog.info("[autotest] hit-stop of {} ticks ({} so far)", sHitStopMax, hitStops);
+        return true;
+    }
+    if (ctx.seconds > ctx.timeout(5.0)) {
+        ctx.fail(fmt::format(
+            "expectHitStop: largest pause {} ticks, {} hit-stops", sHitStopMax, hitStops));
+    }
+    return false;
+}
+
+// The latest marker for a hit of ours on `target`, from its DAMAGE_RESULT.
+bool expectHitMarker(StepContext& ctx) {
+    const json& step = ctx.step;
+    const std::string target = step.value("target", std::string{});
+    const Client* c = findPeer(target);
+    const pvp::HitMarkerRecord* found = nullptr;
+    for (const pvp::HitMarkerRecord& r : pvp::hitMarkers()) {
+        if (c != nullptr && r.victimId == c->clientId) {
+            found = &r;
+        }
+    }
+    if (found == nullptr || (step.contains("drawn") && step.value("drawn", true) &&
+                                ui::hit_markers::drawnFrames() == 0))
+    {
+        if (ctx.seconds > ctx.timeout(10.0)) {
+            ctx.fail(fmt::format("expectHitMarker: {} on '{}' (drawn frames {})",
+                found == nullptr ? "no marker" : "never drawn", target,
+                ui::hit_markers::drawnFrames()));
+        }
+        return false;
+    }
+    const std::string text = ui::hit_markers::text(found->result == "blocked", found->damage);
+    TwiliLog.info("[autotest] hit marker on {}: {} \"{}\"", target, found->result, text);
+    std::string why;
+    if (step.contains("result") && step.value("result", std::string{}) != found->result) {
+        why = "result " + found->result;
+    } else if (step.contains("text") && step.value("text", std::string{}) != text) {
+        why = "text \"" + text + "\"";
+    } else if (step.contains("damage") && step.value("damage", 0) != found->damage) {
+        why = fmt::format("damage {}", found->damage);
+    }
+    if (!why.empty()) {
+        ctx.fail("expectHitMarker: " + why);
+        return false;
+    }
+    return true;
+}
+
+// Z-targeting (hold L too): locked on the first peer's dummy, or not for `frames` ticks.
+bool expectLockOn(StepContext& ctx) {
+    const bool want = ctx.step.value("locked", true);
+    fopAc_ac_c* dummy = firstPeerDummy();
+    dAttention_c* attention = dComIfGp_getAttention();
+    const bool locked = dummy != nullptr && attention != nullptr && attention->LockonTruth() &&
+                        attention->LockonTarget(0) == dummy;
+    const u32 flags = dummy != nullptr ? dummy->attention_info.flags : 0;
+    if (!want) {
+        if (locked) {
+            ctx.fail(fmt::format("expectLockOn: locked on the dummy (flags 0x{:X})", flags));
+            return false;
+        }
+        return ctx.ticks >= ctx.step.value("frames", 30);
+    }
+    if (locked) {
+        TwiliLog.info(
+            "[autotest] locked on the dummy after {} ticks (flags 0x{:X})", ctx.ticks, flags);
+        return true;
+    }
+    if (ctx.seconds > ctx.timeout(5.0)) {
+        ctx.fail(
+            fmt::format("expectLockOn: not locked on the dummy (flags 0x{:X}, target {})", flags,
+                attention != nullptr && attention->LockonTarget(0) != nullptr ? "other" : "none"));
+    }
+    return false;
+}
+
+// A knockout toast with this text (or none for `frames` ticks).
+bool expectPvpToast(StepContext& ctx) {
+    const json& step = ctx.step;
+    const auto& toasts = pvp::knockoutToasts();
+    if (step.value("none", false)) {
+        if (!toasts.empty()) {
+            ctx.fail("expectPvpToast: got \"" + toasts.back() + "\"");
+            return false;
+        }
+        return ctx.ticks >= step.value("frames", 30);
+    }
+    const std::string want = step.value("text", std::string{});
+    const auto n = std::count(toasts.begin(), toasts.end(), want);
+    if (step.contains("max") && n > step.value("max", 0)) {
+        ctx.fail(fmt::format("expectPvpToast: \"{}\" x{}", want, n));
+        return false;
+    }
+    if (n >= step.value("count", 1)) {
+        TwiliLog.info("[autotest] PvP toast \"{}\" x{}", want, n);
+        return true;
+    }
+    if (ctx.seconds > ctx.timeout(10.0)) {
+        ctx.fail(fmt::format("expectPvpToast: \"{}\" x{} (last \"{}\")", want, n,
+            toasts.empty() ? "" : toasts.back()));
+    }
+    return false;
+}
+
+// Our ridden Epona gallops at the first peer's dummy until our collision pass sends it a hit.
+uint32_t sChargeSentBefore = 0;
+
+bool chargeDummy(StepContext& ctx) {
+    daAlink_c* link = daAlink_getAlinkActorClass();
+    daHorse_c* h = dComIfGp_getHorseActor();
+    uint32_t victimId = 0;
+    fopAc_ac_c* dummy = firstPeerDummy(&victimId);
+    if (link == nullptr || h == nullptr || dummy == nullptr || !link->checkHorseRide()) {
+        ctx.fail("chargeDummy: not riding our horse, or no dummy for a peer in our layer");
+        return false;
+    }
+    const pvp::AttackStats* st = pvp::attackStats(victimId);
+    const uint32_t sent = st != nullptr ? st->sent : 0;
+    if (!ctx.begun) {
+        sChargeSentBefore = sent;
+        const float dist = ctx.step.value("dist", 600.0f);
+        const s16 yaw = dummy->shape_angle.y;
+        cXyz pos(dummy->current.pos.x + cM_ssin(yaw) * dist, dummy->current.pos.y,
+            dummy->current.pos.z + cM_scos(yaw) * dist);
+        const cXyz delta = pos - h->current.pos;
+        h->setHorsePosAndAngle(&pos, static_cast<s16>(yaw + 0x8000));
+        h->initHorseMtx();
+        if (camera_process_class* camera = dComIfGp_getCamera(dComIfGp_getPlayerCameraID(0))) {
+            camera->mCamera.Reset(camera->mCamera.mCenter + delta, camera->mCamera.mEye + delta);
+        }
+        interp::requestPresentationSync();
+        return false;
+    }
+    if (sent > sChargeSentBefore) {
+        TwiliLog.info("[autotest] charged the dummy: hit sent after {} ticks", ctx.ticks);
+        return true;
+    }
+    // Stick input is camera-relative: aim it at the dummy, and keep her at a gallop (spurred).
+    const s16 want = cLib_targetAngleY(&h->current.pos, &dummy->current.pos);
+    const s16 camY = dCam_getControledAngleY(dComIfGp_getCamera(dComIfGp_getPlayerCameraID(0)));
+    const float theta = static_cast<s16>(want - camY + 0x8000) * (3.14159265f / 32768.0f);
+    pulsePad(std::sin(theta), -std::cos(theta), 0, 2);
+    h->speedF = std::max(h->speedF, h->getNormalMaxSpeedF());
+    if (ctx.step.value("charge", true)) {
+        h->m_lashAccelerationTime = std::max<s16>(h->m_lashAccelerationTime, 10);
+    }
+    if (ctx.seconds > ctx.timeout(10.0)) {
+        ctx.fail(fmt::format("chargeDummy: no hit sent, {:.0f} units from the dummy",
+            h->current.pos.absXZ(dummy->current.pos)));
+    }
+    return false;
+}
+
 std::optional<bool> pvpSteps(const std::string& op, StepContext& ctx) {
     const json& step = ctx.step;
 
@@ -355,6 +546,21 @@ std::optional<bool> pvpSteps(const std::string& op, StepContext& ctx) {
     }
     if (op == "expectDummyHurtbox") {
         return expectDummyHurtbox(ctx);
+    }
+    if (op == "expectHitStop") {
+        return expectHitStop(ctx);
+    }
+    if (op == "expectHitMarker") {
+        return expectHitMarker(ctx);
+    }
+    if (op == "expectLockOn") {
+        return expectLockOn(ctx);
+    }
+    if (op == "expectPvpToast") {
+        return expectPvpToast(ctx);
+    }
+    if (op == "chargeDummy") {
+        return chargeDummy(ctx);
     }
     return std::nullopt;
 }

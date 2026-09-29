@@ -39,6 +39,9 @@ void overridePad(PADStatus* status) {
     pad.stickX = static_cast<s8>(std::lround(std::clamp(x, -1.0f, 1.0f) * 72.0f));
     pad.stickY = static_cast<s8>(std::lround(std::clamp(y, -1.0f, 1.0f) * 72.0f));
     pad.button = s.padButtons;
+    // Z-targeting reads the analog trigger, not the button bit.
+    pad.triggerLeft = (s.padButtons & PAD_TRIGGER_L) ? 0xFF : 0;
+    pad.triggerRight = (s.padButtons & PAD_TRIGGER_R) ? 0xFF : 0;
     pad.err = PAD_ERR_NONE;
 }
 

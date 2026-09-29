@@ -114,7 +114,7 @@ Timings in `frames` are simulation ticks (30 per second), independent of the fra
 | --- | --- | --- |
 | `waitStage` | `stage`, `timeoutSec` | waits until the player exists and no stage change is pending for 60 ticks |
 | `warp` | `stage`, `room`, `point`, `layer` | requests a stage change |
-| `walk` | `frames`, `stickX`, `stickY`, `circle`, `buttons`, `async` | synthetic port-0 input; `circle` walks in a slow loop; `async` lets the next steps run meanwhile |
+| `walk` | `frames`, `stickX`, `stickY`, `circle`, `buttons`, `async` | synthetic port-0 input (L and R also pull their analog triggers); `circle` walks in a slow loop; `async` lets the next steps run meanwhile |
 | `wait` | `frames` or `sec` | |
 | `markPos` / `expectPos` | none; `minMoved`, `near` (`[x, y, z]`), `maxDist` | remember Link's position / fail unless he moved at least `minMoved` since, or is within `maxDist` of `near` |
 | `connect` | `name`, `room`, `team` (default: instance name, run room, no team) | connects to the run's server |
@@ -236,10 +236,15 @@ Life, PvP and enemies (`StepsPvp.cpp`, `StepsEnemy.cpp`):
 | `approachDummy` | `dist` (110) | our Link in front of the first peer's dummy, facing it |
 | `sendPvpHit` | `target`, `kind` (`sword`), `damage` (2), `knockback` (`light`, `knockdown`), `dirY`, `blocked` | a real DAMAGE_PLAYER without our collision pass or cooldown |
 | `expectPvpResult` | `target`, `result` (string or list), `reason`, `damage`, `timeoutSec` | the DAMAGE_RESULT of our last hit on `target` |
-| `expectPvpStats` | `target`, `sent`, `applied`, `blocked`, `dropped`, `refused`, `damage`, `timeoutSec` (0) | our counters for hits on `target` (only the fields given) |
+| `expectPvpStats` | `target`, `sent`, `applied`, `blocked`, `dropped`, `refused`, `damage`, `hitStops`, `timeoutSec` (0) | our counters for hits on `target` (only the fields given) |
 | `expectPvpTaken` | `count` (applied + blocked), `blocked`, `dropped`, `damage`, `reason`, `timeoutSec` (0) | our counters for hits on us |
 | `expectDummyHurtbox` | `registered` (true), `guard`, `timeoutSec` (0) | the first peer's dummy registered its PvP hurtbox this tick |
 | `expectReaction` | `knockback` (`light`, `knockdown`, `none`), `timeoutSec` | our Link plays that reaction (`none`: neither, and no i-frames) |
+| `expectHitStop` | `target`, `count` (1), `maxFrames` (3), `none`, `frames` (30), `timeoutSec` (5) | the scene's pause timer runs after `count` hit-stops of ours on `target`, at most `maxFrames` long (start the swing with an async `walk`); `none`: no pause for `frames` |
+| `expectHitMarker` | `target`, `result` (`applied`, `blocked`), `text`, `damage`, `drawn`, `timeoutSec` (10) | the latest marker a DAMAGE_RESULT from `target` made (`drawn`: a frame drew markers) |
+| `expectLockOn` | `locked` (true), `frames` (30), `timeoutSec` (5) | Z-targeting (hold L with an async `walk`, buttons 0x40) is locked on the first peer's dummy; `locked: false`: not for `frames` |
+| `expectPvpToast` | `text`, `count` (1), `max`, `none`, `frames`, `timeoutSec` (10) | knockout toasts with that text ("A beat B", "A knocked out B") |
+| `chargeDummy` | `dist` (600), `charge` (true), `timeoutSec` (10) | our ridden Epona, `dist` in front of the first peer's dummy, gallops at it (spurred) until we send it a hit |
 | `spawnEnemy` | `name`, `param`, `dx`, `dy`, `dz`, `tag`, `anchor` (`player`, `playerHome`), `setId`, `placed` | an actor in the current room's layer (`placed`: seen by Enemy Count as a stage placement) |
 | `expectEnemyHealth` | `tag`, `health`, `max`, `tracked`, `timeoutSec` | until the tagged actor runs with that health, max and scaling |
 | `setEnemyHealthPercent` | `value`, `timeoutSec` | once we own the room: its enemy health percent |

@@ -2,6 +2,9 @@
 
 const { STAGES, COMMON_CVARS, barrier, meetIn, connect } = require("../lib");
 
+const PAD_B = 0x200;
+const PAD_L = 0x40;
+
 // Fixed difficulty; pvp-rules turns it up on the victim to show PvP ignores it.
 const CVARS = [...COMMON_CVARS, "game.damageMultiplier=1", "game.instantDeath=false",
                "game.infiniteHearts=false"];
@@ -11,7 +14,9 @@ const room = (name, value) => [
     { op: "waitRoomOption", name, value, timeoutSec: 20 },
 ];
 // One B press and time for the cut; the first press only draws a sheathed sword.
-const swing = [{ op: "walk", frames: 1, stickX: 0, stickY: 0, buttons: 0x200 }, { op: "wait", frames: 45 }];
+const swing = [{ op: "walk", frames: 1, stickX: 0, stickY: 0, buttons: PAD_B }, { op: "wait", frames: 45 }];
+// Z-targeting: L held while the next steps run.
+const holdL = (frames) => ({ op: "walk", frames, stickX: 0, stickY: 0, buttons: PAD_L, async: true });
 const drawSword = swing;
 // More than the victim's 30 ticks of i-frames after a hit.
 const recover = { op: "wait", frames: 45 };
@@ -47,6 +52,8 @@ module.exports = [
                     ...barrier("b-ready-2", "B"),
                     { op: "sendPvpHit", target: "B", damage: 4, knockback: "knockdown" },
                     { op: "expectPvpResult", target: "B", result: "applied", damage: 4 },
+                    // 8 -> 4: down to the floor.
+                    { op: "expectPvpToast", text: "A beat B", max: 1 },
                     recover,
                     ...barrier("b-ready-3", "B"),
                     { op: "sendPvpHit", target: "B", damage: 4 },
@@ -65,6 +72,9 @@ module.exports = [
                     ...barrier("b-life-4", "B"),
                     { op: "sendPvpHit", target: "B", damage: 4, knockback: "knockdown" },
                     { op: "expectPvpResult", target: "B", result: "applied", damage: 4 },
+                    { op: "expectPvpToast", text: "A knocked out B" },
+                    // The hits the floor ate knocked nobody out again.
+                    { op: "expectPvpToast", text: "A beat B", max: 1 },
                     { op: "expectPvpStats", target: "B", sent: 7, applied: 5, refused: 1, dropped: 1, damage: 12 },
                     ...barrier("lethal-checked", "B"),
                     { op: "quit" },
@@ -89,6 +99,7 @@ module.exports = [
                     ...barrier("b-ready-2", "A"),
                     { op: "expectReaction", knockback: "knockdown" },
                     { op: "expectLife", value: 4, timeoutSec: 10 },
+                    { op: "expectPvpToast", text: "A beat B" },
                     { op: "expectReaction", knockback: "none", timeoutSec: 20 },
                     ...barrier("b-ready-3", "A"),
                     ...barrier("floor-4", "A"),
@@ -109,6 +120,7 @@ module.exports = [
                     recover,
                     ...barrier("b-life-4", "A"),
                     { op: "expectLife", value: 0, timeoutSec: 10 },
+                    { op: "expectPvpToast", text: "A knocked out B" },
                     ...barrier("lethal-checked", "A"),
                     { op: "quit" },
                 ],
@@ -117,7 +129,7 @@ module.exports = [
     },
     {
         name: "pvp-sword",
-        description: "A's sword on B's dummy: nothing while PvP is off, half a heart once it is on, nothing more inside B's i-frames",
+        description: "A's sword on B's dummy: nothing while PvP is off, half a heart once it is on with a short hit-stop on A and a \"-1/2\" marker, nothing more inside B's i-frames",
         timeoutSec: 360,
         cvars: CVARS,
         instances: [
@@ -138,11 +150,13 @@ module.exports = [
                     ...barrier("b-marked-on", "B"),
                     { op: "expectDummyHurtbox", registered: true, timeoutSec: 10 },
                     { op: "approachDummy" },
+                    { op: "walk", frames: 1, stickX: 0, stickY: 0, buttons: PAD_B, async: true },
+                    // The scene pauses a couple of ticks as the cut lands.
+                    { op: "expectHitStop", target: "B", maxFrames: 3, timeoutSec: 3 },
                     // A second press at once: the combo's next cut lands inside B's i-frames.
-                    { op: "walk", frames: 1, stickX: 0, stickY: 0, buttons: 0x200 },
-                    { op: "wait", frames: 10 },
                     ...swing,
-                    { op: "expectPvpStats", target: "B", applied: 1, damage: 2, timeoutSec: 10 },
+                    { op: "expectPvpStats", target: "B", applied: 1, damage: 2, hitStops: 1, timeoutSec: 10 },
+                    { op: "expectHitMarker", target: "B", result: "applied", text: "-1/2", drawn: true },
                     // The hit's i-frames flash on our dummy of B (StatusFx: B's damage timer).
                     { op: "expectDummyStatus", flashesMin: 1, timeoutSec: 2 },
                     { op: "wait", frames: 60 },
@@ -200,6 +214,10 @@ module.exports = [
                         ...barrier("b-marked", "B"),
                         { op: "expectDummyHurtbox", registered: false },
                         { op: "approachDummy" },
+                        // A teammate without friendly fire is no Z-target either.
+                        holdL(40),
+                        { op: "expectLockOn", locked: false, frames: 30 },
+                        { op: "wait", frames: 15 },
                         ...swing,
                         { op: "expectPvpStats", target: "B", sent: 0 },
                         { op: "sendPvpHit", target: "B", damage: 2 },
@@ -316,7 +334,8 @@ module.exports = [
                     { op: "approachDummy" },
                     ...swing,
                     { op: "expectPvpResult", target: "B", result: "blocked", damage: 0 },
-                    { op: "expectPvpStats", target: "B", blocked: 1, applied: 0 },
+                    { op: "expectHitMarker", target: "B", result: "blocked", text: "Blocked" },
+                    { op: "expectPvpStats", target: "B", blocked: 1, applied: 0, hitStops: 0 },
                     ...barrier("guard-checked", "B"),
                     { op: "quit" },
                 ],
@@ -400,6 +419,103 @@ module.exports = [
                     { op: "expectLifeDelta", delta: -4, timeoutSec: 10 },
                     { op: "expectPvpTaken", count: 2, dropped: 2, damage: 4, reason: "busy" },
                     ...barrier("done", "A"),
+                    { op: "quit" },
+                ],
+            },
+        ],
+    },
+    {
+        name: "pvp-lockon",
+        description: "A Z-targets B's dummy only once PvP is on, and the lock holds through B's i-frames after a hit",
+        timeoutSec: 300,
+        cvars: CVARS,
+        instances: [
+            {
+                name: "A",
+                start: STAGES.southFaron,
+                steps: [
+                    ...connect,
+                    ...meetIn(STAGES.southFaron, "B"),
+                    ...barrier("b-still", "B"),
+                    { op: "approachDummy" },
+                    holdL(45),
+                    { op: "expectLockOn", locked: false, frames: 30 },
+                    { op: "wait", frames: 20 },
+                    ...room("pvpMode", true),
+                    ...barrier("pvp-on", "B"),
+                    { op: "approachDummy" },
+                    holdL(150),
+                    { op: "expectLockOn", locked: true, timeoutSec: 3 },
+                    // B's i-frames turn its hurtbox off; the lock stays.
+                    { op: "sendPvpHit", target: "B", damage: 1 },
+                    { op: "expectPvpResult", target: "B", result: "applied", damage: 1 },
+                    { op: "wait", frames: 10 },
+                    { op: "expectLockOn", locked: true, timeoutSec: 1 },
+                    { op: "wait", frames: 90 },
+                    ...barrier("lock-checked", "B"),
+                    { op: "quit" },
+                ],
+            },
+            {
+                name: "B",
+                start: STAGES.southFaron,
+                steps: [
+                    ...connect,
+                    ...meetIn(STAGES.southFaron, "A"),
+                    { op: "setLife", value: 12 },
+                    { op: "wait", frames: 10 },
+                    ...barrier("b-still", "A"),
+                    ...room("pvpMode", true),
+                    ...barrier("pvp-on", "A"),
+                    { op: "expectPvpTaken", count: 1, damage: 1, timeoutSec: 30 },
+                    ...barrier("lock-checked", "A"),
+                    { op: "quit" },
+                ],
+            },
+        ],
+    },
+    {
+        name: "pvp-horse",
+        description: "A gallops its spurred Epona through B's dummy: the horse row's trample (3, knockdown) lands on B, with no hit-stop on horseback",
+        timeoutSec: 420,
+        cvars: CVARS,
+        instances: [
+            {
+                name: "A",
+                start: STAGES.faronField,
+                steps: [
+                    ...connect,
+                    ...meetIn(STAGES.faronField, "B"),
+                    { op: "clearEnemies" },
+                    ...room("pvpMode", true),
+                    { op: "spawnHorse" },
+                    { op: "rideHorse", mode: "force" },
+                    { op: "expectLocalHorse", ridden: true },
+                    ...barrier("b-marked", "B"),
+                    { op: "expectDummyHurtbox", registered: true, timeoutSec: 10 },
+                    { op: "chargeDummy", dist: 450, charge: true, timeoutSec: 15 },
+                    { op: "expectPvpStats", target: "B", applied: 1, damage: 3, hitStops: 0, timeoutSec: 10 },
+                    { op: "expectHitMarker", target: "B", result: "applied", text: "-3/4" },
+                    ...barrier("charged", "B"),
+                    { op: "quit" },
+                ],
+            },
+            {
+                name: "B",
+                start: STAGES.faronField,
+                steps: [
+                    ...connect,
+                    ...meetIn(STAGES.faronField, "A"),
+                    { op: "clearEnemies" },
+                    ...room("pvpMode", true),
+                    { op: "setLife", value: 12 },
+                    { op: "wait", frames: 10 },
+                    { op: "markLife" },
+                    ...barrier("b-marked", "A"),
+                    { op: "expectLifeDelta", delta: -3, timeoutSec: 30 },
+                    { op: "expectReaction", knockback: "knockdown" },
+                    { op: "expectPvpTaken", count: 1, damage: 3 },
+                    ...barrier("charged", "A"),
                     { op: "quit" },
                 ],
             },
