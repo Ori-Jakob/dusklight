@@ -29,6 +29,8 @@ struct TeamMove {
     bool transient = false;
     bool transientExpired = false;
     Clock::time_point transientSince{};
+    // Received, or no longer transient: a newer move of the same chain may still follow.
+    Clock::time_point offerableAt{};
 };
 
 struct LoadState {

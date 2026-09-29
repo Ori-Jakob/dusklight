@@ -16,6 +16,8 @@ const PROTOCOL_VERSION = 5;
 const WS_SUBPROTOCOL = `${APP_ID}.${PROTOCOL_VERSION}`;
 const PUBLIC_ROOM_ID = "";
 const MAX_TEAM_QUEUE = 4000;
+// STORY_MOVE arrives kept per team and game for catch-up.
+const MAX_TEAM_STORY_MOVES = 16;
 const MAX_TCP_FRAME = 1048576;
 const PING_MS = envNumber("TT_PING_MS", 10000);
 const TCP_TIMEOUT_MS = envNumber("TT_TCP_TIMEOUT_MS", 30000);
@@ -47,7 +49,7 @@ const TEAM_PACKET_TYPES = new Set([
 const PRESENCE_PACKET_TYPES = new Set(["PLAYER_UPDATE", "PLAYER_SFX"]);
 // Teammates in the sender's stage and layer only; never cached or queued.
 const TEAM_PRESENCE_PACKET_TYPES = new Set(["ENEMY_DEFEATED", "ENEMY_DAMAGE", "STORY_EVENT"]);
-// The whole team; the latest arrive is replayed on catch-up (see sendTeamStoryMove).
+// The whole team; the last arrives are replayed on catch-up (see sendTeamStoryMoves).
 const TEAM_STORY_PACKET_TYPES = new Set(["STORY_MOVE"]);
 // Every client obeys these, so a relayed copy could rewrite the roster or disconnect the room.
 const SERVER_ONLY_TYPES = new Set(["ALL_CLIENT_STATE", "SERVER_MESSAGE", "DISABLE_CLIENT", "TEAM_STATE",
@@ -171,7 +173,7 @@ let nextClientId = 1;
  *             conflictKey: string, sig: string }} Team
  * @typedef {{ id: string, clients: Map<number, Client>, ownerClientId: number|null,
  *             state: object, teams: Map<string, Team>, teamStates: Map<string, object>,
- *             teamQueues: Map<string, object[]>, teamStoryMoves: Map<string, object>,
+ *             teamQueues: Map<string, object[]>, teamStoryMoves: Map<string, object[]>,
  *             expiryTimer: NodeJS.Timeout|null }} Room
  */
 
@@ -481,14 +483,17 @@ function storyKey(room, client) {
     return JSON.stringify([client.teamId, teamGameKey(room, client)]);
 }
 
-// The team's latest STORY_MOVE arrive, never to the session that sent it.
-function sendTeamStoryMove(room, client) {
-    const cached = room.teamStoryMoves.get(storyKey(room, client));
-    if (!cached || cached.clientId === client.clientId || sameSession(client, cached.senderSessionKey)) {
-        return;
+// The team's last STORY_MOVE arrives, oldest first, never to the session that sent them.
+function sendTeamStoryMoves(room, client) {
+    let sent = 0;
+    for (const cached of room.teamStoryMoves.get(storyKey(room, client)) ?? []) {
+        if (cached.clientId === client.clientId || sameSession(client, cached.senderSessionKey)) continue;
+        send(client, { ...cached, fromCache: true, ageMs: Math.max(0, Date.now() - cached.serverTime) });
+        sent++;
     }
-    send(client, { ...cached, fromCache: true, ageMs: Math.max(0, Date.now() - cached.serverTime) });
-    log(`[${client.name}] catch-up: cached story move from ${text(cached.name)}`);
+    if (sent > 0) {
+        log(`[${client.name}] catch-up: ${sent} cached story move(s)`);
+    }
 }
 
 function assignOwnerIfNeeded(room) {
@@ -1109,7 +1114,12 @@ function handlePacket(client, packet) {
         // Relayed first, so a packet that cannot be serialized throws before it is cached.
         broadcastTeam(room, client, relayed);
         if (packet.ph === "arrive") {
-            room.teamStoryMoves.set(storyKey(room, client), relayed);
+            const ring = room.teamStoryMoves.get(storyKey(room, client)) ?? [];
+            ring.push(relayed);
+            if (ring.length > MAX_TEAM_STORY_MOVES) {
+                ring.splice(0, ring.length - MAX_TEAM_STORY_MOVES);
+            }
+            room.teamStoryMoves.set(storyKey(room, client), ring);
         }
         return;
     }
@@ -1148,7 +1158,7 @@ function handlePacket(client, packet) {
             // The cache stands in only for absent teammates: it may predate flags cleared since.
             sendTeamCatchUp(room, client, live.length === 0, packet.catchUp === true);
             if (packet.catchUp === true) {
-                sendTeamStoryMove(room, client);
+                sendTeamStoryMoves(room, client);
             }
             if (live.length === 0) {
                 // Ordered connection: this catch-up is merged before any request forwarded later.

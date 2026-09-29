@@ -38,40 +38,8 @@
 
 namespace twili::autotest {
 
-namespace {
-
-struct StageTbl {
-    const char* prefix;
-    int8_t tbl;
-};
-
-// dStage_stagInfo_GetSaveTbl of each stage (the randomizer's getStageSaveId); prefixes match
-// a dungeon's rooms and boss rooms.
-constexpr StageTbl kStageTbls[] = {
-    {"F_SP00", 0x0}, {"F_SP103", 0x0}, {"F_SP104", 0x0}, {"R_SP01", 0x0}, {"R_SP107", 0x1},
-    {"D_SB10", 0x2}, {"F_SP108", 0x2}, {"R_SP108", 0x2}, {"F_SP109", 0x3}, {"F_SP110", 0x3},
-    {"F_SP111", 0x3}, {"F_SP128", 0x3}, {"R_SP109", 0x3}, {"R_SP110", 0x3}, {"R_SP128", 0x3},
-    {"R_SP209", 0x3}, {"F_SP112", 0x4}, {"F_SP113", 0x4}, {"F_SP115", 0x4}, {"F_SP126", 0x4},
-    {"R_SP127", 0x4}, {"F_SP121", 0x6}, {"F_SP122", 0x6}, {"F_SP123", 0x6}, {"F_SP200", 0x6},
-    {"F_SP117", 0x7}, {"F_SP114", 0x8}, {"F_SP116", 0x9}, {"R_SP116", 0x9}, {"R_SP160", 0x9},
-    {"R_SP161", 0x9}, {"F_SP118", 0xA}, {"F_SP124", 0xA}, {"F_SP125", 0xA}, {"F_SP127", 0xB},
-    {"D_MN05", 0x10}, {"D_MN04", 0x11}, {"D_MN01", 0x12}, {"D_MN10", 0x13}, {"D_MN11", 0x14},
-    {"D_MN06", 0x15}, {"D_MN07", 0x16}, {"D_MN08", 0x17}, {"D_MN09", 0x18}, {"D_SB00", 0x19},
-    {"D_SB01", 0x19}, {"D_SB02", 0x19}, {"D_SB03", 0x1A}, {"D_SB04", 0x1A}, {"D_SB05", 0x1B},
-    {"D_SB06", 0x1B}, {"D_SB07", 0x1B}, {"D_SB08", 0x1B}, {"D_SB09", 0x1B},
-};
-
-}  // namespace
-
 int stageSaveTbl(const char* stage) {
-    for (const StageTbl& t : kStageTbls) {
-        const size_t n = std::strlen(t.prefix);
-        const bool dungeon = t.prefix[0] == 'D' && t.prefix[2] == 'M';
-        if (std::strncmp(stage, t.prefix, n) == 0 && (dungeon || stage[n] == '\0')) {
-            return t.tbl;
-        }
-    }
-    return -1;
+    return story::stageSaveTbl(stage);
 }
 
 // The story fields of `start`, applied after dComIfGs_init and before the first load.
@@ -298,6 +266,8 @@ std::string selfTest() {
     const bool f0630 = dComIfGs_isEventBit(dSv_event_flag_c::F_0630);
     const bool m014 = dComIfGs_isEventBit(dSv_event_flag_c::M_014);
     const bool m077 = dComIfGs_isEventBit(dSv_event_flag_c::M_077);
+    const bool m071 = dComIfGs_isEventBit(dSv_event_flag_c::M_071);
+    const bool f0250 = dComIfGs_isEventBit(dSv_event_flag_c::F_0250);
     const auto restoreBit = [](bool on, u16 bit) {
         if (on) {
             dComIfGs_onEventBit(bit);
@@ -334,11 +304,44 @@ std::string selfTest() {
         b.mDarkClearLevelFlag = 1;
         check(story::activeSegment() == nullptr, "a segment is active after Faron is restored");
         check(!story::predictSpawnWolf(entrance("F_SP108", 1, 3)), "the spring spawns a wolf");
+        b.mTransformLevelFlag = 0x3;
+        seg = story::activeSegment();
+        check(seg != nullptr && std::strcmp(seg->id, "eldin-twilight") == 0,
+            "eldin-twilight is not active in Eldin's twilight");
+        check(seg != nullptr &&
+                  story::segmentState(*seg, "F_SP109") == story::SegmentState::Consistent &&
+                  story::segmentState(*seg, "F_SP104") == story::SegmentState::Behind &&
+                  story::segmentState(*seg, "F_SP115") == story::SegmentState::Inconsistent,
+            "eldin-twilight has the wrong core or allowed stages");
+        b.mTransformLevelFlag = 0x7;
+        b.mDarkClearLevelFlag = 0x3;
+        seg = story::activeSegment();
+        check(seg != nullptr && std::strcmp(seg->id, "lanayru-twilight") == 0,
+            "lanayru-twilight is not active in Lanayru's twilight");
+        b.mTransformLevelFlag = 0xF;
+        b.mDarkClearLevelFlag = 0x7;
+        dComIfGs_onEventBit(dSv_event_flag_c::M_071);
+        seg = story::activeSegment();
+        check(seg != nullptr && std::strcmp(seg->id, "mdh") == 0, "mdh is not active after M_071");
+        check(story::predictSpawnWolf(entrance("F_SP109", 0, 0)), "MDH does not spawn a wolf");
+        dComIfGs_onEventBit(dSv_event_flag_c::F_0250);
+        seg = story::activeSegment();
+        check(seg != nullptr && std::strcmp(seg->id, "wolf-until-sword") == 0,
+            "wolf-until-sword is not active after F_0250");
+        check(!story::predictSpawnWolf(entrance("F_SP117", 1, 99)),
+            "the Master Sword point spawns a wolf");
+        dComIfGs_offEventBit(dSv_event_flag_c::M_071);
+        dComIfGs_offEventBit(dSv_event_flag_c::F_0250);
+        check(story::stageSaveTbl("D_MN05A") == 0x10 && story::stageSaveTbl("F_SP121") == 6 &&
+                  story::stageSaveTbl("F_SP1") == -1,
+            "stage save tables are wrong");
         b.mTransformLevelFlag = tlv;
         b.mDarkClearLevelFlag = dcl;
         restoreBit(f0630, dSv_event_flag_c::F_0630);
         restoreBit(m014, dSv_event_flag_c::M_014);
         restoreBit(m077, dSv_event_flag_c::M_077);
+        restoreBit(m071, dSv_event_flag_c::M_071);
+        restoreBit(f0250, dSv_event_flag_c::F_0250);
     }
     return failure;
 }
@@ -414,8 +417,7 @@ std::optional<bool> triggerStory(StepContext& ctx) {
             currentStage());
         return true;
     }
-    // A story event of our own: Midna requests a potential event and, once it runs, the stage
-    // loads `stage`/`room`/`point` on `layer` (and `bit` is set meanwhile).
+    // Midna requests a potential event; once it runs the stage loads (tickForcedMove).
     if (via == "forcedMove") {
         fopAc_ac_c* midna = daPy_py_c::getMidnaActor();
         if (midna == nullptr) {
@@ -553,6 +555,113 @@ std::optional<bool> collectTear(StepContext& ctx) {
     return false;
 }
 
+struct SweepEntry {
+    story::Entrance e;
+    std::string what;
+};
+std::vector<SweepEntry> sSweep;
+size_t sSweepIndex = 0;
+int sSweepPhase = 0;  // 0 idle wait, 1 loading
+bool sSweepPredictWolf = false;
+int sSweepQuiet = 0;
+bool sSweepChecked = false;
+std::string sSweepFailures;
+
+void addSweep(const story::Entrance& e, const std::string& what) {
+    if (!e.valid()) {
+        return;
+    }
+    for (const SweepEntry& s : sSweep) {
+        if (s.e.sameStageRoom(e.stage, e.room) && s.e.point == e.point) {
+            return;
+        }
+    }
+    sSweep.push_back({e, what});
+}
+
+// Loads every segment entrance, follow point and learned destination: known, predicted form.
+std::optional<bool> entranceSweep(StepContext& ctx) {
+    if (!ctx.begun) {
+        sSweep.clear();
+        sSweepIndex = 0;
+        sSweepPhase = 0;
+        sSweepQuiet = 0;
+        sSweepFailures.clear();
+        for (const char* id : {"captured", "ordon-twilight", "mdh", "wolf-until-sword",
+                 "lanayru-twilight", "eldin-twilight"})
+        {
+            if (const story::StorySegment* seg = story::segmentById(id)) {
+                addSweep(story::segmentEntrance(*seg), std::string("segment ") + id);
+            }
+        }
+        for (int i = 0; i < story::kStoryMoveCount; i++) {
+            const story::StoryMoveDef& d = story::kStoryMoves[i];
+            if (d.toStage != nullptr && d.toRoom >= 0 && d.followPoint >= 0) {
+                addSweep(entrance(d.toStage, d.toRoom, d.followPoint), std::string("row ") + d.id);
+            }
+        }
+        for (const auto& [key, e] : story::storylog::learned()) {
+            addSweep(e.move.to, "learned " + key);
+        }
+        TwiliLog.info("[autotest] entrance sweep: {} entrance(s)", sSweep.size());
+    }
+    const bool idle = !dComIfGp_isEnableNextStage() && !dComIfGp_event_runCheck() &&
+                      local::liveLink() != nullptr;
+    if (sSweepPhase == 1) {
+        sSweepQuiet = idle ? sSweepQuiet + 1 : 0;
+        const SweepEntry& s = sSweep[sSweepIndex];
+        // The spawn form, before an arrival scene changes it.
+        if (!sSweepChecked && local::liveLink() != nullptr && !dComIfGp_isEnableNextStage() &&
+            std::strncmp(currentStage(), s.e.stage, 8) == 0)
+        {
+            sSweepChecked = true;
+            const bool wolf = local::liveLink()->checkWolf() != 0;
+            TwiliLog.info("[autotest] sweep {} room {} point {} ({}): layer {} {} (predicted {})",
+                s.e.stage, s.e.room, s.e.point, s.what, dComIfG_play_c::getLayerNo(0),
+                wolf ? "wolf" : "human", sSweepPredictWolf ? "wolf" : "human");
+            if (wolf != sSweepPredictWolf) {
+                sSweepFailures += fmt::format(" {}/{}/{} ({}) spawned a {};", s.e.stage, s.e.room,
+                    s.e.point, s.what, wolf ? "wolf" : "human");
+            }
+        }
+        if ((sSweepChecked && sSweepQuiet >= 45) || ctx.ticks % 2700 == 2699) {
+            sSweepPhase = 0;
+            sSweepIndex++;
+            sSweepQuiet = 0;
+        } else {
+            if (dComIfGp_event_runCheck() && !padBusy() && ctx.ticks % 20 == 0) {
+                pulsePad(0.0f, 0.0f, PAD_BUTTON_A, 3);
+            }
+            return false;
+        }
+    }
+    if (sSweepIndex >= sSweep.size()) {
+        if (!sSweepFailures.empty()) {
+            ctx.fail("entranceSweep:" + sSweepFailures);
+            return false;
+        }
+        TwiliLog.info("[autotest] entrance sweep passed");
+        return true;
+    }
+    if (!idle) {
+        return false;
+    }
+    const SweepEntry& s = sSweep[sSweepIndex];
+    if (!local::isKnownEntrance(s.e.stage, s.e.room, s.e.point)) {
+        sSweepFailures += fmt::format(" {}/{}/{} ({}) unknown;", s.e.stage, s.e.room, s.e.point,
+            s.what);
+        sSweepIndex++;
+        return false;
+    }
+    sSweepPredictWolf = story::predictSpawnWolf(s.e);
+    dComIfGs_setRestartRoomParam(0);
+    dComIfGp_setNextStage(s.e.stage, s.e.point, s.e.room, -1, 0.0f, 0, 1, 0, 0, 1, 0);
+    sSweepPhase = 1;
+    sSweepQuiet = 0;
+    sSweepChecked = false;
+    return false;
+}
+
 std::optional<bool> expectStoryMove(StepContext& ctx) {
     const json& step = ctx.step;
     const sd::State& st = sd::state();
@@ -600,12 +709,16 @@ std::optional<bool> catchUp(StepContext& ctx) {
     const std::string want = step.value("expectKind", std::string("entrance"));
     const story::CatchUpPlan& plan = sd::state().plan;
     const std::string have = story::catchUpKindName(plan.kind);
-    if (have != want) {
+    // toStage: the plan must lead there.
+    const std::string toStage = step.value("toStage", std::string{});
+    if (have != want ||
+        (!toStage.empty() && std::strncmp(plan.entrance.stage, toStage.c_str(), 8) != 0))
+    {
         if (ctx.seconds < ctx.timeout(10.0)) {
             return false;  // a merge may still be coming
         }
-        ctx.fail(fmt::format(
-            "catchUp: plan {} '{}' - {} (want {})", have, plan.title, plan.reason, want));
+        ctx.fail(fmt::format("catchUp: plan {} '{}' to {} - {} (want {} {})", have, plan.title,
+            plan.entrance.stage, plan.reason, want, toStage));
         return false;
     }
     if (plan.kind == story::CatchUpPlan::Kind::None || !step.value("start", true)) {
@@ -738,17 +851,15 @@ std::optional<bool> storySteps(const std::string& op, StepContext& ctx) {
         const std::string title =
             st.team.valid ? sd::moveTitle(st.team.move) : std::string{};
         const std::string want = step.value("titleHas", std::string{});
-        if (st.prompt.showing && kind == story::promptKindName(st.prompt.kind)) {
-            if (!want.empty() && title.find(want) == std::string::npos) {
-                ctx.fail(fmt::format("expectPrompt: title '{}' lacks '{}'", title, want));
-                return false;
-            }
+        if (st.prompt.showing && kind == story::promptKindName(st.prompt.kind) &&
+            (want.empty() || title.find(want) != std::string::npos))
+        {
             TwiliLog.info("[autotest] story prompt {} is showing: '{}'", kind, title);
             return true;
         }
         if (ctx.seconds > ctx.timeout(60.0)) {
-            ctx.fail(fmt::format("expectPrompt {}: prompt {} showing {} ({})", kind,
-                story::promptKindName(st.prompt.kind), st.prompt.showing, sd::debugText()));
+            ctx.fail(fmt::format("expectPrompt {}: prompt {} showing {} title '{}' ({})", kind,
+                story::promptKindName(st.prompt.kind), st.prompt.showing, title, sd::debugText()));
         }
         return false;
     }
@@ -782,6 +893,13 @@ std::optional<bool> storySteps(const std::string& op, StepContext& ctx) {
         const json want = step.value("state", json("arrived"));
         const std::string have = story::loadPhaseName(st.load.phase);
         const std::string reason = step.value("reason", std::string{});
+        if (step.contains("layerArg") && st.load.phase != story::LoadPhase::Idle &&
+            st.load.layerArg != step.value("layerArg", -1))
+        {
+            ctx.fail(fmt::format("expectStoryLoad: layer arg {} (want {})", st.load.layerArg,
+                step.value("layerArg", -1)));
+            return false;
+        }
         if (matchesAny(want, have) && (reason.empty() || reason == st.load.reason)) {
             return true;
         }
@@ -920,6 +1038,62 @@ std::optional<bool> storySteps(const std::string& op, StepContext& ctx) {
         }
         TwiliLog.info("[autotest] fixture '{}' saved in {}", name, dir.string());
         return true;
+    }
+
+    if (op == "expectSegment") {
+        const std::string id = step.value("id", std::string{});
+        const std::string want = step.value("state", std::string("consistent"));
+        const story::StorySegment* seg = story::activeSegment();
+        const std::string haveId = seg != nullptr ? seg->id : "none";
+        const std::string have =
+            seg != nullptr ? story::segmentStateName(story::segmentState(*seg, currentStage())) :
+                             "none";
+        if ((id.empty() || id == haveId) && (haveId == "none" || have == want)) {
+            TwiliLog.info("[autotest] segment {} {} in {}", haveId, have, currentStage());
+            return true;
+        }
+        if (ctx.seconds > ctx.timeout(10.0)) {
+            ctx.fail(fmt::format("expectSegment: {} {} in {} (want {} {})", haveId, have,
+                currentStage(), id, want));
+        }
+        return false;
+    }
+
+    // key or curated; count (default 1): how many learned moves match.
+    if (op == "expectLearned") {
+        const std::string key = step.value("key", std::string{});
+        const std::string curated = step.value("curated", std::string{});
+        int found = 0;
+        for (const auto& [k, e] : story::storylog::learned()) {
+            const story::StoryMoveDef* def = story::curatedMove(e.move.curated);
+            if ((!key.empty() && k == key) ||
+                (!curated.empty() && def != nullptr && curated == def->id))
+            {
+                found++;
+            }
+        }
+        const int want = step.value("count", 1);
+        if (key.empty() && curated.empty() ? static_cast<int>(story::storylog::learnedCount()) >= want :
+                                               found == want)
+        {
+            TwiliLog.info("[autotest] learned: {} move(s), {} matching", story::storylog::learnedCount(),
+                found);
+            return true;
+        }
+        if (ctx.seconds > ctx.timeout(20.0)) {
+            ctx.fail(fmt::format("expectLearned: {} matching of {} (want {})", found,
+                story::storylog::learnedCount(), want));
+        }
+        return false;
+    }
+
+    if (op == "forgetLearned") {
+        story::storylog::forget();
+        return true;
+    }
+
+    if (op == "entranceSweep") {
+        return entranceSweep(ctx);
     }
 
     if (op == "expectTransient") {

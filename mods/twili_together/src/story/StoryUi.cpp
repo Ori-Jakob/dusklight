@@ -27,7 +27,8 @@ std::string statusRml() {
         html += escapeRml(fmt::format("Your story: {}.", seg->text)) + "<br/>";
         html += p.inconsistent ?
                     escapeRml(fmt::format("You are not where it says ({}).", seg->place)) :
-                    std::string("You are where your story says.");
+                p.behind ? escapeRml(fmt::format("Your story goes on in {}.", seg->place)) :
+                           std::string("You are where your story says.");
         html += "<br/>";
     }
     const detail::TeamMove& team = st.team;

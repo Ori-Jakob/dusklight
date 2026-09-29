@@ -531,7 +531,7 @@ test("STORY_MOVE reaches teammates in any stage, not other teams, and is never q
     await a.expectNone((p) => p.type === "STORY_MOVE", "STORY_MOVE to the sender");
 }));
 
-test("the latest STORY_MOVE arrive is replayed on catch-up, with its age, except to its own session", () => withServer(async (mk) => {
+test("the team's last STORY_MOVE arrives are replayed oldest first on catch-up, with their age, except to their own session", () => withServer(async (mk) => {
     const a = mk();
     await a.join({ teamId: "t", sessionKey: "KA" });
     a.enterStage("R_SP107", 14);
@@ -547,11 +547,12 @@ test("the latest STORY_MOVE arrive is replayed on catch-up, with its age, except
     b.send({ type: "REQUEST_WORLD_STATE" });
     await b.expectNone((p) => p.type === "STORY_MOVE", "a cached story move without catchUp");
     b.send({ type: "REQUEST_WORLD_STATE", catchUp: true });
-    const cached = await b.waitType("STORY_MOVE");
-    assert.equal(cached.mid, "new", "only the latest arrive is cached; a depart is not");
-    assert.equal(cached.fromCache, true);
-    assert.ok(cached.ageMs >= 100, `ageMs ${cached.ageMs}`);
-    await b.expectNone((p) => p.type === "STORY_MOVE", "a second cached story move");
+    const first = await b.waitType("STORY_MOVE");
+    const second = await b.waitType("STORY_MOVE");
+    assert.deepEqual([first.mid, second.mid], ["old", "new"], "arrives oldest first; a depart is not cached");
+    assert.equal(second.fromCache, true);
+    assert.ok(second.ageMs >= 100, `ageMs ${second.ageMs}`);
+    await b.expectNone((p) => p.type === "STORY_MOVE", "a third cached story move");
 
     const other = mk();
     await other.join({ teamId: "u" });
@@ -563,6 +564,25 @@ test("the latest STORY_MOVE arrive is replayed on catch-up, with its age, except
     await a2.join({ teamId: "t", sessionKey: "KA" });
     a2.send({ type: "REQUEST_WORLD_STATE", catchUp: true });
     await a2.expectNone((p) => p.type === "STORY_MOVE", "our own session's story move");
+}));
+
+test("only the last 16 STORY_MOVE arrives are kept", () => withServer(async (mk) => {
+    const a = mk();
+    await a.join({ teamId: "t" });
+    for (let i = 0; i < 20; i++) {
+        a.send({ type: "STORY_MOVE", sv: 1, ph: "arrive", mid: `m${i}`, name: "Kira" });
+    }
+    await settle(150);
+    const b = mk();
+    await b.join({ teamId: "t" });
+    b.send({ type: "REQUEST_WORLD_STATE", catchUp: true });
+    const mids = [];
+    for (let i = 0; i < 16; i++) {
+        mids.push((await b.waitType("STORY_MOVE")).mid);
+    }
+    assert.equal(mids[0], "m4");
+    assert.equal(mids[15], "m19");
+    await b.expectNone((p) => p.type === "STORY_MOVE", "a seventeenth cached story move");
 }));
 
 test("queued team packets are replayed to a teammate who joins later", () => withServer(async (mk) => {

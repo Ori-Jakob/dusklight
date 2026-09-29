@@ -157,11 +157,18 @@ struct StorySegment {
     const char* id;
     const char* text;
     bool (*active)();
-    const char* const* allowedStages;  // nullptr-terminated; nullptr = anywhere
-    Entrance canonical;                // stage[0] == 0: none known
+    // nullptr-terminated; outside core: behind (menu offer), outside allowed: inconsistent.
+    const char* const* coreStages;
+    const char* const* allowedStages;
+    Entrance canonical;  // stage[0] == 0: none known
     Form form;
     const char* place;
+    // A curated move whose learned destination comes before `canonical`.
+    const char* canonicalMove = nullptr;
 };
+
+enum class SegmentState : uint8_t { None, Consistent, Behind, Inconsistent };
+const char* segmentStateName(SegmentState state);
 
 // What "Catch up to story" would do now.
 struct CatchUpPlan {
@@ -173,7 +180,11 @@ struct CatchUpPlan {
     uint32_t clientId = 0;
     std::string moveId;   // "" for a segment repair
     std::string segment;  // "" if none
+    std::string source;   // for the log: "move <id>", "segment <id>", "learned <key>"
+    bool needSync = false;
     bool inconsistent = false;
+    // In the segment's allowed stages but not where its story happens.
+    bool behind = false;
     std::string title;
     std::string reason;
     std::string place;
@@ -194,6 +205,15 @@ const char* joinStateName(JoinState state);
 const StorySegment* activeSegment();
 const StorySegment* segmentById(const std::string& id);
 bool segmentAllows(const StorySegment& seg, const char* stage);
+SegmentState segmentState(const StorySegment& seg, const char* stage);
+// The learned destination of the segment's curated move, else its canonical entrance.
+Entrance segmentEntrance(const StorySegment& seg, const MoveRecord** learned = nullptr);
+// dStage_stagInfo_GetSaveTbl of a stage, -1 if unknown.
+int stageSaveTbl(const char* stage);
+// A memory switch of that stage's save table: 1, 0, or -1 when it cannot be read.
+int saveSwitch(const char* stage, int no);
+// A twilight wall's point 10 whose switch is still off: Link spawns human and changes there.
+bool gateHumanArrival(const Entrance& e);
 // dComIfGs_Wolf_Change_Check for a spawn at `e`, with the entrance's own phase_1 levels applied.
 bool predictSpawnWolf(const Entrance& e);
 

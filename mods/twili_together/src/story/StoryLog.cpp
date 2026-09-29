@@ -10,6 +10,7 @@
 #include <fmt/format.h>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <condition_variable>
 #include <filesystem>
@@ -84,6 +85,7 @@ private:
 struct Loaded {
     std::string identity;
     std::map<std::string, Learned> entries;
+    int64_t lastOwnMs = 0;
 };
 
 Worker s_worker;
@@ -92,15 +94,10 @@ std::map<std::string, Learned> s_learned;
 std::string s_identity;
 fs::path s_path;
 bool s_dirty = false;
+int64_t s_lastOwnMs = 0;
 Clock::time_point s_saveAt{};
 std::mutex s_loadedMutex;
 std::optional<Loaded> s_loaded;
-
-int64_t unixMs() {
-    return std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::system_clock::now().time_since_epoch())
-        .count();
-}
 
 fs::path learnedDir() {
     const char* dir = nullptr;
@@ -113,14 +110,18 @@ fs::path learnedDir() {
 }
 
 nlohmann::json entryJson(const Learned& e) {
-    return {{"move", e.move.toJson()}, {"seen", e.seen}, {"lastSeen", e.lastSeenMs}};
+    return {{"move", e.move.toJson()}, {"seen", e.seen}, {"lastSeen", e.lastSeenMs},
+        {"own", e.own}};
 }
 
-std::map<std::string, Learned> parseFile(const std::string& text) {
+std::map<std::string, Learned> parseFile(const std::string& text, int64_t& lastOwnMs) {
     std::map<std::string, Learned> out;
     const nlohmann::json j = nlohmann::json::parse(text, nullptr, false);
     if (!j.is_object() || !j.contains("entries") || !j["entries"].is_array()) {
         return out;
+    }
+    if (const auto it = j.find("lastOwn"); it != j.end() && it->is_number_integer()) {
+        lastOwnMs = it->get<int64_t>();
     }
     for (const auto& item : j["entries"]) {
         if (!item.is_object() || !item.contains("move") || !item["move"].is_object()) {
@@ -131,6 +132,7 @@ std::map<std::string, Learned> parseFile(const std::string& text) {
             e.move = MoveRecord::fromJson(item["move"]);
             e.seen = item.value("seen", 1u);
             e.lastSeenMs = item.value("lastSeen", int64_t{0});
+            e.own = item.value("own", false);
         } catch (const nlohmann::json::exception&) {
             continue;
         }
@@ -162,8 +164,8 @@ void saveNow() {
     for (const auto& [key, e] : s_learned) {
         entries.push_back(entryJson(e));
     }
-    const nlohmann::json j = {
-        {"version", 1}, {"identity", s_identity}, {"entries", std::move(entries)}};
+    const nlohmann::json j = {{"version", 1}, {"identity", s_identity}, {"lastOwn", s_lastOwnMs},
+        {"entries", std::move(entries)}};
     std::string text = j.dump(1);
     s_worker.post([path = s_path, text = std::move(text)] {
         std::error_code ec;
@@ -186,6 +188,7 @@ void switchIdentity(const std::string& identity) {
     }
     s_identity = identity;
     s_learned.clear();
+    s_lastOwnMs = 0;
     s_path.clear();
     if (identity.empty()) {
         return;
@@ -201,7 +204,11 @@ void switchIdentity(const std::string& identity) {
         if (in) {
             text << in.rdbuf();
         }
-        Loaded loaded{identity, in ? parseFile(text.str()) : std::map<std::string, Learned>{}};
+        Loaded loaded;
+        loaded.identity = identity;
+        if (in) {
+            loaded.entries = parseFile(text.str(), loaded.lastOwnMs);
+        }
         std::lock_guard lock(s_loadedMutex);
         s_loaded = std::move(loaded);
     });
@@ -209,7 +216,13 @@ void switchIdentity(const std::string& identity) {
 
 }  // namespace
 
-void note(const MoveRecord& m) {
+int64_t unixMs() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch())
+        .count();
+}
+
+void note(const MoveRecord& m, bool own) {
     if (m.key.empty() || m.qual == 0 || !m.to.valid()) {
         return;
     }
@@ -230,6 +243,7 @@ void note(const MoveRecord& m) {
     e.move = m;
     e.seen++;
     e.lastSeenMs = unixMs();
+    e.own = own;
     trimLearned();
     TwiliLog.info("[story] learned '{}' -> {} room {} point {} layer {} (seen {})", m.key,
         m.to.stage, m.to.room, m.to.point, m.to.layer, e.seen);
@@ -265,6 +279,22 @@ size_t learnedCount() {
     return s_learned.size();
 }
 
+const std::map<std::string, Learned>& learned() {
+    return s_learned;
+}
+
+void noteOwnStoryArrival() {
+    s_lastOwnMs = unixMs();
+    if (!s_identity.empty() && !s_dirty) {
+        s_dirty = true;
+        s_saveAt = Clock::now() + kSaveDelay;
+    }
+}
+
+int64_t lastOwnStoryMs() {
+    return s_lastOwnMs;
+}
+
 void forget() {
     s_recent.clear();
     s_learned.clear();
@@ -285,6 +315,7 @@ void tick() {
             for (auto& [key, e] : s_loaded->entries) {
                 s_learned.try_emplace(key, std::move(e));
             }
+            s_lastOwnMs = std::max(s_lastOwnMs, s_loaded->lastOwnMs);
             trimLearned();
             TwiliLog.info("[story] {} learned move(s) for this game", s_learned.size());
         }
@@ -304,6 +335,7 @@ void shutdown() {
     s_learned.clear();
     s_identity.clear();
     s_path.clear();
+    s_lastOwnMs = 0;
     std::lock_guard lock(s_loadedMutex);
     s_loaded.reset();
 }

@@ -1,6 +1,6 @@
 // Story sync after the capture: later beats from synthetic checkpoints (lib.js STORY).
 
-const { COMMON_CVARS, STORY, STORY_BITS: B, barrier, connect } = require("../lib");
+const { COMMON_CVARS, STAGES, STORY, STORY_BITS: B, barrier, connect } = require("../lib");
 
 // MoveRecord qual bits (StoryTypes.hpp).
 const QUAL = { curated: 1, side: 2, form: 4, levels: 8, oneShot: 16, bits: 32, boss: 64 };
@@ -269,6 +269,160 @@ const scenarios = [
             ],
         };
     })(),
+    pair({
+        name: "story-mdh-start",
+        description: "A leaves the Lakebed: boss warp, Zant's scene and the curse to Hyrule Field; B in Kakariko follows mdh-start and ends a wolf where the mdh segment is consistent",
+        timeoutSec: 900,
+        a: {
+            start: STORY.lakebedBoss,
+            steps: [
+                { op: "triggerStory", via: "bossWarp" },
+                noSave,
+                settle(500),
+                { op: "expectStoryMove", role: "sent", curated: "mdh-start", qualHas: QUAL.levels, toStage: "F_SP121", toRoom: 10 },
+                { op: "expectLocalForm", form: "wolf" },
+                { op: "expectSegment", id: "mdh", state: "consistent" },
+            ],
+        },
+        b: {
+            start: { stage: "F_SP109", room: 0, point: 0, eventBits: STORY.lakebedBoss.eventBits, levels: STORY.lakebedBoss.levels },
+            steps: [
+                { op: "expectLocalForm", form: "human" },
+                ...followTo("F_SP121", "cursed by Zant"),
+                settle(),
+                { op: "expectLocalForm", form: "wolf" },
+                { op: "expectSegment", id: "mdh", state: "consistent" },
+                { op: "expectStoryMove", role: "none" },
+            ],
+        },
+    }),
+    {
+        name: "story-mdh-repair",
+        description: "offline, a save with Zant's curse (M_071, transform level 3) in Kakariko is inconsistent; Catch up to story loads Hyrule Field room 10 and a wolf arrives",
+        timeoutSec: 420,
+        cvars: COMMON_CVARS,
+        instances: [{
+            name: "solo",
+            start: { stage: "F_SP109", room: 0, point: 0, eventBits: [...STORY.lakebedBoss.eventBits, B.zantAppears], levels: { transform: [0, 1, 2, 3], darkClear: [0, 1, 2] } },
+            steps: [
+                at("F_SP109"),
+                { op: "storyPrompts", value: false },
+                { op: "expectSegment", id: "mdh", state: "inconsistent" },
+                { op: "catchUp", expectKind: "entrance", toStage: "F_SP121" },
+                { op: "expectStoryLoad", state: "arrived", timeoutSec: 120 },
+                at("F_SP121"),
+                settle(),
+                { op: "expectLocalForm", form: "wolf" },
+                { op: "expectSegment", id: "mdh", state: "consistent" },
+                { op: "quit" },
+            ],
+        }],
+    },
+    pair({
+        name: "story-learned-catchup",
+        description: "A makes a strong move, then a weak one; B declined the first: Catch up to story picks the strong move, not the newer weak one",
+        timeoutSec: 780,
+        a: {
+            start: STORY.kakariko,
+            steps: [
+                // Faron Spring point 3 has a phase_1 side effect: strong, and no row names it.
+                { op: "triggerStory", via: "forcedMove", stage: "F_SP108", room: 1, point: 3, layer: -1 },
+                settle(),
+                { op: "expectStoryMove", role: "sent", qualHas: QUAL.side, toStage: "F_SP108" },
+                { op: "waitSignal", name: "b-declined", from: "B", timeoutSec: 360 },
+                { op: "triggerStory", via: "forcedMove", stage: "F_SP109", room: 0, point: 0, layer: -1, bit: 0x0180 },
+                settle(),
+                { op: "expectStoryMove", role: "sent", qualHas: QUAL.bits, toStage: "F_SP109" },
+                { op: "signal", name: "a-second" },
+            ],
+        },
+        b: {
+            start: { ...STORY.kakariko, stage: "F_SP110" },
+            steps: [
+                { op: "expectPrompt", kind: "move", timeoutSec: 300 },
+                { op: "answerPrompt", answer: "decline" },
+                { op: "signal", name: "b-declined" },
+                { op: "waitSignal", name: "a-second", from: "A", timeoutSec: 360 },
+                { op: "expectStoryMove", role: "received", toStage: "F_SP109" },
+                { op: "catchUp", expectKind: "entrance", toStage: "F_SP108" },
+                { op: "expectStoryLoad", state: "arrived", timeoutSec: 150 },
+                at("F_SP108"),
+                { op: "expectLearned", count: 2 },
+            ],
+        },
+    }),
+    (() => {
+        // A teammate's Forest Temple exit, learned in an earlier session (fnv64("vanilla")).
+        const move = {
+            mid: "0000000000000001", from: { stage: "D_MN05A", room: 50, point: 0, layerArg: -1, layer: 0 },
+            to: { stage: "F_SP108", room: 1, point: 1, layerArg: -1, layer: 0 },
+            event: { name: "BOSS_WARPIN", ev: 299, m: 255, lt: 1, type: 255, sw: 255, req: 355, rk: 3, mode: 2, arrival: false },
+            wolf: [false, false], tlv: [1, 1], dcl: [1, 1], arrivalEvent: { m: 10, name: "SAVEREQ" },
+            curated: "", qual: QUAL.boss, hops: 1, hl: [], bits: [], key: "actor|BOSS_WARPIN|D_MN05A/50|F_SP108/1", th: false, boss: true,
+        };
+        const learned = { version: 1, identity: "vanilla", lastOwn: 0, entries: [{ move, seen: 1, lastSeen: Date.now() - 60000, own: false }] };
+        return {
+            name: "story-learned-offline",
+            description: "after a restart and offline, a teammate's strong move learned earlier is still offered by Catch up to story",
+            timeoutSec: 300,
+            cvars: COMMON_CVARS,
+            files: { "mod_data/dev.n0ted.twili_together/story-learned/0bd5832498c9c0d0.json": JSON.stringify(learned) },
+            instances: [{
+                name: "solo",
+                start: { ...STAGES.linksHouse, eventBits: [B.day2Done, B.castleEscape, B.cellWakeUp], levels: { transform: [0], darkClear: [0] } },
+                steps: [
+                    at("R_SP01"),
+                    { op: "storyPrompts", value: false },
+                    { op: "expectLearned", key: move.key },
+                    { op: "catchUp", expectKind: "entrance", toStage: "F_SP108" },
+                    { op: "expectStoryLoad", state: "arrived", timeoutSec: 120 },
+                    at("F_SP108"),
+                    noSave,
+                    settle(),
+                    { op: "catchUp", expectKind: "none", start: false },
+                    { op: "quit" },
+                ],
+            }],
+        };
+    })(),
+    {
+        name: "story-cinematic-repair",
+        description: "the stuck-capture repair loads the cell on layer 11 while the wake-up's switch is off, so demo04_02 plays and ends at point 0 on layer 14",
+        timeoutSec: 420,
+        cvars: COMMON_CVARS,
+        expectLog: [/\[story\] accept .*'demo04_02'.*R_SP107 room 0 layer 11/],
+        rejectLog: [/demo data load error/i],
+        instances: [{
+            name: "solo",
+            start: { stage: "F_SP108", room: 0, point: 0, eventBits: [B.day2Done] },
+            steps: [
+                at("F_SP108"),
+                { op: "storyPrompts", value: false },
+                { op: "setEventBit", no: B.cellWakeUp },
+                { op: "setTransformLevel", level: 0 },
+                { op: "expectSegment", id: "captured", state: "inconsistent" },
+                { op: "catchUp", expectKind: "entrance", toStage: "R_SP107" },
+                { op: "expectStoryLoad", state: "arrived", layerArg: 11, timeoutSec: 120 },
+                at("R_SP107"),
+                settle(),
+                { op: "expectLocalForm", form: "wolf" },
+                { op: "expectLayer", layer: 14 },
+                { op: "expectSegment", id: "captured", state: "consistent" },
+                { op: "quit" },
+            ],
+        }],
+    },
+    {
+        name: "story-entrance-sweep",
+        description: "loads every segment entrance, curated follow point and learned destination: each is a known point and spawns the predicted form",
+        timeoutSec: 1200,
+        cvars: COMMON_CVARS,
+        instances: [{
+            name: "solo",
+            start: STORY.kakariko,
+            steps: [at("F_SP109"), { op: "storyPrompts", value: false }, { op: "entranceSweep", timeoutSec: 1100 }, { op: "quit" }],
+        }],
+    },
 ];
 
 module.exports = [...observeScenarios, ...scenarios];

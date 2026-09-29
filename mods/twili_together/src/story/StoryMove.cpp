@@ -43,6 +43,8 @@ constexpr auto kExplicitLayerFresh = std::chrono::seconds(120);
 constexpr auto kCachedMovePromptAge = std::chrono::minutes(10);
 // A transient move is offered as a menu row once its originator stayed that long.
 constexpr auto kTransientGiveUp = std::chrono::minutes(10);
+// A received move is offered after this, so a chain split in two moves prompts once.
+constexpr auto kOfferDelay = std::chrono::seconds(8);
 // The consistency check waits this long after a stage load, with no event running.
 constexpr uint32_t kConsistencySettleTicks = 150;
 constexpr int kMaxInconsistentDeclines = 3;
@@ -106,6 +108,11 @@ CatchUpPlan followPlan(const MoveRecord& m) {
              ownForm                                  ? Form::Any :
              m.wolfAfter                              ? Form::Wolf :
                                                         Form::Human;
+    if (gateHumanArrival(p.entrance)) {
+        p.form = Form::Any;  // Link spawns human there and changes in the arrival scene
+    }
+    p.source = "move " + m.id;
+    p.needSync = true;
     const std::string name = m.originName.empty() ? std::string("A teammate") : m.originName;
     p.title = fmt::format("Follow {} to {}", name, p.place);
     p.reason = def != nullptr ? withName(def->prompt, name) + "." :
@@ -113,16 +120,93 @@ CatchUpPlan followPlan(const MoveRecord& m) {
     return p;
 }
 
+// An unplayed one-shot arrival scene of a cutscene layer is loaded on that layer so it plays.
 CatchUpPlan segmentPlan(const StorySegment& seg) {
     CatchUpPlan p;
     p.kind = CatchUpPlan::Kind::Entrance;
-    p.entrance = seg.canonical;
-    p.form = seg.form;
+    const MoveRecord* learned = nullptr;
+    p.entrance = segmentEntrance(seg, &learned);
+    p.layerArg = -1;
+    if (std::strcmp(seg.id, "captured") == 0 && saveSwitch("R_SP107", 27) == 0) {
+        p.layerArg = 11;  // the cell's wake-up (demo04_02) has no STB on layer 14
+    } else if (learned != nullptr) {
+        for (const Hop& hop : learned->hopList) {
+            if (hop.arrivalSwitch != 0xFF && hop.at.layerArg >= 0 &&
+                saveSwitch(hop.at.stage, hop.arrivalSwitch) == 0 &&
+                local::isKnownEntrance(hop.at.stage, hop.at.room, hop.at.point))
+            {
+                p.entrance = hop.at;
+                p.layerArg = hop.at.layerArg;
+                break;
+            }
+        }
+    }
+    p.entrance.layerArg = p.layerArg;
+    p.form = gateHumanArrival(p.entrance) ? Form::Any : seg.form;
     p.place = seg.place;
     p.segment = seg.id;
+    p.source = std::string("segment ") + seg.id + (learned != nullptr ? " (learned)" : "");
     p.title = fmt::format("Catch up: go to {}", seg.place);
     p.reason = fmt::format("Your story says {}.", seg.text);
     return p;
+}
+
+bool bitsAllSet(const MoveRecord& m) {
+    for (const uint16_t no : m.bits) {
+        if (!dComIfGs_isEventBit(no)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool standingIn(const MoveRecord& m) {
+    return m.to.sameStageRoom(currentStage(), dComIfGp_roomControl_getStayNo());
+}
+
+// Newest unfollowed teammate move whose bits we have; strong ones before a later weak one.
+const MoveRecord* pickLoggedMove(const StorySegment* seg) {
+    const auto own = tracker().lastOwnStoryArrival();
+    const uint32_t self = Session::instance().selfClientId();
+    const TeamMove& team = s_state.team;
+    const MoveRecord* weak = nullptr;
+    const auto& log = storylog::recent();
+    for (auto it = log.rbegin(); it != log.rend(); ++it) {
+        const MoveRecord& m = *it;
+        if (m.originClientId == 0 || m.originClientId == self || (own && m.at <= *own) ||
+            standingIn(m) || (seg != nullptr && !segmentAllows(*seg, m.to.stage)) ||
+            !bitsAllSet(m))
+        {
+            continue;
+        }
+        if (team.valid && team.move.id == m.id && (team.satisfied || team.transient)) {
+            continue;
+        }
+        if (m.strong()) {
+            return &m;
+        }
+        if (weak == nullptr) {
+            weak = &m;
+        }
+    }
+    return weak;
+}
+
+// Offline or after a restart: the newest strong learned teammate move we have not caught up on.
+const MoveRecord* pickLearnedMove() {
+    const int64_t own = storylog::lastOwnStoryMs();
+    const MoveRecord* best = nullptr;
+    int64_t bestAt = 0;
+    for (const auto& [key, e] : storylog::learned()) {
+        if (e.own || !e.move.strong() || e.lastSeenMs <= own || e.lastSeenMs <= bestAt ||
+            standingIn(e.move) || !bitsAllSet(e.move))
+        {
+            continue;
+        }
+        best = &e.move;
+        bestAt = e.lastSeenMs;
+    }
+    return best;
 }
 
 bool stageIsDungeon() {
@@ -155,8 +239,7 @@ bool originStillThere(const MoveRecord& m) {
            it->second.layerNo == m.to.layer;
 }
 
-// The originator is still on the cutscene or battle layer the move ended on, which we would
-// not load (our flags pick the stage's normal layer).
+// The originator still stands on a cutscene or battle layer our flags would not load.
 bool moveTransient(const MoveRecord& m) {
     const StoryMoveDef* def = curatedMove(m.curated);
     if (!m.transientHint || (def != nullptr && def->keepExplicitLayer)) {
@@ -184,6 +267,7 @@ void updateTransient() {
     }
     if (team.transient && !transient) {
         TwiliLog.info("[story] move {} is no longer transient", team.move.id);
+        team.offerableAt = Clock::now() + kOfferDelay;
     }
     team.transient = transient && !team.transientExpired;
 }
@@ -345,6 +429,7 @@ void tickLoadLoading() {
             stage, dComIfGp_roomControl_getStayNo(), dComIfGp_getStartStagePoint(),
             dComIfG_play_c::getLayerNo(0), wolf ? "wolf" : "human", formName(l.form), l.source);
         tracker().setLastOwnStoryArrival(now);
+        storylog::noteOwnStoryArrival();
         if (!l.moveId.empty() && s_state.team.valid && s_state.team.move.id == l.moveId) {
             s_state.team.satisfied = true;
         }
@@ -546,13 +631,14 @@ void onOwnMoveSettled(MoveRecord move, uint32_t localBitsDuring, uint32_t copyOf
         move.wolfAfter ? "wolf" : "human", curated, move.qual, move.hops, outcome);
     if (move.qual != 0 || copyOf != 0) {
         tracker().setLastOwnStoryArrival(move.at);
+        storylog::noteOwnStoryArrival();
     }
     TeamMove& team = s_state.team;
     if (team.valid && move.to.sameStageRoom(team.move.to.stage, team.move.to.room)) {
         team.satisfied = true;
     }
     if (copyOf == 0) {
-        storylog::note(move);
+        storylog::note(move, true);
     }
     if (copyOf != 0 || move.qual == 0 || !syncing) {
         return;
@@ -596,7 +682,7 @@ void handleStoryMove(const nlohmann::json& packet) {
     if (m.key.empty()) {
         m.key = moveKey(m);
     }
-    storylog::note(m);
+    storylog::note(m, false);
 
     s_state.movesReceived++;
     s_state.lastMoveCurated = m.curated >= 0 ? kStoryMoves[m.curated].id : "";
@@ -621,6 +707,7 @@ void handleStoryMove(const nlohmann::json& packet) {
     team.move = m;
     team.valid = true;
     team.fromCache = fromCache;
+    team.offerableAt = Clock::now() + kOfferDelay;
     // Already there, or we watched the same cutscene (a pull-in copy follows its exit too).
     const JoinInfo& j = s_state.join;
     const bool here = m.to.sameStageRoom(currentStage(), dComIfGp_roomControl_getStayNo());
@@ -671,8 +758,10 @@ void computeCatchUpPlan() {
     CatchUpPlan p;
     const StorySegment* seg = activeSegment();
     const char* stage = currentStage();
+    const SegmentState segState = seg != nullptr ? segmentState(*seg, stage) : SegmentState::None;
     p.segment = seg != nullptr ? seg->id : "";
-    p.inconsistent = seg != nullptr && !segmentAllows(*seg, stage);
+    p.inconsistent = segState == SegmentState::Inconsistent;
+    p.behind = segState == SegmentState::Behind;
     p.title = "Catch up to story";
 
     if (session.isConnected() && !session.roomState().syncWorldState) {
@@ -680,41 +769,51 @@ void computeCatchUpPlan() {
         s_state.plan = std::move(p);
         return;
     }
-    // 1. The team's latest move, if our own story has not moved on since.
+    // 1. The team's newest logged move, if our own story has not moved on since.
     const TeamMove& team = s_state.team;
-    const auto own = tracker().lastOwnStoryArrival();
     if (sync::enabled() && team.valid && team.transient && !p.inconsistent) {
         p.reason = fmt::format("{} is in a story event in {}. You can follow when it ends.",
             team.move.originName, placeName(team.move));
         s_state.plan = std::move(p);
         return;
     }
-    if (sync::enabled() && team.valid && !team.satisfied && !team.transient &&
-        (!own || team.move.at > *own) && (seg == nullptr || segmentAllows(*seg, team.move.to.stage)))
-    {
-        CatchUpPlan f = followPlan(team.move);
-        f.segment = p.segment;
-        f.inconsistent = p.inconsistent;
-        s_state.plan = std::move(f);
-        return;
+    if (sync::enabled()) {
+        if (const MoveRecord* m = pickLoggedMove(seg)) {
+            CatchUpPlan f = followPlan(*m);
+            f.segment = p.segment;
+            f.inconsistent = p.inconsistent;
+            f.behind = p.behind;
+            s_state.plan = std::move(f);
+            return;
+        }
     }
-    if (!p.inconsistent) {
+    if (!p.inconsistent && !p.behind) {
+        // 2. A learned teammate move (offline, or after a restart).
+        if (const MoveRecord* m = pickLearnedMove(); m != nullptr && !session.isConnected()) {
+            CatchUpPlan f = followPlan(*m);
+            f.moveId.clear();
+            f.source = "learned " + m->key;
+            f.needSync = false;
+            s_state.plan = std::move(f);
+            return;
+        }
         p.reason = "Nothing to catch up on.";
         s_state.plan = std::move(p);
         return;
     }
-    // 2. The segment's canonical entrance: needs no network, so a stuck save is repaired offline.
-    if (seg->canonical.valid()) {
+    // 3. The segment's entrance: needs no network, so a stuck save is repaired offline.
+    if (segmentEntrance(*seg).valid()) {
         CatchUpPlan s = segmentPlan(*seg);
-        s.inconsistent = true;
+        s.inconsistent = p.inconsistent;
+        s.behind = p.behind;
         s_state.plan = std::move(s);
         return;
     }
-    // 3. A teammate standing where the story allows, through teleport-to-player.
+    // 4. A teammate standing where the story happens, through teleport-to-player.
     std::string mate;
     for (const auto& [id, c] : session.clients()) {
         if (c.self || !c.online || !c.isSaveLoaded || !session.isTeammate(c) ||
-            !segmentAllows(*seg, c.stageName))
+            segmentState(*seg, c.stageName) != SegmentState::Consistent)
         {
             continue;
         }
@@ -730,7 +829,7 @@ void computeCatchUpPlan() {
             return;
         }
     }
-    // 4. Nothing known.
+    // 5. Nothing known.
     p.reason = fmt::format("Your story says {}. No known way back yet: ask {} to stand on solid "
                            "ground in {} and use Teleport.",
         seg->text, mate.empty() ? std::string("a teammate") : mate, seg->place);
@@ -763,8 +862,7 @@ bool startCatchUpPlan() {
     if (p.kind == CatchUpPlan::Kind::TeleportToPlayer) {
         return teleport::request(p.clientId);
     }
-    return startLoad(p.entrance, p.layerArg, p.form, p.moveId,
-        p.moveId.empty() ? "segment " + p.segment : "move " + p.moveId, !p.moveId.empty());
+    return startLoad(p.entrance, p.layerArg, p.form, p.moveId, p.source, p.needSync);
 }
 
 void closePrompt() {
@@ -796,7 +894,7 @@ void answerPrompt(PromptAnswer answer) {
                 ui::kToastStory, 4000);
         } else if (team.valid) {
             const CatchUpPlan f = followPlan(team.move);
-            startLoad(f.entrance, f.layerArg, f.form, f.moveId, "move " + f.moveId, true);
+            startLoad(f.entrance, f.layerArg, f.form, f.moveId, f.source, true);
         }
     } else if (kind == PromptKind::Inconsistent) {
         if (answer == PromptAnswer::Decline) {
@@ -827,7 +925,7 @@ void tickPrompt() {
 
     updateTransient();
     if (team.valid && !team.offered && !team.satisfied && !team.declined && syncing &&
-        !team.transient)
+        !team.transient && now >= team.offerableAt)
     {
         offerTeamMove();
     }
