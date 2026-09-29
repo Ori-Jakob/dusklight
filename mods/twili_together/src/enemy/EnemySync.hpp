@@ -21,6 +21,8 @@ struct SpawnKey {
     uint32_t params;
     uint16_t setId;
     float home[3];
+    // 0: the enemy itself; 1..kMaxDup: that extra copy of it (Enemy Count).
+    uint8_t dup = 0;
 };
 
 struct Kill {
@@ -32,9 +34,18 @@ struct Kill {
     bool zoneActor = false;
 };
 
-// ENEMY_DEFEATED carries its own version.
-inline constexpr int kVersion = 1;
+// ENEMY_DEFEATED carries its own version; v2 added dup.
+inline constexpr int kVersion = 2;
 inline constexpr size_t kMaxKillsPerPacket = 16;
+inline constexpr int kMaxDup = 4;
+
+// Home within a unit, the rest exact.
+bool sameKey(const SpawnKey& a, const SpawnKey& b);
+std::string keyText(const SpawnKey& key);
+// The key of a live, tracked enemy, or nullptr.
+const SpawnKey* trackedKey(fpc_ProcID id);
+// Dying by its own hand or already removed: not to be touched.
+bool isDying(fpc_ProcID id);
 
 // Hook entry points.
 // fopAc_Create returned cPhs_COMPLEATE_e; the append is freed right after.
@@ -71,7 +82,9 @@ struct Stats {
 const Stats& stats();
 
 namespace detail {
-// False (nothing sent) unless we are where the server routes us and a teammate is there too.
+// We are where the server routes us and a teammate is there too.
+bool canSendHere(const char* stage, int layer);
+// False (nothing sent) unless canSendHere.
 bool sendDefeated(const char* stage, int layer, const Kill* kills, size_t count);
 // A validated kill from a teammate in our stage and layer.
 void queueRemote(const Kill& kill);

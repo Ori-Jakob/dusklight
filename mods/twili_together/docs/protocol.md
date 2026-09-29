@@ -187,7 +187,7 @@ cache and empties the queue.
 
 | Packet | Goes to | Notes |
 | --- | --- | --- |
-| `ENEMY_DEFEATED` | teammates in the same stage and layer | `{v, stageName, layerNo, kills: [...]}`; never cached, a replay would delete an enemy that respawned |
+| `ENEMY_DEFEATED` | teammates in the same stage and layer | `{v: 2, stageName, layerNo, kills: [...]}`; a kill is the enemy's spawn key `{roomNo, procName, params, setId, home, dup}` (`dup` 0, or 1 to 4 for an Enemy Count extra) plus `fxSize`, `fxType`, `zoneActor`. Never cached, a replay would delete an enemy that respawned |
 | `STORY_EVENT` | teammates in the same stage and layer | `ph` = `start`, `joined` or `end`; a story cutscene teammates in the same room may watch too |
 | `STORY_MOVE` | the whole team | `ph: "arrive"`: a story event moved the sender to another stage. Teammates get a prompt to follow. The latest one per team is replayed on catch-up |
 

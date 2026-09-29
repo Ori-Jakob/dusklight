@@ -47,9 +47,10 @@ bool parseKill(const nlohmann::json& k, Kill& out) {
     if (!k.is_object()) {
         return false;
     }
-    int64_t roomNo, procName, params, setId;
+    int64_t roomNo, procName, params, setId, dup;
     if (!intField(k, "roomNo", -1, 63, roomNo) || !intField(k, "procName", 0, 0x7FFF, procName) ||
-        !intField(k, "params", 0, 0xFFFFFFFFll, params) || !intField(k, "setId", 0, 0xFFFF, setId))
+        !intField(k, "params", 0, 0xFFFFFFFFll, params) || !intField(k, "setId", 0, 0xFFFF, setId) ||
+        !intField(k, "dup", 0, kMaxDup, dup))
     {
         return false;
     }
@@ -63,6 +64,7 @@ bool parseKill(const nlohmann::json& k, Kill& out) {
     out.key.procName = static_cast<int16_t>(procName);
     out.key.params = static_cast<uint32_t>(params);
     out.key.setId = static_cast<uint16_t>(setId);
+    out.key.dup = static_cast<uint8_t>(dup);
     // Cosmetic: clamped rather than rejected.
     int64_t v;
     out.fxSize = intField(k, "fxSize", INT64_MIN, INT64_MAX, v) ?
@@ -114,22 +116,26 @@ void handleEnemyDefeated(const nlohmann::json& packet) {
 
 }  // namespace
 
-bool detail::sendDefeated(const char* stage, int layer, const Kill* kills, size_t count) {
-    Session& session = Session::instance();
+bool detail::canSendHere(const char* stage, int layer) {
+    const Session& session = Session::instance();
     // The server routes by the stage it last heard from us.
-    if (count == 0 || std::strncmp(stage, session.reportedStageName(), 8) != 0 ||
+    if (std::strncmp(stage, session.reportedStageName(), 8) != 0 ||
         layer != session.reportedLayerNo())
     {
         return false;
     }
     const auto& clients = session.clients();
-    const bool teammateHere = std::any_of(clients.begin(), clients.end(), [&](const auto& e) {
+    return std::any_of(clients.begin(), clients.end(), [&](const auto& e) {
         return !e.second.self && session.clientIsInCurrentLayer(e.second) &&
                session.isTeammate(e.second);
     });
-    if (!teammateHere) {
+}
+
+bool detail::sendDefeated(const char* stage, int layer, const Kill* kills, size_t count) {
+    if (count == 0 || !canSendHere(stage, layer)) {
         return false;
     }
+    Session& session = Session::instance();
     nlohmann::json list = nlohmann::json::array();
     for (size_t i = 0; i < count; ++i) {
         const Kill& k = kills[i];
@@ -138,6 +144,7 @@ bool detail::sendDefeated(const char* stage, int layer, const Kill* kills, size_
             {"procName", k.key.procName},
             {"params", k.key.params},
             {"setId", k.key.setId},
+            {"dup", static_cast<int>(k.key.dup)},
             {"home", {{"x", k.key.home[0]}, {"y", k.key.home[1]}, {"z", k.key.home[2]}}},
             {"fxSize", static_cast<int>(k.fxSize)},
             {"fxType", static_cast<int>(k.fxType)},

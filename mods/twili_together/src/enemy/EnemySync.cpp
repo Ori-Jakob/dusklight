@@ -122,11 +122,6 @@ std::vector<std::pair<SpawnKey, Clock::time_point>> s_recent;
 bool s_applyingRemote = false;
 Stats s_stats{};
 
-std::string keyText(const SpawnKey& k) {
-    return fmt::format("proc {}, room {}, setId 0x{:04X}, home {:.1f} {:.1f} {:.1f}", k.procName,
-        k.roomNo, k.setId, k.home[0], k.home[1], k.home[2]);
-}
-
 void logKill(const char* what, const Kill& k) {
     TwiliLog.info("[enemy] {} ({})", what, keyText(k.key));
 }
@@ -168,13 +163,6 @@ bool isKillSyncable(s16 procName, u32 params) {
     default:
         return false;
     }
-}
-
-bool sameKey(const SpawnKey& a, const SpawnKey& b) {
-    return a.procName == b.procName && a.roomNo == b.roomNo && a.params == b.params &&
-           a.setId == b.setId && std::fabs(a.home[0] - b.home[0]) <= kHomeTolerance &&
-           std::fabs(a.home[1] - b.home[1]) <= kHomeTolerance &&
-           std::fabs(a.home[2] - b.home[2]) <= kHomeTolerance;
 }
 
 // isActor/onActor assert a setID below ACTOR_MAX and a live zone for the room.
@@ -315,6 +303,36 @@ Apply tryApply(const Pending& p, const char*& why) {
 }
 
 }  // namespace
+
+std::string keyText(const SpawnKey& k) {
+    return fmt::format("proc {}, room {}, setId 0x{:04X}, home {:.1f} {:.1f} {:.1f}{}", k.procName,
+        k.roomNo, k.setId, k.home[0], k.home[1], k.home[2],
+        k.dup != 0 ? fmt::format(", extra {}", k.dup) : std::string{});
+}
+
+bool sameKey(const SpawnKey& a, const SpawnKey& b) {
+    return a.procName == b.procName && a.roomNo == b.roomNo && a.params == b.params &&
+           a.setId == b.setId && a.dup == b.dup &&
+           std::fabs(a.home[0] - b.home[0]) <= kHomeTolerance &&
+           std::fabs(a.home[1] - b.home[1]) <= kHomeTolerance &&
+           std::fabs(a.home[2] - b.home[2]) <= kHomeTolerance;
+}
+
+const SpawnKey* trackedKey(fpc_ProcID id) {
+    const auto it = s_records.find(id);
+    return it == s_records.end() ? nullptr : &it->second.key;
+}
+
+bool isDying(fpc_ProcID id) {
+    const auto it = s_records.find(id);
+    if (it == s_records.end()) {
+        return false;
+    }
+    const Record& r = it->second;
+    return r.defeated || r.reported || r.remoteRemoved || !isUnset(r.deleteAt) ||
+           (!isUnset(r.disappearAt) && Clock::now() - r.disappearAt < kStillDying) ||
+           (r.inPlace != nullptr && r.inPlace->isDead(r.actor));
+}
 
 void onActorCreated(fopAc_ac_c* ac) {
     if (!isKillSyncable(fopAcM_GetName(ac), fopAcM_GetParam(ac))) {
