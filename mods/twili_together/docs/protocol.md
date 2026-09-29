@@ -213,11 +213,20 @@ hearts, at most 4). The relay forwards it only when both players are in game in 
 and layer and the team rules allow it (friendly fire), at most every 200 ms per attacker and
 victim; otherwise it answers with `DAMAGE_RESULT {result: "refused", reason}`. The victim
 checks again, plays the hit through its own damage code and answers `DAMAGE_RESULT {targetClientId,
-hitId, result, reason, damage}` with `result` = `applied`, `blocked` or `dropped`. The relay
-passes the result back to the attacker.
+hitId, result, reason, damage, knockout}` with `result` = `applied`, `blocked` or `dropped`. The
+relay passes the result back to the attacker.
+
+`kind`: 0 sword, 1 wolf, 2 arrow, 3 bomb, 4 slingshot, 5 boomerang, 6 clawshot, 7 shield bash,
+8 Ball and Chain, 9 stomp, 10 spinner, 11 horse. The victim clamps `damage` and `spl` to what its
+own table allows for the kind (README, PvP); an unknown kind from a newer client is clamped to
+the last one it knows.
+
+`knockout` is only set on an applied hit: `ko` when it took the victim's last heart (`pvpLethal`),
+`floor` when it took them down to the one-heart floor. The relay then sends `PVP_KNOCKOUT
+{attackerClientId, victimClientId, knockout}` to the whole room, which shows it as a toast.
 
 ### Server to client only
 
-`ALL_CLIENT_STATE`, `TEAM_STATE`, `TEAM_GAME_CONFLICT`, `SERVER_MESSAGE` and `DISABLE_CLIENT`.
-The relay drops them when a client sends them. `DISABLE_CLIENT` disconnects the client without an
-automatic reconnect.
+`ALL_CLIENT_STATE`, `TEAM_STATE`, `TEAM_GAME_CONFLICT`, `SERVER_MESSAGE`, `DISABLE_CLIENT` and
+`PVP_KNOCKOUT`. The relay drops them when a client sends them. `DISABLE_CLIENT` disconnects the
+client without an automatic reconnect.

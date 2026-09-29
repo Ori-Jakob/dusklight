@@ -118,6 +118,38 @@ All settings are stored in the game's `config.json` as `mod.dev_n0ted_twili__tog
 (for example `server_url`, `team_id`, `sync_world_state`) and can be set from the command line
 with `--cvar mod.dev_n0ted_twili__together.server_url=wss://twili.example.org`.
 
+## PvP
+
+With PvP Mode on, players can hurt each other with their own weapons. Your game decides that
+your hit landed; the other player's game still blocks it with a shield that faces you, and drops
+it during their cutscenes, events and i-frames. Players on the same team fight only with Friendly
+Fire; players without a team fight everyone. Without Lethal PvP a hit never takes you below one
+heart.
+
+| Attack | Hearts | Reaction |
+| --- | --- | --- |
+| Sword slash | 1/2 | stagger |
+| Combo finisher, back slice, mortal draw, spin attack | 3/4 | stagger |
+| Jump attack, helm splitter, ending blow | 3/4 | knockdown |
+| Great spin | 1 | knockdown |
+| Wolf bite or spin, Midna's area attack | 1/2 | stagger |
+| Ball and Chain | 1 | knockdown |
+| Iron Boots stomp | 1/2 | stagger |
+| Arrow / light arrow | 1/2 / 3/4 | stagger |
+| Bomb, bomb arrow | 3/4 | knockdown |
+| Spinner / its spin attack | 1/4 / 1/2 | stagger |
+| Epona at a gallop / spurred | 1/2 / 3/4 | stagger / knockdown |
+| Clawshot, shield bash, boomerang, slingshot | none | stagger |
+
+The Master Sword adds 1/4 to sword attacks and the Wooden Sword takes 1/4 off. A wolf takes
+double, a hit never more than one heart. Magic Armor pays in rupees as usual.
+
+When your hit lands, the game pauses for a moment (sword and wolf attacks, not on horseback), the
+other player makes the impact sound, and a small number rises where you hit: the hearts taken,
+"Hit" for none, "Blocked" when their shield took it. Hold L to Z-target the players you can
+fight. A hit that takes someone down to the one-heart floor shows "A beat B" to the whole room;
+with Lethal PvP, one that takes their last heart shows "A knocked out B".
+
 ## The Players tab
 
 Lists everyone in the room, grouped by team, with where they are and whether they sync with you.
