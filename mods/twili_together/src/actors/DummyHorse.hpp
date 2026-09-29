@@ -2,6 +2,7 @@
 
 // A remote player's Epona: daHorse_c pose members on a private Horse.arc, never the game's horse.
 
+#include "actors/DummyHoZelda.hpp"
 #include "actors/PrivateArchives.hpp"
 #include "fx/PlayerRecolor.hpp"
 #include "presence/RemotePose.hpp"
@@ -43,6 +44,9 @@ struct DummyHorseDebugInfo {
     uint32_t recolorKey = 0;
     Hsv mane{}, manePristine{};
     uint32_t soundAnims = 0;
+    bool zeldaShown = false;      // the sender's Zelda sits behind its rider
+    uint16_t zeldaAnm = 0xFFFF;   // her pack 0 clip
+    float zeldaPos[3] = {};
 };
 bool GetDummyHorseDebugInfo(fopAc_ac_c* actor, DummyHorseDebugInfo& out);
 // Looked up by process id every call: the manager may delete the puppet between two phases.
@@ -87,6 +91,7 @@ private:
     // Every Horse.arc BCK with its BAS, loaded in createHeap before the heap is trimmed.
     mDoExt_transAnmBas* mBck[kHorseLastAnm + 1] = {};
     HorseRecolor mRecolor;
+    DummyHoZelda mZelda;
     uint32_t mClientId = 0;
     uint32_t mHeapUsed = 0;
     uint16_t mBoundAnm[3] = {};

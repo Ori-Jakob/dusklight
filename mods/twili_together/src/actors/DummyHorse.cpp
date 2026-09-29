@@ -352,12 +352,14 @@ void daDummyHorse_c::applyRemotePose(const RemoteHorsePose& p, float alpha, bool
         mPosed = false;
         mRidden = false;
         mDemoHeld = false;
+        mZelda.update(p.zelda, false, nullptr, shape_angle, false);
         return;
     }
     if (p.flags & kHorseDemo) {
         // A stage demo clip cannot be posed here: the last pose holds, hidden.
         mDemoHeld = true;
         mRidden = false;
+        mZelda.update(p.zelda, false, nullptr, shape_angle, false);
         return;
     }
     const bool jump = snapped || !mPosed || mDemoHeld || p.epoch != mEpoch;
@@ -419,6 +421,8 @@ void daDummyHorse_c::applyRemotePose(const RemoteHorsePose& p, float alpha, bool
         updateReinsNormal(m_resetStateFlg0 != 0);
     }
     mPosed = true;
+    mZelda.update(p.zelda, (p.flags & kHorseZelda) != 0, getRootMtx(), shape_angle,
+        (p.flags & kHorseRidden) != 0);
 }
 
 void daDummyHorse_c::poseParked(const Client& c) {
@@ -462,6 +466,7 @@ void daDummyHorse_c::poseParked(const Client& c) {
     finishPose(jump);
     updateReinsNormal(jump);
     mPosed = true;
+    mZelda.update(RemoteHorseZelda{}, false, nullptr, shape_angle, false);
 }
 
 // What daHorse_c::execute does after its calc, for the parts a puppet shows.
@@ -693,6 +698,7 @@ int daDummyHorse_c::draw() {
     } else {
         m_shadowID = 0;
     }
+    mZelda.draw(tevStr, m_shadowID);
     if (!(mFlags & kHorseReinsHidden) && field_0x1204 > 1) {
         static GXColor reinLineColor = {0x00, 0x00, 0x00, 0xFF};
         m_reinLine.update(field_0x1204, 1.5f, reinLineColor, 0, &tevStr);
@@ -704,6 +710,7 @@ int daDummyHorse_c::draw() {
 void daDummyHorse_c::destroy() {
     // Never ~daHorse_c: it would drop the resident "Horse" archive our own Epona uses.
     m_sound.deleteObject();
+    mZelda.destroy();
     mpArchive = nullptr;
     mArchives.release();
     TwiliLog.info("[horse {}] destroyed", mClientId);
@@ -744,6 +751,11 @@ void daDummyHorse_c::getDebugInfo(DummyHorseDebugInfo& out) const {
     out.recolorKey = mRecolor.mane.appliedKey();
     mRecolor.mane.probe(out.mane, out.manePristine);
     out.soundAnims = mSoundAnims;
+    out.zeldaShown = mZelda.shown() && isShown();
+    out.zeldaAnm = mZelda.anm();
+    out.zeldaPos[0] = mZelda.pos().x;
+    out.zeldaPos[1] = mZelda.pos().y;
+    out.zeldaPos[2] = mZelda.pos().z;
 }
 
 namespace {

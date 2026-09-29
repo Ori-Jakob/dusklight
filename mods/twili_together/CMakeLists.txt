@@ -28,6 +28,7 @@ endif ()
 set(TWILI_SOURCES
     src/mod.cpp
     src/actors/DummyActors.cpp
+    src/actors/DummyHoZelda.cpp
     src/actors/DummyHorse.cpp
     src/actors/DummyItemFx.cpp
     src/actors/DummyMidna.cpp

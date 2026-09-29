@@ -710,6 +710,9 @@ void Session::sendPlayerUpdate(float posX, float posY, float posZ,
     if (!keyframe || cur.hsr[0] != 0) {
         putField(packet, "or", cur.hsr, o.hsr, keyframe, changed);
     }
+    if (!keyframe || anyNonZero(cur.hsz)) {
+        putField(packet, "oz", cur.hsz, o.hsz, keyframe, changed);
+    }
     if (keyframe) {
         packet["xv"] = 1;
     }
@@ -971,6 +974,7 @@ void Session::handlePlayerUpdate(const nlohmann::json& packet) {
     takeItemGroup("ow", w.hsw);
     takeItemGroup("ok", w.hsk);
     takeItemGroup("or", w.hsr);
+    takeItemGroup("oz", w.hsz);
     if (keyframe) {
         c.sendsItemFx = packet.find("xv") != packet.end();
     }

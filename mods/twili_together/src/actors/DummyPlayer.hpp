@@ -139,6 +139,9 @@ struct DummyPlayerDebugInfo {
     uint32_t sfxDropped = 0;  // late, too far ahead, or across a snap
     uint32_t midnaSfx = 0;    // Midna's sounds played (from the wire and her clips)
     DummySfxPlayed sfxRecent[16];  // the latest first
+    // A rider aiming the bow: ticks jointControll turned joint 5, and by how much last time
+    uint32_t bowTiltTicks = 0;
+    float bowTiltDeg = 0.0f;
 };
 
 // A remote player: a daAlink_c posed from the received stream, never controlled.
@@ -202,6 +205,7 @@ private:
                                              float frameNext = 0.0f, float frameAlpha = 0.0f);
     bool setRemoteBasAnime(bool upper, int idx);
     void modelCalcRemoteBody(bool attentionLock);
+    f32 jointExtraTurnDeg(u16 jnt) const;
     void applyRemoteClothes(uint8_t clothesItem);
     void bindRemoteMagicArmorBrk(int status, bool fromStart = false);
     void updateRemoteMagicArmor(const twili::LinkPuppetState& state);
@@ -397,6 +401,8 @@ private:
     bool mDummySfxPrimed = false;
     uint32_t mDummySfxPlayed = 0;
     uint32_t mDummySfxDropped = 0;
+    uint32_t mDummyBowTiltTicks = 0;
+    f32 mDummyBowTiltDeg = 0.0f;
     twili::DummySfxPlayed mDummySfxRecent[16];
 };
 

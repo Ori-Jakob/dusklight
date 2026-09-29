@@ -351,7 +351,18 @@ enum HorseFlag : uint8_t {
     kHorseReinsHidden = 1 << 3,  // RFLG0_UNK_100: a demo hides the reins
     kHorseDemo = 1 << 4,
     kHorseReinReset = 1 << 5,    // RFLG0_UNK_1: a cut, no rein continuity
-    kHorseWireMask = 0x3F,
+    kHorseZelda = 1 << 6,        // daHoZelda_c rides it ("oz")
+    kHorseWireMask = 0x7F,
+};
+
+// daHoZelda_c behind the rider: HoZelda.arc clips (0xFFFF none) as her three packs play them.
+struct RemoteHorseZelda {
+    uint16_t anm[3] = {0xFFFF, 0xFFFF, 0xFFFF};
+    float frame[3] = {};
+    float ratio = 0.0f;       // pack 1's (pack 0 has the rest)
+    bool upper = false;       // pack 2 drives the upper body (mBowMode or field_0x6da)
+    uint16_t bowAnm = 0xFFFF;
+    float bowFrame = 0.0f;
 };
 
 struct RemoteHorseRider {
@@ -360,6 +371,7 @@ struct RemoteHorseRider {
     uint8_t stirrups = 0;    // field_0x2fab & 3: 1 left foot, 2 right foot in its stirrup
     int8_t reinHand = -1;
     bool pitchComp = false;
+    bool bowTilt = false;    // aiming the bow: jointControll turns joint 5 (checkReinRide)
     float base[3] = {};      // field_0x3588.x, field_0x33b0, field_0x3588.z
     float off[3] = {};       // Link's current.pos in the horse root joint's space
 };
@@ -378,6 +390,7 @@ struct RemoteHorsePose {
     int16_t neckYaw = 0, lean = 0, tail[3] = {};  // field_0x16f0, field_0x16fa, field_0x16d4
     int16_t foot[4][4] = {};  // m_footData[i].field_0x4: the legs' ground IK
     RemoteHorseRider rider;
+    RemoteHorseZelda zelda;
     // Set by RemotePoseBuffer like the body packs' *FramesNext (frameAlpha is shared).
     float frameNext[3] = {};
     bool present() const { return (flags & kHorsePresent) != 0; }
@@ -503,6 +516,7 @@ struct WirePose {
     // The clawshot (RemoteHookshot)
     int32_t hk[11]{}, bc[7]{}, ls[8]{}, hx[4]{};
     int32_t hsx[6]{}, hsp[3]{}, hss[3]{}, hsa[3]{}, hsf[3]{}, hsw[2]{}, hsk[16]{}, hsr[7]{};
+    int32_t hsz[8]{};
 };
 
 struct RemotePoseSample {

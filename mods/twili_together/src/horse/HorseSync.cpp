@@ -4,6 +4,7 @@
 
 #include "d/actor/d_a_alink.h"
 #include "d/actor/d_a_horse.h"
+#include "d/actor/d_a_hozelda.h"
 #include "d/d_com_inf_game.h"
 #include "JSystem/J3DGraphAnimator/J3DModel.h"
 #include "JSystem/J3DGraphBase/J3DShape.h"
@@ -54,6 +55,33 @@ void putUtf8(std::string& out, uint32_t cp) {
         out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
         out += static_cast<char>(0x80 | (cp & 0x3F));
     }
+}
+
+// HoZelda.arc indices ride +1 so that 0 means none.
+int32_t zeldaAnm(uint16_t id) {
+    return id == 0xFFFF ? 0 : id + 1;
+}
+
+uint16_t zeldaAnmFrom(int32_t v) {
+    return v <= 0 || v > 0x100 ? 0xFFFF : static_cast<uint16_t>(v - 1);
+}
+
+void captureZelda(daHorse_c* h, RemoteHorsePose& out) {
+    daHoZelda_c* z = h->getZeldaActor();
+    if (z == nullptr || z->mpZeldaModel == nullptr) {
+        return;
+    }
+    out.flags |= kHorseZelda;
+    RemoteHorseZelda& r = out.zelda;
+    const uint16_t ids[3] = {z->field_0x6e4[0], z->field_0x6e4[1], z->mUpperAnmID};
+    for (int i = 0; i < 3; i++) {
+        r.anm[i] = z->mAnmRatioPack[i].getAnmTransform() != nullptr ? ids[i] : 0xFFFF;
+        r.frame[i] = z->mFrameCtrl[i].getFrame();
+    }
+    r.ratio = z->mAnmRatioPack[1].getRatio();
+    r.upper = z->mBowMode != 0 || z->field_0x6da != 0;
+    r.bowAnm = z->mBowAnmID;
+    r.bowFrame = z->mBowBck.getFrame();
 }
 
 // daHorse_c::create's refusal
@@ -111,6 +139,7 @@ bool captureLocal(RemoteHorsePose& out) {
     if (h->checkResetStateFlg0(daHorse_c::RFLG0_UNK_1)) {
         out.flags |= kHorseReinReset;
     }
+    captureZelda(h, out);
     const uint16_t anm0 = h->m_anmIdx[0];
     if ((anm0 != 0xFFFF && (anm0 & 0x8000)) || h->m_procID == daHorse_c::PROC_TOOL_DEMO_e) {
         out.flags |= kHorseDemo;
@@ -153,6 +182,7 @@ bool captureLocal(RemoteHorsePose& out) {
         r.reinHand = static_cast<int8_t>(std::clamp(link->getReinHandType(), -1, 3));
         r.pitchComp = link->checkReinRide() && !link->checkHorseLieAnime() &&
                       link->mProcID != daAlink_c::PROC_HORSE_RUN;
+        r.bowTilt = link->checkReinRide() && link->checkBowAnime();
         r.base[0] = link->field_0x3588.x;
         r.base[1] = link->field_0x33b0;
         r.base[2] = link->field_0x3588.z;
@@ -191,11 +221,23 @@ void encode(const RemoteHorsePose& h, WirePose& w) {
     const RemoteHorseRider& r = h.rider;
     if (r.active) {
         w.hsr[0] = 1 | (r.rootMode << 8) | ((r.stirrups & 3) << 16) |
-                   ((r.reinHand + 1) << 20) | ((r.pitchComp ? 1 : 0) << 24);
+                   ((r.reinHand + 1) << 20) | ((r.pitchComp ? 1 : 0) << 24) |
+                   ((r.bowTilt ? 1 : 0) << 25);
         for (int i = 0; i < 3; i++) {
             w.hsr[1 + i] = quantize(r.base[i], kRiderBaseScale);
             w.hsr[4 + i] = quantize(r.off[i], kRiderOffsetScale);
         }
+    }
+    if (h.flags & kHorseZelda) {
+        const RemoteHorseZelda& z = h.zelda;
+        w.hsz[0] = zeldaAnm(z.anm[0]) | (zeldaAnm(z.anm[1]) << 16);
+        w.hsz[1] = zeldaAnm(z.anm[2]) | (zeldaAnm(z.bowAnm) << 16);
+        for (int i = 0; i < 3; i++) {
+            w.hsz[2 + i] = quantize(z.frame[i], kFrameScale);
+        }
+        w.hsz[5] = quantize(z.ratio, kRatioScale);
+        w.hsz[6] = quantize(z.bowFrame, kFrameScale);
+        w.hsz[7] = z.upper ? 1 : 0;
     }
 }
 
@@ -232,6 +274,7 @@ RemoteHorsePose decode(const WirePose& w) {
         r.stirrups = static_cast<uint8_t>((r0 >> 16) & 3);
         r.reinHand = static_cast<int8_t>(std::clamp(static_cast<int>((r0 >> 20) & 7) - 1, -1, 3));
         r.pitchComp = ((r0 >> 24) & 1) != 0;
+        r.bowTilt = ((r0 >> 25) & 1) != 0;
         bool sane = true;
         for (int i = 0; i < 3; i++) {
             r.base[i] = w.hsr[1 + i] / kRiderBaseScale;
@@ -241,6 +284,23 @@ RemoteHorsePose decode(const WirePose& w) {
         r.active = sane;
         if (!sane) {
             r = RemoteHorseRider{};
+        }
+    }
+    if (h.flags & kHorseZelda) {
+        RemoteHorseZelda& z = h.zelda;
+        z.anm[0] = zeldaAnmFrom(w.hsz[0] & 0xFFFF);
+        z.anm[1] = zeldaAnmFrom((w.hsz[0] >> 16) & 0xFFFF);
+        z.anm[2] = zeldaAnmFrom(w.hsz[1] & 0xFFFF);
+        z.bowAnm = zeldaAnmFrom((w.hsz[1] >> 16) & 0xFFFF);
+        for (int i = 0; i < 3; i++) {
+            z.frame[i] = w.hsz[2 + i] / kFrameScale;
+        }
+        z.ratio = std::clamp(w.hsz[5] / kRatioScale, 0.0f, 1.0f);
+        z.bowFrame = w.hsz[6] / kFrameScale;
+        z.upper = (w.hsz[7] & 1) != 0;
+        if (z.anm[0] == 0xFFFF) {
+            h.flags &= ~kHorseZelda;  // her pack 0 always holds a clip
+            z = RemoteHorseZelda{};
         }
     }
     return h;

@@ -1947,6 +1947,8 @@ void daDummyPlayer_c::modelCalcRemoteBody(bool attentionLock) {
     const f32 oldRootTransBaseY = field_0x33b0;
     auto* const oldRideBase = field_0x384c;
     const s16 oldBodyAngleX = mBodyAngle.x;
+    const u8 oldRideStatus = mRideStatus;
+    const bool bowTilt = mDummyRider.active && mDummyRider.bowTilt && !checkWolf();
 
     field_0x2f99 = 5;
     if (mDummyRider.active && !checkWolf()) {
@@ -1955,9 +1957,17 @@ void daDummyPlayer_c::modelCalcRemoteBody(bool attentionLock) {
         field_0x33b0 = mDummyRider.base[1];
         field_0x3588.z = mDummyRider.base[2];
         field_0x384c = const_cast<cXyz*>(&kDummyHorseBaseAnime);
-        if (mDummyRider.pitchComp) {
-            mBodyAngle.x = static_cast<s16>(mBodyAngle.x - shape_angle.x);
+        s16 bodyX = mDummyRider.pitchComp ? static_cast<s16>(mBodyAngle.x - shape_angle.x)
+                                          : mBodyAngle.x;
+        if (bowTilt) {
+            // jointControll turns joint 5 for the bow only while riding, and then takes the
+            // slope off joint 1 by its own rule: undone here so pitchComp alone decides.
+            mRideStatus = RIDETYPE_HORSE;
+            if (!checkHorseLieAnime() && mProcID != PROC_HORSE_RUN && mProcID != PROC_BOAR_RUN) {
+                bodyX = static_cast<s16>(bodyX + shape_angle.x);
+            }
         }
+        mBodyAngle.x = bodyX;
     } else if (checkWolf()) {
         field_0x3588.x = kDummyWolfRootTransX;
         field_0x3588.z = kDummyWolfRootTransZ;
@@ -1966,12 +1976,65 @@ void daDummyPlayer_c::modelCalcRemoteBody(bool attentionLock) {
         field_0x3588.z = attentionLock ? kDummyHalfAtnRootTransZ : kDummyWaitRootTransZ;
     }
     modelCalc(mpLinkModel);
+    if (bowTilt) {
+        mDummyBowTiltTicks++;
+        mDummyBowTiltDeg = jointExtraTurnDeg(5);
+    }
 
     field_0x2f99 = oldRootTransMode;
     field_0x3588 = oldRootTransBase;
     field_0x33b0 = oldRootTransBaseY;
     field_0x384c = oldRideBase;
     mBodyAngle.x = oldBodyAngleX;
+    mRideStatus = oldRideStatus;
+}
+
+// How far joint `jnt` is turned beyond its clips' pose (jointControll's extras), in degrees.
+f32 daDummyPlayer_c::jointExtraTurnDeg(u16 jnt) const {
+    J3DModelData* data = mpLinkModel->getModelData();
+    const auto parentOf = [&](auto&& self, J3DJoint* joint, u16 child) -> J3DJoint* {
+        for (; joint != nullptr; joint = joint->getYounger()) {
+            for (J3DJoint* c = joint->getChild(); c != nullptr; c = c->getYounger()) {
+                if (c->getJntNo() == child) {
+                    return joint;
+                }
+            }
+            if (J3DJoint* found = self(self, joint->getChild(), child)) {
+                return found;
+            }
+        }
+        return nullptr;
+    };
+    J3DJoint* parent = parentOf(parentOf, data->getJointNodePointer(0), jnt);
+    if (parent == nullptr) {
+        return 0.0f;
+    }
+    MtxP p = mpLinkModel->getAnmMtx(parent->getJntNo());
+    MtxP c = mpLinkModel->getAnmMtx(jnt);
+    Mtx anim;
+    MTXQuat(anim, field_0x2060->getOldFrameQuaternion(jnt));
+    // trace(Ranim^T * Rparent^T * Rchild), columns normalised against any joint scale
+    f32 trace = 0.0f;
+    for (int k = 0; k < 3; k++) {
+        f32 local[3];
+        f32 cl = 0.0f, pl[3] = {};
+        for (int r = 0; r < 3; r++) {
+            cl += c[r][k] * c[r][k];
+        }
+        for (int i = 0; i < 3; i++) {
+            local[i] = 0.0f;
+            for (int r = 0; r < 3; r++) {
+                pl[i] += p[r][i] * p[r][i];
+                local[i] += p[r][i] * c[r][k];
+            }
+        }
+        for (int i = 0; i < 3; i++) {
+            const f32 norm = std::sqrt(pl[i] * cl);
+            trace += anim[i][k] * (norm > 1e-6f ? local[i] / norm : 0.0f);
+        }
+    }
+    const f32 cosA = std::clamp((trace - 1.0f) * 0.5f, -1.0f, 1.0f);
+    return std::acos(cosA) * 180.0f / 3.14159265f;
 }
 
 void daDummyPlayer_c::updateRemoteEquipment(const LinkPuppetState& state) {
@@ -3270,6 +3333,8 @@ void daDummyPlayer_c::getDebugInfo(twili::DummyPlayerDebugInfo& out) const {
     out.sfxPlayed = mDummySfxPlayed;
     out.sfxDropped = mDummySfxDropped;
     out.midnaSfx = mDummyMidna.sfxPlayed();
+    out.bowTiltTicks = mDummyBowTiltTicks;
+    out.bowTiltDeg = mDummyBowTiltDeg;
     std::copy(std::begin(mDummySfxRecent), std::end(mDummySfxRecent), std::begin(out.sfxRecent));
 }
 
