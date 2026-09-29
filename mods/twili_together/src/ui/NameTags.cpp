@@ -58,6 +58,10 @@ constexpr f32 kSmallGlyphHeight = 14.0f;
 constexpr f32 kPadX = 8.0f;
 constexpr f32 kPadY = 4.0f;
 constexpr f32 kLineGap = 2.0f;
+constexpr f32 kDotX = 7.0f;
+constexpr f32 kDotSize = 4.0f;
+// Left of the text: the dot plus a gap.
+constexpr f32 kDotRoom = kDotX + kDotSize + 7.0f - kPadX;
 constexpr size_t kMaxOwnerGlyphs = 24;
 constexpr size_t kMaxHorseGlyphs = 16;
 // A jump this far between two ticks is a teleport or respawn: no lerp across it.
@@ -264,7 +268,7 @@ void layoutTag(JUTFont* font, TagDraw& tag, const Vec& screen, f32 minX, f32 max
         textWidth = std::max(textWidth, line.width);
         textHeight += line.glyphH + (i > 0 ? kLineGap : 0.0f);
     }
-    tag.width = textWidth + kPadX * 2.0f;
+    tag.width = textWidth + kPadX * 2.0f + kDotRoom;
     tag.height = textHeight + kPadY * 2.0f;
     tag.x = std::clamp(screen.x - tag.width * 0.5f, minX + 4.0f, maxX - tag.width - 4.0f);
     tag.y = screen.y - tag.height - 8.0f;
@@ -279,8 +283,8 @@ void drawTagBox(const TagDraw& tag) {
     J2DFillBox(tag.x, tag.y, tag.width, tag.height, tag.fill);
     J2DDrawFrame(tag.x, tag.y, tag.width, tag.height, tag.border, 2);
     // The owner's dot, level with the name.
-    J2DFillBox(tag.x + 5.0f, tag.y + kPadY + tag.lines[0].glyphH * 0.5f - 2.0f, 4.0f, 4.0f,
-        tag.border);
+    J2DFillBox(tag.x + kDotX, tag.y + kPadY + tag.lines[0].glyphH * 0.5f - kDotSize * 0.5f,
+        kDotSize, kDotSize, tag.border);
 }
 
 void addProbe(uint32_t id, Probe::Kind kind, const TagDraw& tag) {
@@ -428,7 +432,7 @@ void draw() {
             baseline += line.glyphH + (i > 0 ? kLineGap : 0.0f);
             font->setCharColor(i == 0 ? tag.text : tag.text2);
             // drawString_scale's y is the baseline, a quarter glyph above the cell's bottom.
-            font->drawString_scale(tag.x + (tag.width - line.width) * 0.5f,
+            font->drawString_scale(tag.x + kDotRoom + (tag.width - kDotRoom - line.width) * 0.5f,
                 baseline - line.glyphH * 0.25f, line.glyphW, line.glyphH, line.text.c_str(), true);
         }
     }
