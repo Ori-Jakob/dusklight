@@ -33,6 +33,8 @@ constexpr KindLook kKindLooks[] = {
     {AT_TYPE_SHIELD_ATTACK, dCcD_SE_SHIELD_ATTACK},
     {AT_TYPE_IRON_BALL, dCcD_SE_HAMMER},
     {AT_TYPE_HEAVY_BOOTS, dCcD_SE_HAMMER},
+    {AT_TYPE_SPINNER, dCcD_SE_SPINNER},
+    {AT_TYPE_HORSE, dCcD_SE_HARD_BODY},
 };
 static_assert(std::size(kKindLooks) == static_cast<size_t>(Kind::Count));
 
@@ -63,6 +65,7 @@ struct Plant {
     bool entered = false;
     Taken taken = Taken::No;
     int lifeTaken = 0;
+    const char* knockout = "";
 };
 Plant s_plant;
 // The warm GetTgHitGObj tap tests only this.
@@ -99,14 +102,31 @@ int victimDamage(daAlink_c* link, int dmg) {
     return std::min(out, kMaxHitDamage);
 }
 
+// Life plus the meter's pending change.
+int currentLife() {
+    return dComIfGs_getLife() + static_cast<int>(dComIfGp_getItemLifeCount());
+}
+
 // Without pvpLethal a hit never takes life below one heart (or the current life if less).
 int clampToFloor(daAlink_c* link, int dmg) {
     if (Session::instance().roomState().pvpLethal || link->checkMagicArmorNoDamage()) {
         return dmg;
     }
-    const int life = dComIfGs_getLife() + static_cast<int>(dComIfGp_getItemLifeCount());
+    const int life = currentLife();
     const int floor = std::min(life, 4);
     return std::clamp(life - floor, 0, dmg);
+}
+
+// "ko" when the hit took our last heart, "floor" when it took us down to the one-heart floor.
+const char* knockoutOf(int lifeBefore, int lifeTaken) {
+    if (lifeTaken <= 0) {
+        return "";
+    }
+    const int after = lifeBefore - lifeTaken;
+    if (Session::instance().roomState().pvpLethal) {
+        return after <= 0 ? "ko" : "";
+    }
+    return lifeBefore > 4 && after <= 4 ? "floor" : "";
 }
 
 // armorRupeeDrain INVINCIBLE is the one mode whose armor stops damage without rupees.
@@ -225,9 +245,11 @@ void onDamagePoint(daAlink_c* link) {
         return;
     }
     s_plant.taken = Taken::Applied;
+    const int lifeBefore = currentLife();
     const int dmg = clampToFloor(link, victimDamage(link, s_plant.pending.hit.damage));
     if (dmg > 0) {
         s_plant.lifeTaken = applyDamage(link, dmg);
+        s_plant.knockout = knockoutOf(lifeBefore, s_plant.lifeTaken);
     } else {
         // A pure stagger or a hit the floor ate: i-frames all the same, so hits cannot chain.
         link->mDamageTimer = link->mpHIO->mDamage.m.mInvincibleTime;
@@ -249,7 +271,8 @@ void endDamageCheck(daAlink_c* link) {
     }
     // Taken as a block only if the guard branch got it first.
     const bool blocked = done.taken == Taken::Blocked;
-    reportResult(done.pending, blocked ? "blocked" : "applied", "", blocked ? 0 : done.lifeTaken);
+    reportResult(done.pending, blocked ? "blocked" : "applied", "", blocked ? 0 : done.lifeTaken,
+        blocked ? "" : done.knockout);
 }
 
 }  // namespace twili::pvp

@@ -24,9 +24,11 @@ const TELEPORT_MIN_INTERVAL_MS = envNumber("TT_TELEPORT_INTERVAL_MS", 1000);
 // PvP: at most one hit per attacker/victim pair per interval.
 const DAMAGE_MIN_INTERVAL_MS = envNumber("TT_DAMAGE_INTERVAL_MS", 200);
 const MAX_PVP_DAMAGE = 4; // quarter hearts per hit
-const PVP_KIND_COUNT = 10;
+const PVP_KIND_COUNT = 12;
 const PVP_KNOCKBACK_COUNT = 2; // "spl": 0 light, 1 knockdown
 const DAMAGE_RESULTS = new Set(["applied", "blocked", "dropped"]);
+// An applied hit that took the victim to 0 hearts ("ko") or down to the one-heart floor.
+const PVP_KNOCKOUTS = new Set(["ko", "floor"]);
 // Test only: delay what each client receives by up to this many ms, keeping order.
 const TEST_JITTER_MS = envNumber("TT_TEST_JITTER_MS", 0);
 // Node runs a timer after 1 ms when its delay is above 2^31-1 ms.
@@ -48,7 +50,7 @@ const TEAM_PRESENCE_PACKET_TYPES = new Set(["ENEMY_DEFEATED", "ENEMY_DAMAGE", "S
 const TEAM_STORY_PACKET_TYPES = new Set(["STORY_MOVE"]);
 // Every client obeys these, so a relayed copy could rewrite the roster or disconnect the room.
 const SERVER_ONLY_TYPES = new Set(["ALL_CLIENT_STATE", "SERVER_MESSAGE", "DISABLE_CLIENT", "TEAM_STATE",
-    "TEAM_GAME_CONFLICT"]);
+    "TEAM_GAME_CONFLICT", "PVP_KNOCKOUT"]);
 const GAME_KINDS = new Set(["vanilla", "randomizer", "mode"]);
 const GAME_KEY_RE = /^[A-Za-z0-9/._-]{1,96}$/;
 const PERMALINK_RE = /^[A-Za-z0-9+/=_-]{1,512}$/;
@@ -141,7 +143,7 @@ function packetSummary(packet) {
         case "DAMAGE_PLAYER":
             return `${packet.type} target=${text(packet.targetClientId)} hit=${text(packet.hitId)} kind=${text(packet.kind)} dmg=${text(packet.damage)} spl=${text(packet.spl)} blocked=${text(packet.blocked)}`;
         case "DAMAGE_RESULT":
-            return `${packet.type} to=${text(packet.targetClientId)} hit=${text(packet.hitId)} ${text(packet.result)} reason=${text(packet.reason)} dmg=${text(packet.damage)}`;
+            return `${packet.type} to=${text(packet.targetClientId)} hit=${text(packet.hitId)} ${text(packet.result)} reason=${text(packet.reason)} dmg=${text(packet.damage)}${packet.knockout === undefined ? "" : ` ko=${text(packet.knockout)}`}`;
         case "AUTOTEST_SIGNAL":
             return `${packet.type} instance=${text(packet.instance)} name=${text(packet.name)}`;
         default:
@@ -974,7 +976,7 @@ function noteAwaitingResult(victim, attackerId, hitId, now) {
     victim.awaitingResults.set(`${attackerId}:${hitId}`, now);
 }
 
-// Back to the attacker only, rebuilt field by field.
+// Back to the attacker only, rebuilt field by field; a knockout is announced to the whole room.
 function handleDamageResult(room, client, packet) {
     const attacker = room.clients.get(asInt(packet.targetClientId, 0, 0, 0x7fffffff));
     if (!attacker || attacker.clientId === client.clientId) return;
@@ -993,6 +995,11 @@ function handleDamageResult(room, client, packet) {
         reason: asString(packet.reason, "", 32),
         damage: clampInt(packet.damage, 0, 0, MAX_PVP_DAMAGE),
     });
+    if (packet.result === "applied" && PVP_KNOCKOUTS.has(packet.knockout)) {
+        log(`[${client.name}] knocked out by ${attacker.name} (${packet.knockout})`);
+        broadcastRoom(room, -1, { type: "PVP_KNOCKOUT", attackerClientId: attacker.clientId,
+                                  victimClientId: client.clientId, knockout: packet.knockout });
+    }
 }
 
 function handlePacket(client, packet) {

@@ -140,6 +140,7 @@ public:
     void getDebugInfo(twili::DummyPlayerDebugInfo& out) const;
     void getRecolorProbe(twili::RecolorProbe& out) const;
     void onPvpTgHit(dCcD_GObjInf* tg, fopAc_ac_c* atActor, dCcD_GObjInf* at);
+    void playPvpHitSe(uint32_t hitSe, uint32_t guardSe, bool blocked);
 
     bool privateArchivesBusy() const { return mDummyArchives.busy(); }
 
@@ -388,5 +389,7 @@ bool IsDummyPlayerShown(fopAc_ac_c* actor);
 bool GetDummyPlayerDebugInfo(fopAc_ac_c* actor, DummyPlayerDebugInfo& out);
 // The worn set's recolour state (autotest).
 bool GetDummyPlayerRecolorProbe(fopAc_ac_c* actor, RecolorProbe& out);
+// PvP: the sound of our hit on `actor`, a dummy player.
+void PlayDummyPlayerHitSe(fopAc_ac_c* actor, uint32_t hitSe, uint32_t guardSe, bool blocked);
 }  // namespace twili
 

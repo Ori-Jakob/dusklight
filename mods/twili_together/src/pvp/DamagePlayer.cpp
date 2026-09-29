@@ -2,14 +2,19 @@
 
 #include "pvp/Pvp.hpp"
 
+#include "actors/DummyPlayer.hpp"
 #include "core/Client.hpp"
 #include "core/Log.hpp"
 #include "core/SaveGate.hpp"
 #include "core/Session.hpp"
 #include "core/Visibility.hpp"
+#include "teleport/Teleport.hpp"
+#include "ui/HitMarkers.hpp"
+#include "ui/Toasts.hpp"
 
 #include "d/actor/d_a_alink.h"
 #include "d/d_com_inf_game.h"
+#include "d/d_s_play.h"
 
 #include <nlohmann/json.hpp>
 
@@ -17,6 +22,7 @@
 #include <chrono>
 #include <climits>
 #include <cstring>
+#include <iterator>
 #include <map>
 #include <tuple>
 #include <vector>
@@ -33,6 +39,14 @@ constexpr auto kPendingTtl = std::chrono::milliseconds(300);
 constexpr size_t kMaxPending = 4;
 // The attacker may have hit a pose of ours at most this many ticks old.
 constexpr int32_t kMaxViewAgeTicks = 30;
+// Sent hits remembered for their marker, and the autotest's histories.
+constexpr size_t kMaxSentHits = 32;
+constexpr size_t kMaxHistory = 32;
+
+struct SentHit {
+    uint32_t victimId = 0;
+    float offset[3] = {};
+};
 
 struct State {
     // Collision pass -> tick: the strongest hit per victim.
@@ -41,6 +55,9 @@ struct State {
     std::vector<PendingHit> pending;
     std::map<uint32_t, AttackStats> attacks;
     VictimStats victim;
+    std::map<uint32_t, SentHit> sentHits;
+    std::vector<HitMarkerRecord> markers;
+    std::vector<std::string> knockouts;
     uint32_t nextHitId = 1;
 };
 State s_state;
@@ -109,6 +126,30 @@ uint32_t sendDamagePlayer(uint32_t victimId, const HitReport& hit) {
     TwiliLog.info("[pvp] hit {} -> client {} kind {} dmg {} {} blocked {}", hitId, victimId,
         kindName(hit.kind), hit.damage, knockbackName(hit.knockback), hit.blocked);
     return hitId;
+}
+
+template <typename T>
+void pushHistory(std::vector<T>& history, T entry) {
+    if (history.size() >= kMaxHistory) {
+        history.erase(history.begin());
+    }
+    history.push_back(std::move(entry));
+}
+
+// The attacker's feedback at once: vanilla's short hit pause and the impact on the dummy.
+void onHitSent(uint32_t victimId, uint32_t hitId, const HitReport& hit) {
+    SentHit& sent = s_state.sentHits[hitId];
+    sent.victimId = victimId;
+    std::copy(std::begin(hit.hitOffset), std::end(hit.hitOffset), sent.offset);
+    while (s_state.sentHits.size() > kMaxSentHits) {
+        s_state.sentHits.erase(s_state.sentHits.begin());
+    }
+    if (hit.hitStop > 0 && dScnPly_c::pauseTimer == 0 && dScnPly_c::nextPauseTimer == 0) {
+        dScnPly_c::setPauseTimer(static_cast<s8>(hit.hitStop));
+        s_state.attacks[victimId].hitStops++;
+    }
+    PlayDummyPlayerHitSe(
+        Session::instance().dummyActorForClient(victimId), hit.hitSe, hit.guardSe, hit.blocked);
 }
 
 void dropPending(const PendingHit& hit, const char* reason) {
@@ -214,9 +255,38 @@ void handleDamageResult(const nlohmann::json& packet) {
         st.lastReason = reason;
         st.lastDamage = damage;
     }
+    const auto sent = s_state.sentHits.find(hitId);
+    if (sent != s_state.sentHits.end() && sent->second.victimId == from) {
+        if (result == "applied" || result == "blocked") {
+            ui::hit_markers::spawn(from, sent->second.offset, result == "blocked", damage);
+            pushHistory(s_state.markers, HitMarkerRecord{from, hitId, result, damage});
+        }
+        s_state.sentHits.erase(sent);
+    }
     TwiliLog.info("[pvp] hit {} on client {}: {}{}{} ({} damage){}", hitId, from, result,
         reason.empty() ? "" : " ", reason, damage,
         packet.contains("fromServer") ? " [server]" : "");
+}
+
+// The relay announces a PvP hit that took someone to 0 hearts or down to the one-heart floor.
+void handleKnockout(const nlohmann::json& packet) {
+    // Only the relay makes these; a relayed copy would carry its sender's clientId.
+    if (packet.contains("clientId")) {
+        return;
+    }
+    const auto attacker =
+        static_cast<uint32_t>(clampedInt(packet, "attackerClientId", 0, 0x7FFFFFFF));
+    const auto victim = static_cast<uint32_t>(clampedInt(packet, "victimClientId", 0, 0x7FFFFFFF));
+    const std::string knockout = shortString(packet, "knockout");
+    if (attacker == 0 || victim == 0 || (knockout != "ko" && knockout != "floor")) {
+        return;
+    }
+    const std::string a = teleport::clientName(attacker);
+    const std::string v = teleport::clientName(victim);
+    std::string text = knockout == "ko" ? a + " knocked out " + v : a + " beat " + v;
+    TwiliLog.info("[pvp] {}", text);
+    ui::toast("PvP", text, ui::kToastNet, 4000);
+    pushHistory(s_state.knockouts, std::move(text));
 }
 
 }  // namespace
@@ -269,15 +339,20 @@ void requeueHit(const PendingHit& hit) {
     s_state.pending.insert(s_state.pending.begin(), hit);
 }
 
-void reportResult(const PendingHit& hit, const char* result, const char* reason, int damage) {
-    Session::instance().send({
+void reportResult(const PendingHit& hit, const char* result, const char* reason, int damage,
+    const char* knockout) {
+    nlohmann::json packet = {
         {"type", "DAMAGE_RESULT"},
         {"targetClientId", hit.attackerId},
         {"hitId", hit.hitId},
         {"result", result},
         {"reason", reason},
         {"damage", damage},
-    });
+    };
+    if (knockout[0] != '\0') {
+        packet["knockout"] = knockout;
+    }
+    Session::instance().send(packet);
     VictimStats& st = s_state.victim;
     if (std::strcmp(result, "dropped") == 0) {
         st.dropped++;
@@ -289,9 +364,10 @@ void reportResult(const PendingHit& hit, const char* result, const char* reason,
             st.blocked++;
         }
     }
-    TwiliLog.info("[pvp] hit {} from client {} kind {} dmg {} {}: {}{}{} (took {})", hit.hitId,
+    TwiliLog.info("[pvp] hit {} from client {} kind {} dmg {} {}: {}{}{} (took {}){}{}", hit.hitId,
         hit.attackerId, kindName(hit.hit.kind), hit.hit.damage, knockbackName(hit.hit.knockback),
-        result, reason[0] != '\0' ? " " : "", reason, damage);
+        result, reason[0] != '\0' ? " " : "", reason, damage,
+        knockout[0] != '\0' ? ", knockout " : "", knockout);
 }
 
 bool handlePacket(const std::string& type, const nlohmann::json& packet) {
@@ -301,6 +377,10 @@ bool handlePacket(const std::string& type, const nlohmann::json& packet) {
     }
     if (type == "DAMAGE_RESULT") {
         handleDamageResult(packet);
+        return true;
+    }
+    if (type == "PVP_KNOCKOUT") {
+        handleKnockout(packet);
         return true;
     }
     return false;
@@ -345,7 +425,7 @@ void tick() {
             continue;
         }
         lastSent = now;
-        sendDamagePlayer(victimId, hit);
+        onHitSent(victimId, sendDamagePlayer(victimId, hit), hit);
     }
 }
 
@@ -367,6 +447,14 @@ const AttackStats* attackStats(uint32_t victimId) {
 
 const VictimStats& victimStats() {
     return s_state.victim;
+}
+
+const std::vector<HitMarkerRecord>& hitMarkers() {
+    return s_state.markers;
+}
+
+const std::vector<std::string>& knockoutToasts() {
+    return s_state.knockouts;
 }
 
 }  // namespace twili::pvp

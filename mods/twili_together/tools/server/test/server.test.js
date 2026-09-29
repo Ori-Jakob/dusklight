@@ -1159,9 +1159,9 @@ test("hostile field types and unserializable packets do not kill the server", ()
         });
     }
     a.send({ type: "AUTOTEST_SIGNAL", instance: evil, name: evil });
-    for (const type of ["DAMAGE_PLAYER", "DAMAGE_RESULT"]) {
+    for (const type of ["DAMAGE_PLAYER", "DAMAGE_RESULT", "PVP_KNOCKOUT"]) {
         a.send({ type, targetClientId: evil, hitId: evil, kind: evil, damage: evil, spl: evil, dirY: evil,
-                 blocked: evil, viewSeq: evil, result: evil, reason: evil });
+                 blocked: evil, viewSeq: evil, result: evil, reason: evil, knockout: evil });
     }
     // Parses, but is nested too deeply for JSON.stringify: relaying it throws.
     const deep = "[".repeat(100000) + "]".repeat(100000);
@@ -1414,14 +1414,15 @@ test("DAMAGE_PLAYER reaches only its target, rebuilt, clamped and stamped with t
     a.send(hit(b, 7, { kind: 99, damage: 50, spl: 2, dirY: 99999, blocked: "yes", viewSeq: 12.5,
                        stageName: "X", layerNo: 9, clientId: 999, junk: { x: 1 } }));
     const got = await b.waitType("DAMAGE_PLAYER");
-    assert.deepEqual(got, { type: "DAMAGE_PLAYER", clientId: a.id, targetClientId: b.id, hitId: 7, kind: 9,
+    assert.deepEqual(got, { type: "DAMAGE_PLAYER", clientId: a.id, targetClientId: b.id, hitId: 7, kind: 11,
                             damage: 4, spl: 0, dirY: 32767, blocked: false, viewSeq: 0, stageName: "F_SP108",
                             layerNo: 0 });
     await c.expectNone((p) => p.type === "DAMAGE_PLAYER" || p.type === "DAMAGE_RESULT", "PvP packet for a bystander");
     await a.expectNone((p) => p.type === "DAMAGE_RESULT", "refusal of an allowed hit");
     await settle(250);
-    a.send(hit(b, 8, { spl: 1 }));
-    assert.equal((await b.waitType("DAMAGE_PLAYER", (p) => p.hitId === 8)).spl, 1, "knockdown passes");
+    a.send(hit(b, 8, { spl: 1, kind: 10 }));
+    const spinner = await b.waitType("DAMAGE_PLAYER", (p) => p.hitId === 8);
+    assert.deepEqual([spinner.spl, spinner.kind], [1, 10], "knockdown and the spinner kind pass");
 }));
 
 test("DAMAGE_PLAYER is refused across stage, layer and protocol", () => withServer(async (mk) => {
@@ -1529,6 +1530,36 @@ test("DAMAGE_RESULT reaches the attacker only, sanitized", () => withServer(asyn
     const bad = await a.waitType("DAMAGE_RESULT", (p) => p.hitId === 10);
     assert.deepEqual([bad.result, bad.reason.length, bad.damage, bad.fromServer], ["dropped", 32, 4, undefined]);
     await c.expectNone((p) => p.type === "DAMAGE_RESULT", "result for a bystander");
+}));
+
+test("an applied knockout is announced to the whole room; others are not", () => withServer(async (mk) => {
+    const [a, b, c] = await pvpRoom(mk, ["", "", ""]);
+    const room = [a, b, c];
+    const answer = async (hitId, result, knockout) => {
+        a.send(hit(b, hitId));
+        await b.waitType("DAMAGE_PLAYER", (p) => p.hitId === hitId);
+        b.send({ type: "DAMAGE_RESULT", targetClientId: a.id, hitId, result, reason: "", damage: 4, knockout });
+        await a.waitType("DAMAGE_RESULT", (p) => p.hitId === hitId);
+        await settle(250); // past the per-pair hit interval
+    };
+    await answer(1, "applied", "floor");
+    for (const cl of room) {
+        const ko = await cl.waitType("PVP_KNOCKOUT");
+        assert.deepEqual(ko, { type: "PVP_KNOCKOUT", attackerClientId: a.id, victimClientId: b.id, knockout: "floor" });
+    }
+    await answer(2, "applied", "ko");
+    for (const cl of room) {
+        assert.equal((await cl.waitType("PVP_KNOCKOUT")).knockout, "ko");
+    }
+    await answer(3, "blocked", "ko");
+    await answer(4, "applied", "dead");
+    await answer(5, "applied", undefined);
+    for (const cl of room) {
+        await cl.expectNone((p) => p.type === "PVP_KNOCKOUT", "knockout for a block, a bad value or none");
+    }
+    // Only the relay announces one.
+    a.send({ type: "PVP_KNOCKOUT", attackerClientId: a.id, victimClientId: c.id, knockout: "ko" });
+    await c.expectNone((p) => p.type === "PVP_KNOCKOUT" && p.victimClientId === c.id, "client-made knockout");
 }));
 
 test("DAMAGE_RESULT only answers a hit the server forwarded, once", () => withServer(async (mk) => {

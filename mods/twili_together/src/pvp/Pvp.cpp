@@ -37,6 +37,10 @@ enum class Attack : uint8_t {
     Bomb,  // bombs and bomb arrows
     Boomerang,
     Slingshot,
+    Spinner,       // riding into someone
+    SpinnerBoost,  // the spinner's spin attack
+    HorseRun,      // a gallop
+    HorseCharge,   // spurred or in the rodeo: a trample
     Count,
 };
 
@@ -63,6 +67,10 @@ constexpr Row kTable[] = {
     {Kind::Bomb, 3, Knockback::Knockdown},      // Bomb
     {Kind::Boomerang, 0, Knockback::Light},     // Boomerang: stagger only
     {Kind::Slingshot, 0, Knockback::Light},     // Slingshot: stagger only
+    {Kind::Spinner, 1, Knockback::Light},       // Spinner
+    {Kind::Spinner, 2, Knockback::Light},       // SpinnerBoost
+    {Kind::Horse, 2, Knockback::Light},         // HorseRun
+    {Kind::Horse, 3, Knockback::Knockdown},     // HorseCharge
 };
 static_assert(std::size(kTable) == static_cast<size_t>(Attack::Count));
 constexpr int kMasterSwordBonus = 1;
@@ -78,7 +86,7 @@ constexpr bool tableWithinCap() {
 static_assert(tableWithinCap());
 
 constexpr const char* kKindNames[] = {"sword", "wolf", "arrow", "bomb", "slingshot", "boomerang",
-    "hookshot", "shieldBash", "ironBall", "stomp"};
+    "hookshot", "shieldBash", "ironBall", "stomp", "spinner", "horse"};
 static_assert(std::size(kKindNames) == static_cast<size_t>(Kind::Count));
 
 constexpr const char* kKnockbackNames[] = {"light", "knockdown"};
@@ -133,6 +141,39 @@ bool linkAttack(daAlink_c* link, dCcD_GObjInf* at, Attack& out) {
         return false;
     }
     return true;
+}
+
+// The spinner or horse we ride (their ATs share the enemies' group 0x2 with our weapons).
+bool rideAttack(daAlink_c* link, fopAc_ac_c* atActor, dCcD_GObjInf* at, Attack& out) {
+    if (atActor != link->getRideActor()) {
+        return false;
+    }
+    switch (fopAcM_GetName(atActor)) {
+    case fpcNm_SPINNER_e:
+        if (!link->checkSpinnerRide()) {
+            return false;
+        }
+        out = at->GetAtAtp() >= 2 ? Attack::SpinnerBoost : Attack::Spinner;
+        return true;
+    case fpcNm_HORSE_e:
+        if (!link->checkHorseRide()) {
+            return false;
+        }
+        out = at->GetAtSpl() == dCcG_At_Spl_UNK_1 ? Attack::HorseCharge : Attack::HorseRun;
+        return true;
+    default:
+        return false;
+    }
+}
+
+// Vanilla's short pause for a sword hit (cc_at_check): not on horseback nor for Midna's attack.
+uint8_t hitStopTicks(daAlink_c* link, Attack attack, const HitReport& hit) {
+    const bool melee =
+        kTable[static_cast<size_t>(attack)].kind == Kind::Sword || attack == Attack::Wolf;
+    if (!melee || hit.blocked || hit.damage < 2 || link->checkHorseRide()) {
+        return 0;
+    }
+    return hit.knockback == Knockback::Knockdown ? 3 : 2;
 }
 
 // Our bomb arrows' blasts: that NBOMB is created at the noted position and hits for 3 ticks.
@@ -269,7 +310,10 @@ bool classifyLocalAttack(
     }
     // Enemy weapons and traps can reach the hurtbox too; only our own weapons count.
     Attack attack;
-    if (atActor == link ? !linkAttack(link, at, attack) : !projectileAttack(atActor, at, attack)) {
+    const bool ours = atActor == link ? linkAttack(link, at, attack) :
+                                        rideAttack(link, atActor, at, attack) ||
+                                            projectileAttack(atActor, at, attack);
+    if (!ours) {
         return false;
     }
     fillFromTable(attack, out);
@@ -280,6 +324,16 @@ bool classifyLocalAttack(
     }
     out.dirY = vec.abs2XZ() < 0.1f ? atActor->shape_angle.y : vec.atan2sX_Z();
     out.blocked = tg->ChkTgShieldHit();
+    out.hitStop = hitStopTicks(link, attack, out);
+    // As def_se_set and setGuardSe pick them from the AT.
+    out.hitSe = dCcD_GObjInf::getHitSeID(at->GetAtSe(), FALSE);
+    out.guardSe = dCcD_GObjInf::getHitSeID(at->GetAtSe(), TRUE);
+    const cXyz offset = *tg->GetTgHitPosP() - dummy->current.pos;
+    if (offset.abs2() < 300.0f * 300.0f) {
+        out.hitOffset[0] = offset.x;
+        out.hitOffset[1] = offset.y;
+        out.hitOffset[2] = offset.z;
+    }
     return true;
 }
 
@@ -296,6 +350,12 @@ bool hurtboxEnabled(const Client& client) {
            pvpAllowedWith(client) && !(client.presenceFlags & kPresenceInCutscene) &&
            // The newest flags, not the delayed pose: the victim would drop the hit anyway.
            !(client.visFlags & kVisPvpImmune);
+}
+
+bool lockOnEnabled(const Client& client) {
+    const Session& s = Session::instance();
+    return s.isConnected() && s.roomState().pvpMode && isSaveLoaded() && client.isSaveLoaded &&
+           pvpAllowedWith(client);
 }
 
 uint16_t localVisFlags(daAlink_c* link) {

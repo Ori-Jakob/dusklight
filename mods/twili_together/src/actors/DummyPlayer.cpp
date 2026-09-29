@@ -129,7 +129,7 @@ static constexpr u32 kDummyTgType = AT_TYPE_NORMAL_SWORD | AT_TYPE_MASTER_SWORD 
                                     AT_TYPE_HEAVY_BOOTS | AT_TYPE_IRON_BALL | AT_TYPE_MIDNA_LOCK |
                                     AT_TYPE_WOLF_CUT_TURN | (u32)AT_TYPE_WOLF_ATTACK |
                                     AT_TYPE_ARROW | AT_TYPE_SLINGSHOT | AT_TYPE_BOOMERANG |
-                                    AT_TYPE_BOMB;
+                                    AT_TYPE_BOMB | AT_TYPE_SPINNER | AT_TYPE_HORSE;
 
 static const dCcD_SrcCyl l_dummyTgCylSrc = {
     {
@@ -2956,6 +2956,22 @@ void daDummyPlayer_c::playRemotePlayerSfx(uint32_t soundId, uint8_t kind, uint32
     }
 }
 
+// PvP: our hit landing, from the dummy's own sound object (def_se_set, or setGuardSe's clang).
+void daDummyPlayer_c::playPvpHitSe(uint32_t hitSe, uint32_t guardSe, bool blocked) {
+    if (!isRemotePlayerAudioAudible(this) || isHidden()) {
+        return;
+    }
+    const bool wood = mDummyShieldItem == dItemNo_WOOD_SHIELD_e;
+    const u32 soundId = blocked && !wood ? guardSe : hitSe;
+    const u32 mapInfo = !blocked ? 30 : wood ? 0x29 : 0x28;
+    if (soundId == 0) {
+        return;
+    }
+    ScopedDummyLinkAudioPtr scoped(&mZ2Link);
+    // Z2Creature's, not Z2CreatureLink's: that one also drives our battle music.
+    mZ2Link.Z2Creature::startCollisionSE(soundId, mapInfo);
+}
+
 // Each set's textures come from this dummy's private archives, so they are its own to rewrite.
 void daDummyPlayer_c::bindRemoteRecolor() {
     using twili::RecolorSetId;
@@ -3085,6 +3101,12 @@ bool GetDummyPlayerDebugInfo(fopAc_ac_c* actor, DummyPlayerDebugInfo& out) {
 
     static_cast<daDummyPlayer_c*>(actor)->getDebugInfo(out);
     return true;
+}
+
+void PlayDummyPlayerHitSe(fopAc_ac_c* actor, uint32_t hitSe, uint32_t guardSe, bool blocked) {
+    if (isDummyPlayer(actor)) {
+        static_cast<daDummyPlayer_c*>(actor)->playPvpHitSe(hitSe, guardSe, blocked);
+    }
 }
 
 void daDummyPlayer_c::getDebugInfo(twili::DummyPlayerDebugInfo& out) const {
@@ -3835,6 +3857,11 @@ void daDummyPlayer_c::updateRemoteHurtbox(const twili::Client& client,
                                           const LinkPuppetState& state) {
     // As setCollision does first
     mCcStts.Move();
+    // Z-targetable as an opponent (the Bokoblins' distance entry)
+    if (twili::pvp::lockOnEnabled(client) && isBodyShown()) {
+        attention_info.flags |= fopAc_AttnFlag_BATTLE_e;
+        attention_info.distances[fopAc_attn_BATTLE_e] = 3;
+    }
     if (!twili::pvp::hurtboxEnabled(client) || !isBodyShown() || state.modelSwap) {
         return;
     }
@@ -3954,6 +3981,7 @@ int daDummyPlayer_c::execute() {
     // Registered again below only when this tick gets that far.
     mDummyHurtboxLive = false;
     mDummyHurtboxGuard = false;
+    attention_info.flags &= ~fopAc_AttnFlag_BATTLE_e;
 
     if (!mDummyShellReady) {
         return TRUE;

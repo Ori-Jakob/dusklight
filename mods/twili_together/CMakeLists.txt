@@ -96,6 +96,7 @@ set(TWILI_SOURCES
     src/sync/WorldSync.cpp
     src/teleport/Teleport.cpp
     src/ui/ColorMath.cpp
+    src/ui/HitMarkers.cpp
     src/ui/ItemNames.cpp
     src/ui/ItemToasts.cpp
     src/ui/MapCursors.cpp

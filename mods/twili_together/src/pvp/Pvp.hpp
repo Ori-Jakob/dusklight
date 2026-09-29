@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 struct cXyz;
 class daAlink_c;
@@ -29,6 +30,8 @@ enum class Kind : uint8_t {
     ShieldBash,
     IronBall,
     Stomp,
+    Spinner,
+    Horse,
     Count,
 };
 
@@ -50,6 +53,19 @@ struct HitReport {
     bool blocked = false;
     // The victim's PLAYER_UPDATE seq the attacker's dummy showed.
     uint32_t viewSeq = 0;
+    // Attacker only, never sent: hit-stop ticks, the dummy's impact and guard sounds, where it hit.
+    uint8_t hitStop = 0;
+    uint32_t hitSe = 0;
+    uint32_t guardSe = 0;
+    float hitOffset[3] = {0.0f, 120.0f, 0.0f};
+};
+
+// What the autotest reads about the markers and knockout toasts.
+struct HitMarkerRecord {
+    uint32_t victimId = 0;
+    uint32_t hitId = 0;
+    std::string result;
+    int damage = 0;
 };
 
 struct PendingHit {
@@ -62,6 +78,7 @@ struct PendingHit {
 // What the autotest reads.
 struct AttackStats {
     uint32_t sent = 0, applied = 0, blocked = 0, dropped = 0, refused = 0;
+    uint32_t hitStops = 0;
     int damage = 0;
     uint32_t lastHitId = 0;
     bool lastAnswered = false;
@@ -85,6 +102,8 @@ bool classifyLocalAttack(
     fopAc_ac_c* atActor, dCcD_GObjInf* at, dCcD_GObjInf* tg, fopAc_ac_c* dummy, HitReport& out);
 // Whether `client`'s dummy registers its hurtbox this frame.
 bool hurtboxEnabled(const Client& client);
+// Whether we may Z-target `client`'s dummy; unlike the hurtbox it stays on through their i-frames.
+bool lockOnEnabled(const Client& client);
 // Our bomb arrow exploded at `pos`: that NBOMB counts as ours for a moment.
 void noteLocalExplosion(const cXyz& pos);
 
@@ -106,7 +125,9 @@ void queueHit(uint32_t victimId, const HitReport& hit);
 bool takePendingHit(PendingHit& out);
 // A hit the damage check did not reach goes back to the front of the queue.
 void requeueHit(const PendingHit& hit);
-void reportResult(const PendingHit& hit, const char* result, const char* reason, int damage);
+// `knockout`: "ko" (life 0), "floor" (down to the one-heart floor) or "".
+void reportResult(const PendingHit& hit, const char* result, const char* reason, int damage,
+    const char* knockout = "");
 bool handlePacket(const std::string& type, const nlohmann::json& packet);
 // After the dummies: sends what the last collision pass registered, expires waiting hits.
 void tick();
@@ -114,6 +135,8 @@ void resetSession();
 uint32_t sendDamagePlayerForTest(uint32_t victimId, const HitReport& hit);
 const AttackStats* attackStats(uint32_t victimId);
 const VictimStats& victimStats();
+const std::vector<HitMarkerRecord>& hitMarkers();
+const std::vector<std::string>& knockoutToasts();
 
 }  // namespace pvp
 }  // namespace twili

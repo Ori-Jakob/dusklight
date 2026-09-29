@@ -3,6 +3,7 @@
 #include "core/Log.hpp"
 #include "core/Session.hpp"
 #include "hooks/Hooks.hpp"
+#include "ui/HitMarkers.hpp"
 #include "ui/ItemToasts.hpp"
 #include "ui/MapCursors.hpp"
 #include "ui/NameTags.hpp"
@@ -31,6 +32,7 @@ void init() {
         TwiliLog.warn("[ui] could not add the menu tab");
     }
     name_tags::install();
+    hit_markers::install();
     std::string error;
     if (hooks::install(hooks::Group::Map, error) != MOD_OK) {
         TwiliLog.warn("[ui] map cursors are off: {}", error);
@@ -50,6 +52,7 @@ void tick() {
 void shutdown() {
     shutdownWindow();
     name_tags::uninstall();
+    hit_markers::uninstall();
     map_cursor::reset();
     item_toasts::clearForTest();
     s_wasConnected = false;
