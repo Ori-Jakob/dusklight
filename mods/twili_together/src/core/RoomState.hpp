@@ -25,6 +25,7 @@ struct RoomState {
     bool cutsceneSync = true;
     bool hidePlayersInCutscene = false;
     int enemyHealthMultiplier = 100;  // percent
+    int enemyCountMultiplier = 100;   // percent
 
     // Compares everything except ownerClientId.
     bool sameSettings(const RoomState& o) const {
@@ -35,7 +36,8 @@ struct RoomState {
                syncNPCs == o.syncNPCs && syncEnemyDamage == o.syncEnemyDamage &&
                cutsceneSync == o.cutsceneSync &&
                hidePlayersInCutscene == o.hidePlayersInCutscene &&
-               enemyHealthMultiplier == o.enemyHealthMultiplier;
+               enemyHealthMultiplier == o.enemyHealthMultiplier &&
+               enemyCountMultiplier == o.enemyCountMultiplier;
     }
 
     nlohmann::json toJson() const {
@@ -54,6 +56,7 @@ struct RoomState {
             {"cutsceneSync", cutsceneSync},
             {"hidePlayersInCutscene", hidePlayersInCutscene},
             {"enemyHealthMultiplier", enemyHealthMultiplier},
+            {"enemyCountMultiplier", enemyCountMultiplier},
         };
     }
 
@@ -74,6 +77,7 @@ struct RoomState {
         cutsceneSync = j.value("cutsceneSync", cutsceneSync);
         hidePlayersInCutscene = j.value("hidePlayersInCutscene", hidePlayersInCutscene);
         enemyHealthMultiplier = j.value("enemyHealthMultiplier", enemyHealthMultiplier);
+        enemyCountMultiplier = j.value("enemyCountMultiplier", enemyCountMultiplier);
     }
 };
 

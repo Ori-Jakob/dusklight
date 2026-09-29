@@ -19,6 +19,7 @@ enum class Group : uint8_t {
     Pvp,
     Enemy,
     EnemyDamage,
+    EnemyCount,
     Story,
     Map,
     Autotest,
@@ -61,6 +62,7 @@ enum class ScopeKind : uint8_t {
     BombArrow,
     PlantedHit,
     EnemyDamage,
+    StagePlaced,
     DmapDraw,
 };
 

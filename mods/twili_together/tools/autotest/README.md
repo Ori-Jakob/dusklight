@@ -240,24 +240,29 @@ Life, PvP and enemies (`StepsPvp.cpp`, `StepsEnemy.cpp`):
 | `expectPvpTaken` | `count` (applied + blocked), `blocked`, `dropped`, `damage`, `reason`, `timeoutSec` (0) | our counters for hits on us |
 | `expectDummyHurtbox` | `registered` (true), `guard`, `timeoutSec` (0) | the first peer's dummy registered its PvP hurtbox this tick |
 | `expectReaction` | `knockback` (`light`, `knockdown`, `none`), `timeoutSec` | our Link plays that reaction (`none`: neither, and no i-frames) |
-| `spawnEnemy` | `name`, `param`, `dx`, `dy`, `dz`, `tag`, `anchor` (`player`, `playerHome`), `setId` | an actor in the current room's layer |
+| `spawnEnemy` | `name`, `param`, `dx`, `dy`, `dz`, `tag`, `anchor` (`player`, `playerHome`), `setId`, `placed` | an actor in the current room's layer (`placed`: seen by Enemy Count as a stage placement) |
 | `expectEnemyHealth` | `tag`, `health`, `max`, `tracked`, `timeoutSec` | until the tagged actor runs with that health, max and scaling |
 | `setEnemyHealthPercent` | `value`, `timeoutSec` | once we own the room: its enemy health percent |
 | `expectEnemyHealthPercent` | `value`, `timeoutSec` | the percent we apply (the room's while joined, else 100) |
+| `setEnemyCountPercent` / `expectEnemyCountPercent` | `value`, `timeoutSec` | the same for the enemy count percent |
+| `expectEnemyCount` | `name`, `count`, `maxDist` (from our Link's home), `timeoutSec` | exactly that many running enemies of that actor name in the current room |
+| `tagExtra` | `tag`, `of`, `dup` (1), `timeoutSec` | tags extra `dup` of the enemy tagged `of`, once it runs |
+| `expectEnemyExtras` | `of`, `count`, `timeoutSec` | exactly `count` extras of `of`, each with setID 0xFFFF, its defeated switch stripped and in the original's layer |
+| `enemyDigest` / `expectPeerEnemyDigest` | `maxDist` / `from`, `maxDist`, `timeoutSec` | signals a hash of the room's enemies (name, params, home, extra index) / waits for `from`'s to match ours |
 | `setEnemyHealth` / `deleteEnemy` | `tag`, `health` / `tag` | writes health directly (a bite, a get-up) / deletes the actor |
 | `expectEnemyGone` / `expectEnemiesGone` | `tag` / `tags`, `maxSpreadTicks`, `timeoutSec` | no longer running (and not scaled) / all gone within that many ticks of each other |
 | `killEnemy` | `tag`, `how` (`disappear`, `real`, `fall`, `hz`, `hzReal`), `size`, `type`, `onActor` | a puff and delete (with the zone actor bit after it), a Bokoblin's own death or void fall, or a Tile Worm's death wait after its puff / its own death roll |
 | `expectEnemyDeadInPlace` | `tag`, `timeoutSec` | the tagged Tile Worm still runs, dead (its tile only) and out of the ENEMY group |
 | `expectZoneActor` | `setId`, `room`, `set`, `timeoutSec` | the zone actor bit |
 | `expectEnemySync` | `sent`, `received`, `applied`, `echoes`, `expired`, `timeoutSec` | the enemy-death sync counters given |
-| `forceGroupFail` | `tags` | tagged Shadow Beasts into their downed wait, so the group is condemned |
-| `dumpEnemies` | | logs the current room's enemies and their scaling |
-
-Epona (`StepsHorse.cpp`):
-
 | `damageEnemy` | `tag`, `amount` | lowers health as an attributed hit of ours (unlike `setEnemyHealth`), so it is shared |
 | `sendEnemyDamageForTest` | `tag`, `dmg`, `pct` | sends an ENEMY_DAMAGE for the tagged enemy with any sender percent (not counted as sent) |
 | `expectEnemyDamage` | `sent`, `received`, `applied`, `floored`, `dropped`, `timeoutSec` | the shared-damage counters given (hits, not packets) |
+| `forceGroupFail` | `tags` | tagged Shadow Beasts into their downed wait, so the group is condemned |
+| `dumpEnemies` | | logs the current room's enemies, their scaling and extra index |
+
+Epona (`StepsHorse.cpp`):
+
 | op | fields | does |
 | --- | --- | --- |
 | `spawnHorse` | `dist` (250), `side`, `timeoutSec` | our Epona shown in front of our Link (created when the stage has none) |

@@ -3,8 +3,8 @@
 Online co-op for Dusklight. Play Twilight Princess together: you see the other players in your
 world as full Link models, with their clothes, items, wolf form, Midna and Epona, and hear their
 sounds. Players on the same team share their progress: flags, items, keys, heart pieces and story
-events. Optional extras are teleporting to a teammate, synced enemy deaths, tougher enemies and
-PvP.
+events. Optional extras are teleporting to a teammate, synced enemy deaths and damage, tougher
+and more numerous enemies, and PvP.
 
 It is a native mod for Dusklight's mod framework (mod id `dev.n0ted.twili_together`) and works
 alongside the randomizer mod.
@@ -112,6 +112,7 @@ the others see the owner's values, greyed out.
 | Teleport to Player | off | teleport buttons on the Players tab |
 | Teleport Across Teams | off | teleport to other teams' players (never between different games) |
 | Enemy Health | 100% | health of regular enemies, 100% to 500% |
+| Enemy Count | 100% | extra copies of the regular enemies placed in an area, 100% to 300% (not bosses, story, twilight or spawned enemies); applies when an area loads |
 
 All settings are stored in the game's `config.json` as `mod.dev_n0ted_twili__together.<name>`
 (for example `server_url`, `team_id`, `sync_world_state`) and can be set from the command line

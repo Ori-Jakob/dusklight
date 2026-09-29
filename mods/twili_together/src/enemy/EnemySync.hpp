@@ -42,6 +42,8 @@ inline constexpr int kMaxDup = 4;
 // Home within a unit, the rest exact.
 bool sameKey(const SpawnKey& a, const SpawnKey& b);
 std::string keyText(const SpawnKey& key);
+// From the actor's append (readable until its create returns); false for children.
+bool appendKey(const fopAc_ac_c* actor, SpawnKey& out);
 // The key of a live, tracked enemy, or nullptr.
 const SpawnKey* trackedKey(fpc_ProcID id);
 // Dying by its own hand or already removed: not to be touched.

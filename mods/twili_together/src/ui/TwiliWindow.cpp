@@ -288,6 +288,9 @@ struct RoomInt {
     int RoomState::*field;
     const char* label;
     const char* help;
+    int min = 100;
+    int max = 500;
+    int step = 25;
 };
 
 const RoomBool kSyncOptions[] = {
@@ -341,6 +344,11 @@ const RoomInt kDifficultyOptions[] = {
     {Var::EnemyHealthMultiplier, &RoomState::enemyHealthMultiplier, "Enemy Health",
         "<p>Health of regular enemies. 100% is normal. Bosses, mini-bosses and enemies that "
         "always die in one hit keep normal health.</p>"},
+    {Var::EnemyCountMultiplier, &RoomState::enemyCountMultiplier, "Enemy Count",
+        "<p>Extra copies of regular enemies placed in an area (not bosses, mini-bosses, story, "
+        "twilight or spawned enemies). Takes effect when an area loads. With Sync Enemy Deaths "
+        "on, an extra a teammate defeats disappears for you too.</p>",
+        100, 300, 50},
 };
 
 void getRoomBool(ModContext*, void* data, UiControlValue* out) {
@@ -375,7 +383,7 @@ void getRoomInt(ModContext*, void* data, UiControlValue* out) {
 void setRoomInt(ModContext*, void* data, const UiControlValue* value) {
     const auto* opt = static_cast<const RoomInt*>(data);
     if (!roomLocked()) {
-        config::setInt(opt->var, std::clamp<int64_t>(value->int_value, 100, 500));
+        config::setInt(opt->var, std::clamp<int64_t>(value->int_value, opt->min, opt->max));
     }
 }
 
@@ -559,9 +567,9 @@ ModResult buildRoomTab(ModContext*, UiWindowHandle, UiElementHandle left, UiElem
         control.is_disabled = roomLockedPredicate;
         control.is_modified = roomIntModified;
         control.user_data = const_cast<RoomInt*>(&opt);
-        control.min = 100;
-        control.max = 500;
-        control.step = 25;
+        control.min = opt.min;
+        control.max = opt.max;
+        control.step = opt.step;
         control.suffix = "%";
         addControl(left, control);
     }

@@ -3,6 +3,7 @@
 #include "core/Config.hpp"
 #include "core/Log.hpp"
 #include "core/SaveGate.hpp"
+#include "enemy/EnemyCount.hpp"
 #include "enemy/EnemyDamage.hpp"
 #include "enemy/EnemyScaling.hpp"
 #include "enemy/EnemySync.hpp"
@@ -239,6 +240,7 @@ void Session::update() {
     teleport::tick();
     story::tick();
     enemy_scaling::tick();
+    enemy_count::tick();
 }
 
 void Session::onConnected() {

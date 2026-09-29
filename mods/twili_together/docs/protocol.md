@@ -89,6 +89,7 @@ keys and wrong types are ignored, numbers are clamped. The state:
 | `teleportMode` | false | teleport to a player |
 | `teleportAcrossTeams` | false | teleport to other teams' players |
 | `enemyHealthMultiplier` | 100 | percent, 100 to 500 |
+| `enemyCountMultiplier` | 100 | percent, 100 to 300: extra copies of stage-placed regular enemies, made alike by every client when an area loads |
 
 The relay adds `ownerClientId`. An empty room keeps its settings and caches for 6 hours.
 

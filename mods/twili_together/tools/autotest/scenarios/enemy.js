@@ -10,6 +10,12 @@ const TEKTITE = { name: "E_tt", param: 0xffffffff, dy: 30 };
 const FREEZARD = { name: "E_fz", param: 0xffffffff, dy: 30 };
 // Tile Worm with defeated switch 0x13 (its low param byte).
 const TILE_WORM = { name: "E_hz", param: 0xffffff13, dy: 0 };
+// Bokoblin type 0 with defeated switch 0x12.
+const BOKO_SW = { name: "E_oc", param: 0xff12ff00, dy: 30 };
+// Seen by Enemy Count as placed by the stage.
+const PLACED = { placed: true };
+// Counts and digests near the start point: the stage's own enemies elsewhere in the room stay out.
+const NEAR = 800;
 // The spawned enemies attack the idle players; keep those alive for the whole run.
 const CVARS = [...COMMON_CVARS, "game.infiniteHearts=1"];
 
@@ -433,6 +439,130 @@ module.exports = [
                     health("one", isA ? 20 : name === "B" ? 30 : 40, { timeoutSec: 0 }),
                     { op: "expectEnemyDamage", ...(isA ? { sent: 1, received: 0 } : name === "B" ? { sent: 0, received: 1, applied: 1 } : { sent: 0, received: 0, applied: 0 }) },
                     ...barrierAll("done", others),
+                    { op: "quit" },
+                ],
+            };
+        }),
+    },
+    pair("enemy-count",
+        "at 200% a placed Bokoblin gets one extra on both clients (a Tektite none), the extra's kill syncs by its extra index and leaves the original, and only the original's death sets its switch",
+        (isA, other) => [
+            ...(isA ? [{ op: "setEnemyCountPercent", value: 200 }] : []),
+            { op: "expectEnemyCountPercent", value: 200, timeoutSec: 30 },
+            ...syncOn(isA),
+            { op: "waitPeers", count: 1, sameStage: true, timeoutSec: 120 },
+            ...barrier("ready", other),
+            ...spawnAndSettle([["b1", BOKO_SW, 0, 250, PLACED], ["t1", TEKTITE, 250, 250, PLACED]]),
+            { op: "expectEnemyCount", name: "E_oc", count: 2, maxDist: NEAR },
+            { op: "expectEnemyCount", name: "E_tt", count: 1, maxDist: NEAR, timeoutSec: 0 },
+            { op: "tagExtra", tag: "x1", of: "b1", dup: 1 },
+            { op: "expectEnemyExtras", of: "b1", count: 1 },
+            { op: "dumpEnemies" },
+            ...barrier("spawned", other),
+            ...(isA ? [{ op: "killEnemy", tag: "x1" }] : []),
+            { op: "expectEnemyGone", tag: "x1", timeoutSec: 15 },
+            { op: "wait", frames: 60 },
+            { op: "expectEnemyHealth", tag: "b1", timeoutSec: 0 },
+            { op: "expectSwitch", no: 0x12, room: 0, set: false, timeoutSec: 0 },
+            ...barrier("extra-killed", other),
+            ...(isA ? [] : [{ op: "killEnemy", tag: "b1", how: "real" }]),
+            { op: "expectEnemyGone", tag: "b1", timeoutSec: 15 },
+            { op: "expectSwitch", no: 0x12, room: 0, timeoutSec: 15 },
+            ...barrier("killed", other),
+            { op: "expectEnemySync", sent: 1, received: 1, applied: 1 },
+        ]),
+    pair("enemy-count-150",
+        "at 150% about half of six placed Bokoblins get an extra, the same ones in the same spots on both clients",
+        (isA, other) => [
+            ...(isA ? [{ op: "setEnemyCountPercent", value: 150 }] : []),
+            { op: "expectEnemyCountPercent", value: 150, timeoutSec: 30 },
+            { op: "waitPeers", count: 1, sameStage: true, timeoutSec: 120 },
+            ...barrier("ready", other),
+            ...spawnAndSettle([
+                ["b1", BOKOBLIN, -300, 250, PLACED], ["b2", BOKOBLIN, 0, 250, PLACED], ["b3", BOKOBLIN, 300, 250, PLACED],
+                ["b4", BOKOBLIN, -300, -250, PLACED], ["b5", BOKOBLIN, 0, -250, PLACED], ["b6", BOKOBLIN, 300, -250, PLACED],
+            ]),
+            { op: "dumpEnemies" },
+            { op: "enemyDigest", maxDist: NEAR },
+            { op: "expectPeerEnemyDigest", from: other, maxDist: NEAR },
+        ]),
+    {
+        name: "enemy-count-room-clear",
+        description: "with world sync off, an extra keeps the room from being cleared after the original dies, and its kill clears it on both clients",
+        timeoutSec: 300,
+        cvars: CVARS,
+        instances: ["A", "B"].map((name) => {
+            const isA = name === "A";
+            const other = isA ? "B" : "A";
+            return {
+                name,
+                start: STAGES.linksHouse,
+                launchDelayMs: isA ? 20000 : 1500,
+                steps: [
+                    waitStage(STAGES.linksHouse),
+                    ...connect,
+                    ...(isA ? [{ op: "setRoomOption", name: "syncWorldState", value: false }, { op: "setEnemyCountPercent", value: 200 }] : []),
+                    { op: "waitRoomOption", name: "syncWorldState", value: false, timeoutSec: 30 },
+                    { op: "expectEnemyCountPercent", value: 200, timeoutSec: 30 },
+                    ...syncOn(isA),
+                    { op: "waitPeers", count: 1, sameStage: true, timeoutSec: 120 },
+                    ...barrier("ready", other),
+                    ...spawnAndSettle([["boko", BOKOBLIN, 0, -150, PLACED]]),
+                    { op: "tagExtra", tag: "x1", of: "boko", dup: 1 },
+                    { op: "spawnEnemy", name: "ALLdie", param: 0xff00c5ff, tag: "alldie" },
+                    { op: "expectEnemyHealth", tag: "alldie" },
+                    { op: "wait", frames: 90 },
+                    { op: "expectSwitch", no: 0xc5, room: 4, set: false, timeoutSec: 0 },
+                    ...barrier("spawned", other),
+                    ...(isA ? [{ op: "killEnemy", tag: "boko" }] : []),
+                    { op: "expectEnemyGone", tag: "boko", timeoutSec: 15 },
+                    // ALLdie waits 65 frames after the room is empty: the extra still counts.
+                    { op: "wait", frames: 120 },
+                    { op: "expectSwitch", no: 0xc5, room: 4, set: false, timeoutSec: 0 },
+                    ...barrier("original-killed", other),
+                    ...(isA ? [{ op: "killEnemy", tag: "x1" }] : []),
+                    { op: "expectEnemyGone", tag: "x1", timeoutSec: 15 },
+                    { op: "expectSwitch", no: 0xc5, room: 4, set: true, timeoutSec: 15 },
+                    ...barrier("done", other),
+                    { op: "quit" },
+                ],
+            };
+        }),
+    },
+    {
+        name: "enemy-count-late-join",
+        description: "a placed Bokoblin spawned while offline gets its extra once the client joins a 200% room, the same one its teammate has",
+        timeoutSec: 300,
+        cvars: CVARS,
+        instances: ["A", "B"].map((name) => {
+            const isA = name === "A";
+            const other = isA ? "B" : "A";
+            return {
+                name,
+                start: STAGES.forestTemple,
+                launchDelayMs: isA ? 20000 : 1500,
+                steps: [
+                    waitStage(STAGES.forestTemple),
+                    ...(isA ? [
+                        ...connect,
+                        { op: "setEnemyCountPercent", value: 200 },
+                        { op: "expectEnemyCountPercent", value: 200, timeoutSec: 30 },
+                        ...spawnAndSettle([["b", BOKOBLIN, 0, 250, PLACED]]),
+                        { op: "expectEnemyCount", name: "E_oc", count: 2, maxDist: NEAR },
+                        { op: "waitPeers", count: 1, sameStage: true, timeoutSec: 150 },
+                    ] : [
+                        ...spawnAndSettle([["b", BOKOBLIN, 0, 250, PLACED]]),
+                        // Offline the room's percent is unknown: no extra yet.
+                        { op: "expectEnemyCount", name: "E_oc", count: 1, maxDist: NEAR, timeoutSec: 0 },
+                        ...connect,
+                        { op: "expectEnemyCountPercent", value: 200, timeoutSec: 30 },
+                        { op: "expectEnemyCount", name: "E_oc", count: 2, maxDist: NEAR },
+                        { op: "waitPeers", count: 1, sameStage: true, timeoutSec: 60 },
+                    ]),
+                    ...barrier("joined", other),
+                    { op: "enemyDigest", maxDist: NEAR },
+                    { op: "expectPeerEnemyDigest", from: other, maxDist: NEAR },
+                    ...barrier("done", other),
                     { op: "quit" },
                 ],
             };

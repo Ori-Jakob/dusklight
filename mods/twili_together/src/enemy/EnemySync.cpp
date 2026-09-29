@@ -5,6 +5,7 @@
 #include "core/Log.hpp"
 #include "core/SaveGate.hpp"
 #include "core/Session.hpp"
+#include "enemy/EnemyCount.hpp"
 
 #include "m_Do/m_Do_ext.h"  // the enemy headers are not self-contained
 
@@ -318,6 +319,19 @@ bool sameKey(const SpawnKey& a, const SpawnKey& b) {
            std::fabs(a.home[2] - b.home[2]) <= kHomeTolerance;
 }
 
+bool appendKey(const fopAc_ac_c* actor, SpawnKey& out) {
+    auto* ac = const_cast<fopAc_ac_c*>(actor);
+    const fopAcM_prm_class* prm = fopAcM_GetAppend(ac);
+    // Children of other actors spawn where the parent's timing puts them.
+    if (prm == nullptr || prm->parent_id != fpcM_ERROR_PROCESS_ID_e) {
+        return false;
+    }
+    const cXyz home = prm->base.position;
+    out = {fopAcM_GetName(ac), prm->room_no, static_cast<uint32_t>(prm->base.parameters),
+        static_cast<uint16_t>(prm->base.setID), {home.x, home.y, home.z}};
+    return true;
+}
+
 const SpawnKey* trackedKey(fpc_ProcID id) {
     const auto it = s_records.find(id);
     return it == s_records.end() ? nullptr : &it->second.key;
@@ -338,18 +352,15 @@ void onActorCreated(fopAc_ac_c* ac) {
     if (!isKillSyncable(fopAcM_GetName(ac), fopAcM_GetParam(ac))) {
         return;
     }
-    // The last moment the spawn data is readable and unchanged by the enemy's own create.
-    const fopAcM_prm_class* prm = fopAcM_GetAppend(ac);
     const char* stage = dComIfGp_getStartStageName();
-    // Children of other actors spawn where the parent's timing puts them: not tracked.
-    if (prm == nullptr || stage == nullptr || prm->parent_id != fpcM_ERROR_PROCESS_ID_e) {
+    Record r{};
+    // An extra goes by its original's key; others by the spawn data, readable only now.
+    if (stage == nullptr ||
+        (!enemy_count::extraKey(fopAcM_GetID(ac), r.key) && !appendKey(ac, r.key)))
+    {
         return;
     }
-    Record r{};
     r.actor = ac;
-    const cXyz home = prm->base.position;
-    r.key = {fopAcM_GetName(ac), prm->room_no, static_cast<uint32_t>(prm->base.parameters),
-        static_cast<uint16_t>(prm->base.setID), {home.x, home.y, home.z}};
     r.inPlace = findInPlace(r.key.procName);
     std::strncpy(r.stage, stage, sizeof(r.stage) - 1);
     r.layer = static_cast<int8_t>(dComIfG_play_c::getLayerNo(0));

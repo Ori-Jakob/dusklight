@@ -1,6 +1,7 @@
 #include "hooks/Hooks.hpp"
 
 #include "core/Session.hpp"
+#include "enemy/EnemyCount.hpp"
 #include "enemy/EnemyDamage.hpp"
 #include "enemy/EnemyScaling.hpp"
 #include "enemy/EnemySync.hpp"
@@ -12,7 +13,9 @@
 #include "d/actor/d_a_e_oc.h"
 #include "d/actor/d_a_e_s1.h"
 #include "d/d_cc_uty.h"
+#include "d/d_stage.h"
 #include "f_op/f_op_actor_mng.h"
+#include "f_pc/f_pc_stdcreate_req.h"
 
 namespace twili::hooks {
 
@@ -26,6 +29,9 @@ DEFINE_HOOK(&daE_OC_c::executeFallDead, EocExecuteFallDead);
 DEFINE_HOOK_SYMBOL("src/d/actor/d_a_e_s1.cpp#all_fail", void(e_s1_class*), Es1AllFail);
 DEFINE_HOOK_SYMBOL("src/d/actor/d_a_e_s1.cpp#e_s1_shout", void(e_s1_class*), Es1Shout);
 DEFINE_HOOK(&cc_at_check, CcAtCheck);
+DEFINE_HOOK_SYMBOL("src/d/d_stage.cpp#dStage_actorCreate",
+    void(stage_actor_data_class*, fopAcM_prm_class*, size_t), StageActorCreate);
+DEFINE_HOOK(&fpcSCtRq_Request, StdCreateRequest);
 
 namespace {
 
@@ -41,6 +47,7 @@ void onActorCreatePost(ModContext*, void* args, void* retval, void*) {
     }
     auto* actor = static_cast<fopAc_ac_c*>(mods::arg<void*>(args, 0));
     enemy_scaling::onActorCreated(actor);
+    enemy_count::onActorCreated(actor);
     enemy_sync::onActorCreated(actor);
     enemy_damage::onActorCreated(actor);
 }
@@ -53,6 +60,7 @@ void onActorDeletePost(ModContext*, void* args, void* retval, void*) {
     enemy_scaling::onActorDeleted(actor);
     enemy_sync::onActorDeleted(actor);
     enemy_damage::onActorDeleted(actor);
+    enemy_count::onActorDeleted(actor);
 }
 
 // Deaths without a puff delete from inside these scopes (B2, B3).
@@ -138,7 +146,38 @@ void onCcAtCheckPost(ModContext*, void* args, void*, void*) {
     s_hitEnemy = nullptr;
 }
 
+HookAction onStageActorCreatePre(ModContext*, void* args, void*, void*) {
+    Scope::push(ScopeKind::StagePlaced, mods::arg<fopAcM_prm_class*>(args, 1));
+    return HOOK_CONTINUE;
+}
+
+void onStageActorCreatePost(ModContext*, void* args, void*, void*) {
+    Scope::pop(ScopeKind::StagePlaced, mods::arg<fopAcM_prm_class*>(args, 1));
+}
+
+// The append is how the request is matched to the stage's placement.
+void onStdCreateRequestPost(ModContext*, void* args, void* retval, void*) {
+    const void* append = mods::arg<void*>(args, 4);
+    if (append != nullptr && Scope::owner(ScopeKind::StagePlaced) == append && Session::active()) {
+        enemy_count::onPlacedRequested(*static_cast<fpc_ProcID*>(retval));
+    }
+}
+
 }  // namespace
+
+ModResult installEnemyCount(std::string& error) {
+    const ModResult results[] = {
+        addPre<StageActorCreate>(onStageActorCreatePre, kObserve, "dStage_actorCreate", error),
+        addPost<StageActorCreate>(onStageActorCreatePost, kDefault, "dStage_actorCreate", error),
+        addPost<StdCreateRequest>(onStdCreateRequestPost, kDefault, "fpcSCtRq_Request", error),
+    };
+    for (const ModResult r : results) {
+        if (r != MOD_OK) {
+            return r;
+        }
+    }
+    return MOD_OK;
+}
 
 ModResult installEnemyDamage(std::string& error) {
     const ModResult results[] = {

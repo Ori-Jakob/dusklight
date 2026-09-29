@@ -962,6 +962,21 @@ test("room state values are type-checked", () => withServer(async (mk) => {
     assert.equal(got.state.enemyHealthMultiplier, 500, "multiplier is clamped to the UI range");
 }));
 
+test("room state carries the enemy count multiplier, clamped to 100-300", () => withServer(async (mk) => {
+    const a = mk();
+    const b = mk();
+    await a.join();
+    const state = await b.join();
+    assert.equal(state.roomState.enemyCountMultiplier, 100);
+    b.send({ type: "UPDATE_ROOM_STATE", state: { enemyCountMultiplier: 300 } });
+    await a.expectNone((p) => p.type === "UPDATE_ROOM_STATE", "room state from a non-owner");
+    for (const [sent, want] of [[250, 250], [1e9, 300], [50, 100], ["9", 100]]) {
+        a.send({ type: "UPDATE_ROOM_STATE", state: { enemyCountMultiplier: sent } });
+        const got = await b.waitType("UPDATE_ROOM_STATE");
+        assert.equal(got.state.enemyCountMultiplier, want, `enemyCountMultiplier ${sent}`);
+    }
+}));
+
 test("ownership passes to the next client when the owner leaves", () => withServer(async (mk) => {
     const a = mk();
     const b = mk();
