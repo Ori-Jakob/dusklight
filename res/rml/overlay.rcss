@@ -311,6 +311,10 @@ mod-panels[interactive] mod-panel {
     pointer-events: auto;
 }
 
+mod-panels[cursor] mod-panel[clickable-in-game] [id] {
+    pointer-events: auto;
+}
+
 mod-panel [drag-handle] {
     drag: drag;
 }

@@ -8,6 +8,7 @@
 #include "dusk/action_bindings.h"
 #include "dusk/livesplit.h"
 #include "dusk/mod_loader.hpp"
+#include "dusk/mouse.h"
 #include "dusk/settings.h"
 #include "dusk/speedrun.h"
 
@@ -67,6 +68,20 @@ constexpr auto kMenuNotificationDuration = std::chrono::milliseconds(2500);
 constexpr auto kPipelineProgressOpenDelay = std::chrono::milliseconds(250);
 
 constexpr std::array<const char*, 4> kFpsCorners = {"tl", "tr", "bl", "br"};
+
+// The cursor rests on an [id] element of a mod panel that takes clicks outside menus.
+bool hovering_game_click(Rml::Context* context) {
+    bool id = false;
+    for (auto* e = context != nullptr ? context->GetHoverElement() : nullptr; e != nullptr;
+         e = e->GetParentNode())
+    {
+        if (e->GetTagName() == "mod-panel") {
+            return id && e->HasAttribute("clickable-in-game");
+        }
+        id = id || !e->GetId().empty();
+    }
+    return false;
+}
 
 Rml::Element* create_toast(Rml::Element* parent, const Toast& toast) {
     if (toast.type == "autosave") {
@@ -394,13 +409,20 @@ void Overlay::update() {
     }
 
     if (mModPanels != nullptr) {
-        const bool interactive = any_document_visible();
-        if (interactive != mModPanels->HasAttribute("interactive")) {
-            if (interactive) {
-                mModPanels->SetAttribute("interactive", "");
-            } else {
-                mModPanels->RemoveAttribute("interactive");
+        const auto setFlag = [this](const char* name, bool on) {
+            if (on != mModPanels->HasAttribute(name)) {
+                if (on) {
+                    mModPanels->SetAttribute(name, "");
+                } else {
+                    mModPanels->RemoveAttribute(name);
+                }
             }
+        };
+        setFlag("interactive", any_document_visible());
+        const bool cursor = mouse::cursor_shown();
+        setFlag("cursor", cursor);
+        if (cursor && hovering_game_click(mDocument->GetContext())) {
+            mouse::keep_cursor_awake();
         }
     }
 

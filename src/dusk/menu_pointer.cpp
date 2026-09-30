@@ -4,6 +4,7 @@
 #include "dusk/settings.h"
 #include "m_Do/m_Do_graphic.h"
 
+#include <SDL3/SDL_mouse.h>
 #include <aurora/rmlui.hpp>
 #include <dolphin/pad.h>
 
@@ -44,6 +45,8 @@ bool s_mouseButtonCaptured = false;
 s32 s_mouseButton = -1;
 u32 s_suppressedPadHoldMask = 0;
 u32 s_suppressedPadNextReadMask = 0;
+// RmlUi button indices claimed by claim_mouse_button; kept apart from the menu state resets.
+u32 s_claimedMouseButtons = 0;
 Context s_deferredActivationContext = Context::None;
 TargetId s_deferredActivationTarget = InvalidTarget;
 Gesture s_gesture;
@@ -457,7 +460,23 @@ u32 suppressed_pad_buttons(u32 port) noexcept {
         return 0;
     }
 
-    return s_suppressedPadHoldMask | s_suppressedPadNextReadMask;
+    u32 claimed = 0;
+    if (s_claimedMouseButtons != 0) {
+        const SDL_MouseButtonFlags held = SDL_GetMouseState(nullptr, nullptr);
+        for (s32 button = 0; button < 3; ++button) {
+            if ((s_claimedMouseButtons & (1u << button)) == 0) {
+                continue;
+            }
+            const s32 scancode = scancode_from_rml_button(button);
+            if ((held & SDL_BUTTON_MASK(-(scancode + 1))) == 0) {
+                s_claimedMouseButtons &= ~(1u << button);
+            } else {
+                claimed |= pad_button_for_scancode(PAD_CHAN0, scancode);
+            }
+        }
+    }
+
+    return s_suppressedPadHoldMask | s_suppressedPadNextReadMask | claimed;
 }
 
 void finish_pad_suppression_read(u32 port) noexcept {
@@ -466,6 +485,12 @@ void finish_pad_suppression_read(u32 port) noexcept {
     }
 
     s_suppressedPadNextReadMask = 0;
+}
+
+void claim_mouse_button(s32 button) noexcept {
+    if (scancode_from_rml_button(button) != PAD_KEY_INVALID) {
+        s_claimedMouseButtons |= 1u << button;
+    }
 }
 
 bool hit_rect(f32 left, f32 top, f32 right, f32 bottom, f32 padding) noexcept {

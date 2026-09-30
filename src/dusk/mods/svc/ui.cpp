@@ -5,6 +5,7 @@
 #include "registry.hpp"
 #include "ui_v1.hpp"
 
+#include "dusk/menu_pointer.h"
 #include "dusk/mod_loader.hpp"
 #include "dusk/mods/loader/loader.hpp"
 #include "dusk/mods/log_buffer.hpp"
@@ -302,8 +303,8 @@ std::string element_id_in(Rml::Element* element, const Rml::Element* panel) {
     return {};
 }
 
-// Clicks on [id] elements and drags by [drag-handle] elements; the overlay's RCSS only lets pointer
-// events through while a menu is open.
+// Clicks on [id] elements and drags by [drag-handle] elements; the overlay's RCSS lets the pointer
+// through while a menu is open, or to a clickable-in-game panel's [id] elements while it shows.
 class OverlayPanelListener final : public Rml::EventListener {
 public:
     explicit OverlayPanelListener(uint64_t handle) : m_handle{handle} {}
@@ -325,6 +326,8 @@ public:
         Rml::Element* panel = slot->element;
         switch (event.GetId()) {
         case Rml::EventId::Mousedown:
+            // A press on a panel never reaches the game as a pad button.
+            menu_pointer::claim_mouse_button(event.GetParameter<int>("button", -1));
             if (event.GetParameter<int>("button", -1) == 0) {
                 m_pressedId = element_id_in(event.GetTargetElement(), panel);
             }
@@ -339,6 +342,11 @@ public:
             }
             break;
         case Rml::EventId::Dragstart:
+            if (panel->GetParentNode() == nullptr ||
+                !panel->GetParentNode()->HasAttribute("interactive"))
+            {
+                break;  // panels only move while a menu is open
+            }
             m_dragging = true;
             m_dragMouse = event.GetUnprojectedMouseScreenPos();
             m_dragX = slot->panelX;
@@ -1359,6 +1367,20 @@ ModResult ui_overlay_panel_set_position(LoadedMod& mod, uint64_t handle, float x
     return MOD_OK;
 }
 
+ModResult ui_overlay_panel_set_clickable_in_game(LoadedMod& mod, uint64_t handle, bool clickable) {
+    auto* slot =
+        resolve(mod, handle, UiSlotKind::OverlayPanel, "overlay_panel_set_clickable_in_game");
+    if (slot == nullptr) {
+        return MOD_INVALID_ARGUMENT;
+    }
+    if (clickable) {
+        slot->element->SetAttribute("clickable-in-game", "");
+    } else {
+        slot->element->RemoveAttribute("clickable-in-game");
+    }
+    return MOD_OK;
+}
+
 ModResult ui_overlay_panel_destroy(LoadedMod& mod, uint64_t handle) {
     auto* slot = resolve(mod, handle, UiSlotKind::OverlayPanel, "overlay_panel_destroy");
     if (slot == nullptr) {
@@ -2083,6 +2105,15 @@ ModResult ui_overlay_panel_destroy(ModContext* context, UiElementHandle panel) {
     return ui_impl::ui_overlay_panel_destroy(*mod, panel);
 }
 
+ModResult ui_overlay_panel_set_clickable_in_game(
+    ModContext* context, UiElementHandle panel, bool clickable) {
+    auto* mod = mod_from_context(context);
+    if (mod == nullptr || panel == 0) {
+        return MOD_INVALID_ARGUMENT;
+    }
+    return ui_impl::ui_overlay_panel_set_clickable_in_game(*mod, panel, clickable);
+}
+
 ModResult ui_register_mods_panel(ModContext* context, const UiModsPanelDesc* desc) {
     auto* mod = mod_from_context(context);
     if (mod == nullptr || desc == nullptr || desc->struct_size < sizeof(UiModsPanelDesc) ||
@@ -2574,6 +2605,7 @@ constexpr UiService s_uiService{
     .overlay_panel_create = ui_overlay_panel_create,
     .overlay_panel_set_position = ui_overlay_panel_set_position,
     .overlay_panel_destroy = ui_overlay_panel_destroy,
+    .overlay_panel_set_clickable_in_game = ui_overlay_panel_set_clickable_in_game,
 };
 
 }  // namespace

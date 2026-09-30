@@ -1052,6 +1052,19 @@ if (SERVICE_HAS(svc_ui, UiService, overlay_panel_create) &&
 }
 ```
 
+`overlay_panel_set_clickable_in_game` (UiService 2.5) lets a panel's `id` elements take clicks while the game runs
+with no menu open, whenever the host shows the mouse cursor (it is hidden while the mouse drives the camera or aiming,
+and after a second without motion, unless it rests on such an element). The rest of the panel stays click-through,
+dragging still needs an open menu, and a press on those elements is kept from the game's mouse bindings. `mod-panels`
+carries a `cursor` attribute while the cursor is shown.
+
+```cpp
+if (SERVICE_HAS(svc_ui, UiService, overlay_panel_set_clickable_in_game) &&
+    svc_ui->overlay_panel_set_clickable_in_game != nullptr) {
+    svc_ui->overlay_panel_set_clickable_in_game(mod_ctx, panel, true);
+}
+```
+
 **Menu bar tabs:** `register_menu_tab` adds a tab to the in-game menu bar. `on_selected` fires when the user activates
 the tab: typically you'd push a window from it. The tab is removed by `unregister_menu_tab`, or automatically when the
 mod is disabled.

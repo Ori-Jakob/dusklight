@@ -57,6 +57,8 @@ bool consume_deferred_activation(Context context, TargetId target) noexcept;
 void clear_deferred_activation(Context context) noexcept;
 u32 suppressed_pad_buttons(u32 port) noexcept;
 void finish_pad_suppression_read(u32 port) noexcept;
+// UI outside menus took this press (RmlUi button index): its pad bindings stay off until release.
+void claim_mouse_button(s32 button) noexcept;
 
 bool hit_rect(f32 left, f32 top, f32 right, f32 bottom, f32 padding = 0.0f) noexcept;
 bool hit_pane(CPaneMgr* pane, f32 padding = 0.0f) noexcept;

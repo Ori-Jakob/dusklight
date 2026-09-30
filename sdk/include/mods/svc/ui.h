@@ -10,7 +10,7 @@
 
 #define UI_SERVICE_ID DUSKLIGHT_SERVICE_ID_PREFIX "ui"
 #define UI_SERVICE_MAJOR 2u
-#define UI_SERVICE_MINOR 4u
+#define UI_SERVICE_MINOR 5u
 
 /*
  * UI primitives: a panel inside the host Mods window, mod-owned windows, dialogs, toasts,
@@ -364,7 +364,8 @@ typedef void (*UiOverlayPanelMovedFn)(
  * A mod-owned panel on the passive overlay layer, next to toasts and the FPS counter. It never
  * takes focus or game input. While a focus-stack document is visible (a menu or window is open)
  * it takes mouse input: clicks on elements with an `id` attribute fire on_click, and pressing an
- * element with a `drag-handle` attribute drags the panel and fires on_moved on release.
+ * element with a `drag-handle` attribute drags the panel and fires on_moved on release (see
+ * overlay_panel_set_clickable_in_game for clicks with no menu open).
  * x and y place the panel within the free screen space: 0 is the left/top edge, 1 the right/bottom
  * edge, so the panel always stays fully visible.
  */
@@ -492,6 +493,13 @@ typedef struct UiService {
     ModResult (*overlay_panel_set_position)(
         ModContext* ctx, UiElementHandle panel, float x, float y);
     ModResult (*overlay_panel_destroy)(ModContext* ctx, UiElementHandle panel);
+
+    /* Minor version 5 */
+
+    /* Off by default. On: whenever the host shows the mouse cursor, also with no menu open, the
+     * panel's `id` elements take clicks that never reach the game; dragging still needs a menu. */
+    ModResult (*overlay_panel_set_clickable_in_game)(
+        ModContext* ctx, UiElementHandle panel, bool clickable);
 } UiService;
 
 MOD_DECLARE_SERVICE(UiService, svc_ui, UI_SERVICE_ID, UI_SERVICE_MAJOR, UI_SERVICE_MINOR);

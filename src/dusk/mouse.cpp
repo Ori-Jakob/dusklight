@@ -24,6 +24,7 @@ float s_aim_pitch_rad = 0.0f;
 float s_camera_yaw_rad = 0.0f;
 float s_camera_pitch_rad = 0.0f;
 Clock::time_point s_last_cursor_motion = Clock::now();
+bool s_cursor_shown = true;
 
 void reset_deltas() {
     s_aim_yaw_rad = s_aim_pitch_rad = 0.0f;
@@ -120,6 +121,7 @@ void accumulate_deltas(float mx_rel, float my_rel, bool camera_active, bool aim_
 }
 
 void set_cursor_visible(bool visible) {
+    s_cursor_shown = visible;
     if (visible) {
         ImGui::GetIO().ConfigFlags &= ~ImGuiConfigFlags_NoMouseCursorChange;
         SDL_ShowCursor();
@@ -221,5 +223,13 @@ void on_focus_lost() {
 void on_focus_gained() {
     SDL_Window* window = aurora::window::get_sdl_window();
     sync_capture_state(window, should_capture_mouse(window));
+}
+
+bool cursor_shown() noexcept {
+    return s_cursor_shown;
+}
+
+void keep_cursor_awake() noexcept {
+    s_last_cursor_motion = Clock::now();
 }
 }  // namespace dusk::mouse

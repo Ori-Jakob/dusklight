@@ -13,7 +13,7 @@ public:
     void show() override;
     void update() override;
 
-    // Parent of mod overlay panels; has the `interactive` attribute while a menu is open.
+    // Parent of mod overlay panels; `interactive` while a menu is open, `cursor` while it shows.
     Rml::Element* mod_panels() const { return mModPanels; }
 
 protected:
