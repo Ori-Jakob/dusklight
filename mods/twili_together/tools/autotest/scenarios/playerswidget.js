@@ -44,7 +44,7 @@ const trioBarrier = (signal, name, timeoutSec = 120) => [
 module.exports = [
     {
         name: "players-widget",
-        description: "the overlay players widget and the Players tab rows: teleport buttons blocked then ready, drag only with the menu open, a click teleports, teams list only teammates",
+        description: "the overlay players widget and the Players tab rows: teleport buttons blocked then ready, drag only with the menu open, a click teleports with the menu closed and open, teams list only teammates",
         timeoutSec: 420,
         cvars: COMMON_CVARS,
         instances: ["A", "B"].map((name) => ({
@@ -73,6 +73,19 @@ module.exports = [
                         { op: "mouseDrag", from: header, to: [300, 220], frames: 12 },
                         { op: "wait", frames: 10 },
                         { op: "expectPlayersWidget", x: 0, y: 0, holdTicks: 5 },
+                        // Still closed: the teleport button takes a real click (UiService 2.5).
+                        { op: "expectPlayersWidget", clickableInGame: true },
+                        { op: "movePlayersWidget", x: 1, y: 0 },
+                        { op: "wait", frames: 5 },
+                        { op: "mouseMove", x: tpButton[0], y: tpButton[1] },
+                        { op: "wait", frames: 10 },
+                        { op: "mark", msg: "PW_SHOT closed-tip" },
+                        { op: "wait", sec: 2 },
+                        { op: "clickPlayersWidget", target: "B", at: tpButton, expect: "local", timeoutSec: 30 },
+                        { op: "expectBeside", target: "B", timeoutSec: 10 },
+                        // Past the teleport cooldown, and back where the drag below grabs it.
+                        { op: "wait", sec: 3 },
+                        { op: "movePlayersWidget", x: 0, y: 0 },
                         { op: "showWindow", tab: 2 },
                         { op: "expectPlayersTab", count: 2, rows: [{ name: "B", teleport: "ready", tooltip: "Teleport to B" }] },
                         { op: "mouseDrag", from: header, to: [300, 220], frames: 12 },

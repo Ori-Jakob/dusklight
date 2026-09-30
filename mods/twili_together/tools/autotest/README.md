@@ -323,8 +323,15 @@ Teleport (`StepsTeleport.cpp`):
 
 | op | fields | does |
 | --- | --- | --- |
-| `teleportTo` | `target`, `expect` (`arrived`, `local`, `stage`, `refused`, `timeout`, `failed`, or a list), `reason`, `timeoutSec` | asks to teleport to that peer and waits for the result |
+| `teleportTo` | `target`, `expect` (`arrived`, `local`, `stage`, `refused`, `timeout`, `failed`, or a list), `reason`, `placement` (`exact` beside the peer, `fallback` on the spot it sent), `offset` (`[dx, dy, dz]` added to the peer's pose we aim at), `timeoutSec` | asks to teleport to that peer and waits for the result |
 | `expectNear` | `target`, `maxDist` (250), `timeoutSec` | our Link within `maxDist` of the peer's reported position |
+| `expectBeside` | `target`, `minDist` (40), `maxDist` (150), `maxAngleDeg` (20), `timeoutSec` | our Link that far from the peer's reported position (on the ground plane), facing its way |
+| `expectOwnEvent` | `running` (false), `holdTicks` (60), `timeoutSec` | an event runs in our own game (or not) for `holdTicks` |
+
+Written for teleporting beside the target, also into its cutscene, and the widget's clicks with the
+menu closed, **not run yet** (the machine was in use): `teleport-cutscene` and `teleport-fallback`
+(new), and new expectations in `teleport` (placement, `expectBeside`) and `players-widget` (a real
+click with the menu closed).
 
 Team games (`StepsTeamGame.cpp`). A team syncs only between members in game on its team game;
 the randomizer seed a player runs is found among the generated seeds on disk:
@@ -458,7 +465,7 @@ disturbs them:
 
 | op | fields | does |
 | --- | --- | --- |
-| `expectPlayersWidget` | `shown`, `gate` (`off`, `notConnected`, `noSave`, `empty`, `cutscene`, `menu`), `header`, `count`, `rows` (`name`; `label`, the name as shown; `area`, `tooltip` substrings; `teleport`: `ready`, `blocked`, `none`), `absent` (names), `x`, `y`, `minX`, `minY` (per mille), `opacity`, `scale` (percent), `holdTicks`, `timeoutSec` | the widget as the last tick built it |
+| `expectPlayersWidget` | `shown`, `gate` (`off`, `notConnected`, `noSave`, `empty`, `cutscene`, `menu`), `header`, `count`, `rows` (`name`; `label`, the name as shown; `area`, `tooltip` substrings; `teleport`: `ready`, `blocked`, `none`), `absent` (names), `x`, `y`, `minX`, `minY` (per mille), `opacity`, `scale` (percent), `clickableInGame` (the host takes its clicks with the menu closed), `holdTicks`, `timeoutSec` | the widget as the last tick built it |
 | `expectPlayersTab` | `count`, `rows` (`name`, `teleport`, `tooltip`, `actions`), `absent`, `holdTicks`, `timeoutSec` | the Players tab's rows; the tab must be shown (`showWindow` tab 2) |
 | `clickPlayersWidget` | `target`, `at` (`[x, y]`), `expect`, `reason`, `timeoutSec` | presses the target's teleport button (the host's click callback, or with `at` a real click there) and waits for the teleport's result |
 | `movePlayersWidget` | `x`, `y` (0 to 1) | moves the widget there as a drag would |

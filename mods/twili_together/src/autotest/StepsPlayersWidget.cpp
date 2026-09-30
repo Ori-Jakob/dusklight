@@ -80,8 +80,8 @@ bool held(bool ok, const StepContext& ctx, int holdTicks) {
 std::string describeWidget() {
     const widget::Probe& p = widget::probe();
     std::string s = fmt::format(
-        "supported={} shown={} gate='{}' at {},{} opacity={} scale={} header='{}' rows=[",
-        p.supported, p.shown, p.gate, p.x, p.y, p.opacity, p.scale, p.header);
+        "supported={} shown={} gate='{}' at {},{} opacity={} scale={} inGame={} header='{}' rows=[",
+        p.supported, p.shown, p.gate, p.x, p.y, p.opacity, p.scale, p.clickableInGame, p.header);
     for (const widget::Row& r : p.rows) {
         s += fmt::format(" '{}' '{}' {} '{}';", r.name, r.area, offerName(r.offer), r.tooltip);
     }
@@ -135,6 +135,8 @@ std::optional<bool> expectPlayersWidget(StepContext& ctx) {
     bool ok = p.shown == wantShown && intIs("x", p.x, false) && intIs("y", p.y, false) &&
               intIs("minX", p.x, true) && intIs("minY", p.y, true) &&
               intIs("opacity", p.opacity, false) && intIs("scale", p.scale, false) &&
+              (!step.contains("clickableInGame") ||
+                  step.value("clickableInGame", false) == p.clickableInGame) &&
               (!step.contains("header") || step.value("header", std::string{}) == p.header) &&
               (wantShown || !step.contains("gate") || step.value("gate", std::string{}) == p.gate);
     if (ok && wantShown) {

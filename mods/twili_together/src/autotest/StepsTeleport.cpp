@@ -55,7 +55,25 @@ bool resultMatches(const json& step, const std::string& got, const std::string& 
         ok = one(expect);
     }
     const std::string wantReason = step.value("reason", std::string{});
-    return ok && (wantReason.empty() || wantReason == reason);
+    const std::string wantPlacement = step.value("placement", std::string{});
+    return ok && (wantReason.empty() || wantReason == reason) &&
+           (wantPlacement.empty() || wantPlacement == teleport::status().placement);
+}
+
+int sHoldSince = -1;
+
+bool held(bool ok, const StepContext& ctx, int holdTicks) {
+    if (!ctx.begun) {
+        sHoldSince = -1;
+    }
+    if (!ok) {
+        sHoldSince = -1;
+        return false;
+    }
+    if (sHoldSince < 0) {
+        sHoldSince = ctx.ticks;
+    }
+    return ctx.ticks - sHoldSince >= holdTicks;
 }
 
 std::optional<bool> teleportSteps(const std::string& op, StepContext& ctx) {
@@ -73,25 +91,76 @@ std::optional<bool> teleportSteps(const std::string& op, StepContext& ctx) {
                 return false;
             }
             sTeleportSeq = teleport::status().resultSeq;
+            const json offset = step.value("offset", json::array({0, 0, 0}));
+            teleport::setPlacementOffsetForTest(
+                offset.at(0).get<float>(), offset.at(1).get<float>(), offset.at(2).get<float>());
             // A local refusal is reported as a result too.
             teleport::request(c->clientId);
         }
         const teleport::Status& st = teleport::status();
         if (st.resultSeq == sTeleportSeq) {
             if (ctx.seconds > ctx.timeout(90.0)) {
+                teleport::setPlacementOffsetForTest(0.0f, 0.0f, 0.0f);
                 ctx.fail(fmt::format("teleportTo {} timed out after {:.0f}s ({})", target,
                     ctx.timeout(90.0), st.message));
             }
             return false;
         }
+        teleport::setPlacementOffsetForTest(0.0f, 0.0f, 0.0f);
         const std::string got = teleport::resultName(st.lastResult);
-        TwiliLog.info("[autotest] teleport result={} reason='{}' ({})", got, st.reason, st.message);
+        TwiliLog.info("[autotest] teleport result={} reason='{}' placement='{}' ({})", got,
+            st.reason, st.placement, st.message);
         if (!resultMatches(step, got, st.reason)) {
-            ctx.fail(
-                fmt::format("teleportTo {}: got {} '{}' ({})", target, got, st.reason, st.message));
+            ctx.fail(fmt::format("teleportTo {}: got {} '{}' placement '{}' ({})", target, got,
+                st.reason, st.placement, st.message));
             return false;
         }
         return true;
+    }
+
+    // Beside the peer (not inside its dummy) and facing its way, as a teleport leaves us.
+    if (op == "expectBeside") {
+        const std::string target = step.value("target", std::string{});
+        const float minDist = step.value("minDist", 40.0f);
+        const float maxDist = step.value("maxDist", 150.0f);
+        const float maxAngle = step.value("maxAngleDeg", 20.0f);
+        const Client* c = findPeer(target);
+        fopAc_ac_c* player = dComIfGp_getPlayer(0);
+        std::string why = "peer not visible in our layer";
+        if (c != nullptr && player != nullptr && !dComIfGp_isEnableNextStage() &&
+            peerInMyLayer(*c) && c->hasPlayerUpdate)
+        {
+            const float dx = player->current.pos.x - c->posX;
+            const float dz = player->current.pos.z - c->posZ;
+            const float dist = std::sqrt(dx * dx + dz * dz);
+            const int16_t turn = static_cast<int16_t>(player->shape_angle.y - c->shapeAngleY);
+            const float angle = std::fabs(static_cast<float>(turn)) * (180.0f / 32768.0f);
+            if (dist >= minDist && dist <= maxDist && angle <= maxAngle) {
+                TwiliLog.info("[autotest] beside {}: {:.0f} units, facing {:.0f} deg off", target,
+                    dist, angle);
+                return true;
+            }
+            why = fmt::format("{:.0f} units away, facing {:.0f} deg off", dist, angle);
+        }
+        if (ctx.seconds > ctx.timeout(10.0)) {
+            ctx.fail(fmt::format("expectBeside {}: {} (want {:.0f}-{:.0f} units, {:.0f} deg)",
+                target, why, minDist, maxDist, maxAngle));
+        }
+        return false;
+    }
+
+    // Whether an event runs in our own game, held for holdTicks.
+    if (op == "expectOwnEvent") {
+        const bool want = step.value("running", false);
+        const bool running = dComIfGp_event_runCheck() != FALSE;
+        if (held(running == want, ctx, step.value("holdTicks", 60))) {
+            TwiliLog.info("[autotest] own event running={}", running);
+            return true;
+        }
+        if (ctx.seconds > ctx.timeout(20.0)) {
+            ctx.fail(fmt::format("expectOwnEvent: running={}, want {}", running, want));
+        }
+        return false;
     }
 
     if (op == "expectNear") {
