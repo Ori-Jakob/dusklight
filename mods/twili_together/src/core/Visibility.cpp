@@ -12,8 +12,9 @@ namespace twili {
 namespace {
 
 constexpr auto kCutsceneReleaseDelay = std::chrono::milliseconds(350);
-// dEvt_control_c::doorCheck sets this for door demos (chests set 4 instead).
+// dEvt_control_c::doorCheck sets these for door and treasure chest demos.
 constexpr uint16_t kEventFlagDoor = 0x40;
+constexpr uint16_t kEventFlagTreasure = 0x4;
 
 int s_cutsceneOverride = -1;
 std::chrono::steady_clock::time_point s_cutsceneReleaseAt{};
@@ -21,7 +22,8 @@ std::chrono::steady_clock::time_point s_cutsceneReleaseAt{};
 }  // namespace
 
 bool isCutsceneEvent(bool eventRunning, uint8_t eventMode, uint16_t eventFlags) {
-    return eventRunning && eventMode == dEvt_mode_DEMO_e && (eventFlags & kEventFlagDoor) == 0;
+    return eventRunning && eventMode == dEvt_mode_DEMO_e &&
+           (eventFlags & (kEventFlagDoor | kEventFlagTreasure)) == 0;
 }
 
 bool localCutsceneRunning() {
