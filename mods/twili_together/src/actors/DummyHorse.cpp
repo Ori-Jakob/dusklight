@@ -1,7 +1,6 @@
 #include "actors/DummyHorse.hpp"
 
 #include "core/GameAccess.hpp"
-#include "core/Host.hpp"
 #include "core/Log.hpp"
 #include "core/Session.hpp"
 #include "core/Visibility.hpp"
@@ -20,6 +19,8 @@
 #include "m_Do/m_Do_ext.h"
 #include "m_Do/m_Do_mtx.h"
 #include "res/Object/Horse.h"
+
+#include <mods/svc/interp.h>
 
 #include <algorithm>
 #include <cmath>
@@ -492,8 +493,9 @@ void daDummyHorse_c::finishPose(bool jump) {
     } else if (std::uniform_real_distribution<float>(0.0f, 1.0f)(mBlinkRng) < kBlinkChance) {
         mBlinkFrame = 1;
     }
-    if (jump && isShown()) {
-        interp::requestPresentationSync();
+    if (jump) {
+        // Not blended across the jump
+        m_model->forgetMtx();
     }
 }
 
@@ -585,8 +587,7 @@ void daDummyHorse_c::applyRider(daAlink_c& rider, const RemoteHorsePose& p) {
         m_model->calcWeightEnvelopeMtx();
         // No exported call records the weight matrices (setHorseStirrup does it for our horse).
         for (u16 i = 0; i < m_modelData->getWEvlpMtxNum(); i++) {
-            MtxP mtx = m_model->getWeightAnmMtx(i);
-            interp::recordFinalMtx(mtx, mtx);
+            svc_interp->record_mtx(mod_ctx, m_model->getWeightAnmMtx(i));
         }
     }
     const bool reset = m_resetStateFlg0 != 0;
@@ -709,6 +710,11 @@ int daDummyHorse_c::draw() {
 }
 
 void daDummyHorse_c::destroy() {
+    if (m_model != nullptr) {
+        for (u16 i = 0; i < m_modelData->getWEvlpMtxNum(); i++) {
+            svc_interp->forget_mtx(mod_ctx, m_model->getWeightAnmMtx(i));
+        }
+    }
     // Never ~daHorse_c: it would drop the resident "Horse" archive our own Epona uses.
     m_sound.deleteObject();
     mZelda.destroy();

@@ -3,7 +3,6 @@
 #include "autotest/AutoTestSteps.hpp"
 
 #include "actors/DummyPlayer.hpp"
-#include "core/Host.hpp"
 #include "core/Log.hpp"
 #include "core/Session.hpp"
 #include "core/Visibility.hpp"
@@ -377,7 +376,6 @@ bool viewDummy(StepContext& ctx) {
                      right * ctx.step.value("side", 0.0f) +
                      cXyz(0.0f, ctx.step.value("up", 250.0f), 0.0f);
     camera->mCamera.Reset(center, eye);
-    interp::requestPresentationSync();
     return true;
 }
 

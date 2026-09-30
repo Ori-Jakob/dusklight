@@ -184,6 +184,14 @@ J3DModel* DummyMidna::bodyModel() const {
     return mpMorf != nullptr ? mpMorf->getModel() : nullptr;
 }
 
+void DummyMidna::snap() {
+    for (J3DModel* model : {bodyModel(), mpMask, mpHands, mpHairHand}) {
+        if (model != nullptr) {
+            model->forgetMtx();
+        }
+    }
+}
+
 void DummyMidna::clearPointers() {
     mpMorf = nullptr;
     mHairCB.mScale = nullptr;

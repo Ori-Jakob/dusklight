@@ -2,7 +2,6 @@
 
 #include "actors/DummyPlayer.hpp"
 #include "core/Config.hpp"
-#include "core/Host.hpp"
 #include "core/Log.hpp"
 #include "core/Session.hpp"
 #include "core/Visibility.hpp"
@@ -10,9 +9,11 @@
 #include "horse/HorseSync.hpp"
 
 #include "JSystem/J2DGraph/J2DOrthoGraph.h"
+#include "JSystem/J3DGraphAnimator/J3DModel.h"
 #include "JSystem/JUtility/JUTFont.h"
 #include "JSystem/JUtility/JUTResFont.h"
 #include "JSystem/JUtility/TColor.h"
+#include "d/actor/d_a_alink.h"
 #include "d/d_com_inf_game.h"
 #include "d/d_meter2_info.h"
 #include "f_op/f_op_actor_mng.h"
@@ -21,11 +22,11 @@
 #include "m_Do/m_Do_lib.h"
 
 #include <mods/svc/gfx.h>
+#include <mods/svc/interp.h>
 
 #include <algorithm>
 #include <cmath>
 #include <cstring>
-#include <unordered_map>
 
 namespace twili::ui::name_tags {
 namespace {
@@ -79,40 +80,21 @@ constexpr f32 kHpMaxSegW = 8.0f;
 constexpr f32 kHpMinWidth = 40.0f;
 constexpr size_t kMaxOwnerGlyphs = 24;
 constexpr size_t kMaxHorseGlyphs = 16;
-// A jump this far between two ticks is a teleport or respawn: no lerp across it.
-constexpr f32 kSnapDistanceSq = 400.0f * 400.0f;
 
 GfxStageHookHandle s_hook = 0;
 std::vector<Probe> s_drawn;
 uint32_t s_frames = 0;
 const char* s_gate = "";
 
-// The last two simulation positions of each tag's anchor, keyed by client (horses offset).
-struct Track {
-    uint64_t seq = 0;
-    cXyz prev;
-    cXyz cur;
-};
-std::unordered_map<uint64_t, Track> s_tracks;
-
-cXyz presented(uint64_t key, const cXyz& now) {
-    const uint64_t seq = interp::simTickSeq();
-    auto [it, fresh] = s_tracks.try_emplace(key);
-    Track& t = it->second;
-    if (fresh) {
-        t = {seq, now, now};
-    } else if (seq != t.seq) {
-        t.prev = t.cur;
-        t.cur = now;
-        t.seq = seq;
-        if (t.prev.abs2(t.cur) > kSnapDistanceSq) {
-            t.prev = t.cur;
-        }
-    } else {
-        t.cur = now;
+// Follows the body as this frame draws it: its root joint blended between the last two ticks.
+cXyz presented(J3DModel* model, const cXyz& now) {
+    InterpMtx drawn;
+    if (model == nullptr || !svc_interp->lookup_replacement_mtx(model->getAnmMtx(0), drawn)) {
+        return now;
     }
-    const f32 step = std::clamp(interp::presentationStep(), 0.0f, 1.0f);
-    return t.prev + (t.cur - t.prev) * step;
+    const MtxP latest = model->getAnmMtx(0);
+    return now + cXyz(drawn[0][3] - latest[0][3], drawn[1][3] - latest[1][3],
+                     drawn[2][3] - latest[2][3]);
 }
 
 // An unmapped code draws the font's default glyph.
@@ -386,8 +368,8 @@ void draw() {
         if (text.empty()) {
             continue;
         }
-        const cXyz pos = presented((uint64_t{1} << 32) | id, cXyz(horse->pos[0], horse->pos[1],
-                                                                horse->pos[2]));
+        const cXyz pos =
+            presented(horse->model, cXyz(horse->pos[0], horse->pos[1], horse->pos[2]));
         f32 distanceSq = 0.0f;
         const f32 alpha = tagAlpha(player, pos, distanceSq);
         if (alpha < 0.0f) {
@@ -434,7 +416,7 @@ void draw() {
             anchor.y = std::max(anchor.y, actor->attention_info.position.y + 24.0f);
             anchor.z = actor->attention_info.position.z;
         }
-        const cXyz world = presented(id, anchor);
+        const cXyz world = presented(static_cast<daAlink_c*>(actor)->mpLinkModel, anchor);
         f32 distanceSq = 0.0f;
         const f32 alpha = tagAlpha(player, world, distanceSq);
         if (alpha < 0.0f) {
@@ -516,7 +498,6 @@ bool install() {
 void uninstall() {
     s_hook = 0;
     s_drawn.clear();
-    s_tracks.clear();
 }
 
 const std::vector<Probe>& drawn() {

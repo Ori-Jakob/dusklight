@@ -1,7 +1,5 @@
 #include "presence/RemotePose.hpp"
 
-#include "core/Host.hpp"
-
 #include <algorithm>
 #include <cmath>
 #include <cstdarg>
@@ -11,6 +9,8 @@
 namespace twili {
 namespace {
 
+// Seconds per game tick.
+constexpr double kTickSec = 1.0 / 30.0;
 constexpr float kMinDelayTicks = 2.0f;
 constexpr float kMaxDelayTicks = 8.0f;
 constexpr float kJitterDelayGain = 2.0f;
@@ -250,7 +250,7 @@ void RemotePoseBuffer::push(const RemotePoseSample& sample, double arrivalSec) {
             clear();  // the sender restarted its tick counter
         } else {
             // RFC 3550 interarrival jitter, in ticks
-            const double arrivalTicks = (arrivalSec - mLastArrivalSec) / interp::simPace();
+            const double arrivalTicks = (arrivalSec - mLastArrivalSec) / kTickSec;
             const uint32_t seqTicks = sample.seq - mLastArrivalSeq;
             if (seqTicks <= kMaxJitterGapTicks && arrivalTicks <= kMaxJitterGapTicks) {
                 const double d = arrivalTicks - static_cast<double>(seqTicks);
@@ -407,7 +407,7 @@ RemotePoseSample poseSample(uint32_t seq, float posX, uint8_t epoch = 0) {
 }
 
 double tickSec(int tick) {
-    return tick * static_cast<double>(interp::simPace());
+    return tick * kTickSec;
 }
 
 bool checkBunchedArrival(std::string& why) {

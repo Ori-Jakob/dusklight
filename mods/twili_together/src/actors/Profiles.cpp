@@ -7,8 +7,6 @@
 
 #include <mods/svc/actor.h>
 
-extern const ActorService* svc_actor;
-
 namespace twili::actors {
 
 namespace {

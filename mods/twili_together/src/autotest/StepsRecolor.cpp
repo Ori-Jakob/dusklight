@@ -4,7 +4,6 @@
 
 #include "actors/DummyPlayer.hpp"
 #include "core/Config.hpp"
-#include "core/Host.hpp"
 #include "core/Log.hpp"
 #include "core/Session.hpp"
 #include "fx/PlayerRecolor.hpp"
@@ -390,7 +389,6 @@ std::optional<bool> recolorSteps(const std::string& op, StepContext& ctx) {
                          right * step.value("side", 0.0f) +
                          cXyz(0.0f, step.value("up", 25.0f), 0.0f);
         camera->mCamera.Reset(center, eye);
-        interp::requestPresentationSync();
         return true;
     }
 

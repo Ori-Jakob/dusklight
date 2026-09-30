@@ -281,7 +281,7 @@ void moveLink(daAlink_c* link, const Spot& spot, int16_t angleY) {
     // As a door does: a void-out now restarts Link here.
     dComIfGs_setRestartRoom(spot.pos, angleY, static_cast<s8>(spot.roomNo));
     resetCameraBehind(link, from);
-    interp::requestPresentationSync();
+    interp::snapModels(*link);
 }
 
 bool placeBeside(daAlink_c* link) {

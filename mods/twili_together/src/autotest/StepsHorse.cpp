@@ -5,7 +5,6 @@
 #include "actors/DummyHorse.hpp"
 #include "actors/DummyPlayer.hpp"
 #include "core/GameAccess.hpp"
-#include "core/Host.hpp"
 #include "core/Log.hpp"
 #include "core/Session.hpp"
 #include "fx/PlayerRecolor.hpp"
@@ -144,7 +143,6 @@ void standBeside(daAlink_c* link, const fopAc_ac_c* horse, float dist,
     link->old.pos = pos;
     link->shape_angle.y = facing;
     link->current.angle.y = link->shape_angle.y;
-    interp::requestPresentationSync();
 }
 
 bool rideHorse(StepContext& ctx) {
@@ -628,8 +626,6 @@ bool horseCamera(StepContext& ctx) {
             return false;
         }
         camera->mCamera.Reset(center, eye);
-        // A cut like the game's own: no presented frame lerps across it.
-        interp::requestPresentationSync();
         return true;
     }
     if (!SERVICE_HAS(svc_camera, CameraService, register_camera_operator)) {
@@ -648,7 +644,6 @@ bool horseCamera(StepContext& ctx) {
             return false;
         }
     }
-    interp::requestPresentationSync();
     return true;
 }
 

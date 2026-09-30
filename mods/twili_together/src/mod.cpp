@@ -42,7 +42,8 @@ IMPORT_SERVICE_VERSION(ConfigService, svc_config, 0);
 IMPORT_SERVICE(ActorService, svc_actor);
 // Minor 4 (overlay panels, the players widget) is checked with SERVICE_HAS.
 IMPORT_SERVICE_VERSION(UiService, svc_ui, 3);
-IMPORT_OPTIONAL_SERVICE(InterpService, svc_interp);
+// Upstream's, since Dusklight 2.0.3.
+IMPORT_SERVICE_VERSION(InterpService, svc_interp, 0);
 // Name tags only.
 IMPORT_OPTIONAL_SERVICE(GfxService, svc_gfx);
 // Without it items are not shared; the rest of world sync still works.
@@ -66,9 +67,9 @@ extern "C" {
 MOD_EXPORT ModResult mod_initialize(ModError* error) {
     using namespace twili;
 
-    TwiliLog.info("[core] Twili-Together {} starting (save layout {}; host: interp={} "
+    TwiliLog.info("[core] Twili-Together {} starting (save layout {}; host: {} "
                   "request_quit={} find_host_var={} websocket={} net={})",
-        svc_host->mod_version(mod_ctx), layout::saveLayoutHex(), yesNo(svc_interp != nullptr),
+        svc_host->mod_version(mod_ctx), layout::saveLayoutHex(), svc_host->version,
         yesNo(SERVICE_HAS(svc_host, HostService, request_quit)),
         yesNo(SERVICE_HAS(svc_config, ConfigService, find_host_var)),
         yesNo(svc_websocket != nullptr), yesNo(svc_net != nullptr));

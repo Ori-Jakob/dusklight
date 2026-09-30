@@ -6,7 +6,6 @@
 #include "autotest/State.hpp"
 #include "core/Base64.hpp"
 #include "core/Config.hpp"
-#include "core/Host.hpp"
 #include "core/LocalPlayer.hpp"
 #include "core/Log.hpp"
 #include "story/StoryLog.hpp"
@@ -400,7 +399,6 @@ void movePlayerTo(const cXyz& pos) {
     daPy_py_c* player = dComIfGp_getLinkPlayer();
     cXyz at = pos;
     player->setPlayerPosAndAngle(&at, player->shape_angle.y, TRUE);
-    interp::requestPresentationSync();
 }
 
 // A defeated boss's warp hole plays its own BOSS_WARPIN (the WARP_CHECK choice skipped).
@@ -509,7 +507,6 @@ std::optional<bool> triggerStory(StepContext& ctx) {
         daPy_py_c* player = dComIfGp_getLinkPlayer();
         cXyz pos = tag->current.pos;
         player->setPlayerPosAndAngle(&pos, player->shape_angle.y, TRUE);
-        interp::requestPresentationSync();
         TwiliLog.info(
             "[autotest] triggerStory: moved into the tag area of map event {}", find.eventNo);
         return true;

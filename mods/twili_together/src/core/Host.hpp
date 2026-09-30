@@ -1,28 +1,19 @@
 #pragma once
 
 #include <mods/svc/host.h>
-#include <mods/svc/interp.h>
 
-#include <cstdint>
+class daAlink_c;
 
 namespace twili::host {
 
 // False when the host has no request_quit.
 bool requestQuit(int exitCode);
 
-const InterpService* interp();
-
 }  // namespace twili::host
 
-// InterpService with fallbacks for hosts without it.
 namespace twili::interp {
 
-bool isEnabled();
-void requestPresentationSync();
-float presentationStep();
-uint64_t simTickSeq();
-// Seconds per simulation tick.
-float simPace();
-void recordFinalMtx(const float mtx[3][4], const void* key);
+// The next frames draw Link's models at their latest pose instead of blending across a jump.
+void snapModels(daAlink_c& link);
 
 }  // namespace twili::interp

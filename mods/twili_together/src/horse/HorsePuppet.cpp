@@ -39,6 +39,7 @@ bool tagInfo(uint32_t clientId, TagInfo& out) {
     out.eye[0] = horse->eyePos.x;
     out.eye[1] = horse->eyePos.y;
     out.eye[2] = horse->eyePos.z;
+    out.model = horse->m_model;
     return true;
 }
 

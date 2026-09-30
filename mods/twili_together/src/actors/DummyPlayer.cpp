@@ -2860,23 +2860,14 @@ void daDummyPlayer_c::updateRemoteBootMatrices() {
     mpLinkBootModels[0]->setAnmMtx(3, mpLinkModel->getAnmMtx(0x15));
 
     mDoMtx_stack_c::XrotS(-0x8000);
-    if (interp::isEnabled()) {
-        // setAnmMtx records the matrix for frame interpolation
-        Mtx bootMtx;
-        mDoMtx_concat(mpLinkModel->getAnmMtx(0x18), mDoMtx_stack_c::get(), bootMtx);
-        mpLinkBootModels[1]->setAnmMtx(1, bootMtx);
-        mDoMtx_concat(mpLinkModel->getAnmMtx(0x19), mDoMtx_stack_c::get(), bootMtx);
-        mpLinkBootModels[1]->setAnmMtx(2, bootMtx);
-        mDoMtx_concat(mpLinkModel->getAnmMtx(0x1A), mDoMtx_stack_c::get(), bootMtx);
-        mpLinkBootModels[1]->setAnmMtx(3, bootMtx);
-    } else {
-        mDoMtx_concat(mpLinkModel->getAnmMtx(0x18), mDoMtx_stack_c::get(),
-                      mpLinkBootModels[1]->getAnmMtx(1));
-        mDoMtx_concat(mpLinkModel->getAnmMtx(0x19), mDoMtx_stack_c::get(),
-                      mpLinkBootModels[1]->getAnmMtx(2));
-        mDoMtx_concat(mpLinkModel->getAnmMtx(0x1A), mDoMtx_stack_c::get(),
-                      mpLinkBootModels[1]->getAnmMtx(3));
-    }
+    // setAnmMtx records the matrix for frame interpolation
+    Mtx bootMtx;
+    mDoMtx_concat(mpLinkModel->getAnmMtx(0x18), mDoMtx_stack_c::get(), bootMtx);
+    mpLinkBootModels[1]->setAnmMtx(1, bootMtx);
+    mDoMtx_concat(mpLinkModel->getAnmMtx(0x19), mDoMtx_stack_c::get(), bootMtx);
+    mpLinkBootModels[1]->setAnmMtx(2, bootMtx);
+    mDoMtx_concat(mpLinkModel->getAnmMtx(0x1A), mDoMtx_stack_c::get(), bootMtx);
+    mpLinkBootModels[1]->setAnmMtx(3, bootMtx);
 }
 
 static void decayDummySwordBlur(daAlink_blur_c& blur, const cXyz& currentPos,
@@ -4265,9 +4256,8 @@ int daDummyPlayer_c::execute() {
         // Nothing may streak across the jump
         old.pos = current.pos;
         old.angle = shape_angle;
-        if (!mDummyHidden) {
-            interp::requestPresentationSync();
-        }
+        interp::snapModels(*this);
+        mDummyMidna.snap();
     }
     return TRUE;
 }

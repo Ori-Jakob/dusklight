@@ -55,6 +55,8 @@ public:
     void deactivate();
     // No morph from the pose shown before (a snap or a form change).
     void resetContinuity() { mFresh = true; }
+    // The next frames show her latest pose instead of blending across a jump.
+    void snap();
     // Once per tick after the wolf body's calc; `wolf` may be null while she is apart.
     void update(const RemoteMidnaPose& pose, J3DModel* wolf, float frameAlpha, bool shown);
     void draw(const dKy_tevstr_c& owner, bool ownerTinted);

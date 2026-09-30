@@ -1,5 +1,8 @@
 #include "core/Host.hpp"
 
+#include "JSystem/J3DGraphAnimator/J3DModel.h"
+#include "d/actor/d_a_alink.h"
+
 namespace twili::host {
 
 bool requestQuit(int exitCode) {
@@ -10,41 +13,19 @@ bool requestQuit(int exitCode) {
     return true;
 }
 
-const InterpService* interp() {
-    return svc_interp;
-}
-
 }  // namespace twili::host
 
 namespace twili::interp {
 
-// Without the service assume interpolation is on: the setAnmMtx path is right either way.
-bool isEnabled() {
-    return svc_interp == nullptr || svc_interp->is_enabled(mod_ctx);
-}
-
-void requestPresentationSync() {
-    if (svc_interp != nullptr) {
-        svc_interp->request_presentation_sync(mod_ctx);
-    }
-}
-
-float presentationStep() {
-    return svc_interp != nullptr ? svc_interp->presentation_step(mod_ctx) : 1.0f;
-}
-
-uint64_t simTickSeq() {
-    return svc_interp != nullptr ? svc_interp->sim_tick_seq(mod_ctx) : 0;
-}
-
-float simPace() {
-    const float rate = svc_interp != nullptr ? svc_interp->sim_rate_hz(mod_ctx) : 30.0f;
-    return rate > 0.0f ? 1.0f / rate : 1.0f / 30.0f;
-}
-
-void recordFinalMtx(const float mtx[3][4], const void* key) {
-    if (svc_interp != nullptr) {
-        svc_interp->record_final_mtx(mod_ctx, mtx, key);
+void snapModels(daAlink_c& link) {
+    J3DModel* const models[] = {link.mpLinkModel, link.mpLinkFaceModel, link.mpLinkHatModel,
+        link.mpLinkHandModel, link.mSwordModel, link.mSheathModel, link.mShieldModel,
+        link.mHeldItemModel, link.mpHookTipModel, link.mpKanteraModel, link.mpLinkBootModels[0],
+        link.mpLinkBootModels[1]};
+    for (J3DModel* model : models) {
+        if (model != nullptr) {
+            model->forgetMtx();
+        }
     }
 }
 

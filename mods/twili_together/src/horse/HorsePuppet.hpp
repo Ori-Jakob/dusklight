@@ -4,6 +4,7 @@
 
 #include <cstdint>
 
+class J3DModel;
 struct cXyz;
 class daAlink_c;
 
@@ -25,6 +26,7 @@ struct TagInfo {
     bool ridden = false;
     float pos[3] = {};
     float eye[3] = {};  // the head joint's eye point
+    J3DModel* model = nullptr;
 };
 bool tagInfo(uint32_t clientId, TagInfo& out);
 
