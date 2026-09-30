@@ -30,10 +30,11 @@ namespace {
 
 using clock = std::chrono::steady_clock;
 
-constexpr auto kItemDuration = std::chrono::milliseconds(4000);
-// While two or more wait behind it, so a backlog clears without hiding other toasts for long.
-constexpr auto kBusyItemDuration = std::chrono::milliseconds(2500);
-constexpr auto kSummaryDuration = std::chrono::milliseconds(5000);
+constexpr auto kItemDuration = std::chrono::milliseconds(3500);
+constexpr auto kSummaryDuration = std::chrono::milliseconds(4500);
+// Toasts that waited together go out as one, a line each, so a burst costs one wait, not one each.
+constexpr auto kBatchDuration = std::chrono::milliseconds(4500);
+constexpr size_t kBatchLines = 3;
 // The overlay shows one toast at a time: ours is gone after its duration plus the fade.
 constexpr auto kToastFade = std::chrono::milliseconds(400);
 // The catch-up window closes this long after the last replay, within kWindowMin..kWindowMax.
@@ -243,6 +244,28 @@ std::vector<uint8_t> recentItems(const std::vector<ItemCount>& items, int max) {
         }
     }
     return out;
+}
+
+// One line of a batch: the first item's icon and the entry's text.
+std::string lineRml(const Entry& e) {
+    return fmt::format("<row class=\"item-line\">{}<span class=\"text\">{}</span></row>",
+        iconRml(e.items.front().itemNo), entryText(e, true));
+}
+
+std::string batchRml(const std::vector<Entry>& batch) {
+    std::string rml;
+    int more = 0;
+    for (size_t i = 0; i < batch.size(); i++) {
+        if (i < kBatchLines) {
+            rml += lineRml(batch[i]);
+        } else {
+            more += batch[i].total;
+        }
+    }
+    if (more > 0) {
+        rml += fmt::format("<row><span class=\"text more\">and {} more</span></row>", more);
+    }
+    return rml;
 }
 
 std::string entryRml(const Entry& e) {
@@ -638,23 +661,32 @@ void tick() {
         }
     }
 
-    Entry e = std::move(sPending.front());
-    sPending.pop_front();
-    const bool single = e.kind == Kind::Item || e.kind == Kind::Own;
-    const auto duration = !single               ? kSummaryDuration
-                          : sPending.size() >= 2 ? kBusyItemDuration
-                                                 : kItemDuration;
-    const char* title = e.kind == Kind::Summary ? "Items synced" : single ? "Item" : "Items";
-    ui::toastRml(fmt::format("<toast-title>{}</toast-title>", title), entryRml(e), ui::kToastItem,
+    std::vector<Entry> batch;
+    while (!sPending.empty()) {
+        batch.push_back(std::move(sPending.front()));
+        sPending.pop_front();
+    }
+    const Entry& first = batch.front();
+    const bool single = batch.size() == 1 && (first.kind == Kind::Item || first.kind == Kind::Own);
+    const auto duration = batch.size() > 1 ? kBatchDuration
+                          : single         ? kItemDuration
+                                           : kSummaryDuration;
+    const char* title = batch.size() == 1 && first.kind == Kind::Summary ? "Items synced"
+                        : single                                          ? "Item"
+                                                                          : "Items";
+    ui::toastRml(fmt::format("<toast-title>{}</toast-title>", title),
+        batch.size() == 1 ? entryRml(first) : batchRml(batch), ui::kToastItem,
         static_cast<uint32_t>(duration.count()));
     sOverlayBusyUntil = now + duration + kToastFade;
-    if (Record* r = findRecord(e.seq)) {
-        r->pushed = true;
-        r->holdReason.clear();
+    for (const Entry& e : batch) {
+        if (Record* r = findRecord(e.seq)) {
+            r->pushed = true;
+            r->holdReason.clear();
+        }
+        TwiliLog.info("[toast] {} #{} \"{}\"{}",
+            e.kind == Kind::Summary ? "summary" : e.kind == Kind::Merged ? "merged" : "shown", e.seq,
+            entryText(e, false), batch.size() > 1 ? fmt::format(" (batch of {})", batch.size()) : "");
     }
-    TwiliLog.info("[toast] {} #{} \"{}\"",
-        e.kind == Kind::Summary ? "summary" : e.kind == Kind::Merged ? "merged" : "shown", e.seq,
-        entryText(e, false));
 }
 
 void resetSession() {
