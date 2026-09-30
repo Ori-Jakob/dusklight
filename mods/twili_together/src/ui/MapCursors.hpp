@@ -62,6 +62,7 @@ struct Drawn {
     Vec2 dir;     // unit facing on screen
     Vec2 tip;
     f32 height = 0.0f;  // tip-to-base, J2D units
+    f32 outlineW = 0.0f;
     u8 fill[4] = {};
     u8 outline[4] = {};
     bool pinned = false;    // outside the map area, drawn at its edge pointing towards it
@@ -74,6 +75,7 @@ struct HorseIcon {
     uint32_t clientId = 0;
     Vec2 anchor;
     f32 size = 0.0f;  // outer radius, J2D units
+    f32 outlineW = 0.0f;
     u8 fill[4] = {};
     u8 outline[4] = {};
     bool ridden = false;
@@ -91,6 +93,8 @@ struct Frame {
     uint32_t tick = 0;  // g_Counter.mCounter0 when drawn
     Gate gate = Gate::Drawn;
     MinimapXform xform;  // minimap only
+    // Minimap: the rect came from the picture's own draw, not the host formula
+    bool rectCaptured = false;
     MapPose local;
     Vec2 localAnchor;
     Vec2 localDir;
@@ -106,8 +110,11 @@ struct Frame {
     bool linkIconValid = false;
 };
 
-// After the minimap picture, with its rect and alpha.
-void drawMinimap(dMap_c& map, f32 x, f32 y, f32 w, f32 h, u8 alpha);
+// After the minimap picture, with the rect it was drawn in and its alpha.
+void drawMinimap(dMap_c& map, f32 x, f32 y, f32 w, f32 h, u8 alpha, bool captured);
+// Arrow height and outline width for a map drawn at `scale` J2D units per texel.
+f32 arrowHeight(f32 cursorSize, f32 scale);
+f32 outlineWidth(f32 scale);
 
 // Pause dungeon map: `cnv` maps onto the pane; called per blended floor with its weight.
 using PauseCnvFn = void (*)(const void* ctx, f32 x, f32 z, f32* px, f32* py);

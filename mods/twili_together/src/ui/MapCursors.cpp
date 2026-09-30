@@ -36,12 +36,14 @@ constexpr f32 kBase = 240.0f / 640.0f;
 constexpr f32 kHalfWidth = 200.0f / 640.0f;
 // Remote arrows a little smaller than ours, so the local one stays the dominant marker.
 constexpr f32 kRemoteScale = 0.85f;
-constexpr f32 kMinArrow = 7.0f;
+// At one J2D unit per texel; it follows the map's scale within these bounds.
 constexpr f32 kOutline = 1.25f;
+constexpr f32 kMinOutlineScale = 0.6f;
+constexpr f32 kMaxOutlineScale = 1.6f;
 constexpr f32 kPinScale = 0.75f;
 constexpr f32 kOtherFloorAlpha = 0.55f;
-// Pause dungeon map: the Link icon is 40 units at scale 1.
-constexpr f32 kPauseArrow = 22.0f;
+// Pause maps: the arrow against the Link icon's drawn size (22 of its 40 units).
+constexpr f32 kPauseArrowRatio = 22.0f / 40.0f;
 // Palette group of the local cursor.
 constexpr int kLocalCursorGroup = 0x1E;
 // A remote Epona's horseshoe: outer radius against the remote arrow, inner, the gap at the top.
@@ -216,9 +218,9 @@ void emit(Vec2 p, const u8 c[4]) {
 }
 
 // A `fill` triangle in an `outline` ring it never overlaps, so translucent stays exact.
-void drawOutlinedTri(const Vec2 v[3], const u8 fill[4], const u8 outline[4]) {
+void drawOutlinedTri(const Vec2 v[3], f32 width, const u8 fill[4], const u8 outline[4]) {
     Vec2 o[3];
-    if (!expandTri(v, kOutline, o)) {
+    if (!expandTri(v, width, o)) {
         return;
     }
     GXBegin(GX_TRIANGLES, GX_VTXFMT0, 21);
@@ -248,7 +250,7 @@ void drawPlainTri(const Vec2 v[3], const u8 c[4]) {
 void drawMarker(const Drawn& d) {
     Vec2 v[3];
     arrowVerts(d.anchor, d.dir, d.height, v);
-    drawOutlinedTri(v, d.fill, d.outline);
+    drawOutlinedTri(v, d.outlineW, d.fill, d.outline);
     if (d.floorDelta != 0) {
         // A small chevron beside the arrow: up for a floor above ours, down for one below.
         const f32 s = std::max(d.height * 0.5f, 4.0f);
@@ -256,7 +258,7 @@ void drawMarker(const Drawn& d) {
         const f32 dy = d.floorDelta > 0 ? -1.0f : 1.0f;
         const Vec2 chevron[3] = {c + Vec2{0.0f, dy * s * 0.5f},
             c + Vec2{-s * 0.5f, -dy * s * 0.35f}, c + Vec2{s * 0.5f, -dy * s * 0.35f}};
-        drawOutlinedTri(chevron, d.fill, d.outline);
+        drawOutlinedTri(chevron, d.outlineW, d.fill, d.outline);
     }
 }
 
@@ -284,8 +286,8 @@ void drawLocalOnTop(Frame& f) {
     const f32 localRadius = kTip * f.localHeight;
     bool overlapped = false;
     for (const Drawn& d : f.cursors) {
-        overlapped = overlapped ||
-                     circlesOverlap(f.localAnchor, localRadius, d.anchor, kTip * d.height + kOutline);
+        overlapped = overlapped || circlesOverlap(f.localAnchor, localRadius, d.anchor,
+                                       kTip * d.height + d.outlineW);
     }
     if (!overlapped) {
         return;
@@ -301,7 +303,7 @@ void drawLocalOnTop(Frame& f) {
 }
 
 // A horseshoe in `fill` over a ring `outline` wider on every side (the fill is opaque enough).
-void drawHorseshoe(Vec2 c, f32 outer, const u8 fill[4], const u8 outline[4]) {
+void drawHorseshoe(Vec2 c, f32 outer, f32 width, const u8 fill[4], const u8 outline[4]) {
     const auto ring = [&](f32 ro, f32 ri, f32 gapDeg, const u8 col[4]) {
         const f32 start = (90.0f + gapDeg * 0.5f) * 3.14159265f / 180.0f;
         const f32 sweep = (360.0f - gapDeg) * 3.14159265f / 180.0f;
@@ -323,7 +325,7 @@ void drawHorseshoe(Vec2 c, f32 outer, const u8 fill[4], const u8 outline[4]) {
         GXEnd();
     };
     const f32 inner = outer * kHorseInner;
-    ring(outer + kOutline, std::max(inner - kOutline, 0.0f), kHorseGapDeg - 16.0f, outline);
+    ring(outer + width, std::max(inner - width, 0.0f), kHorseGapDeg - 16.0f, outline);
     ring(outer, inner, kHorseGapDeg, fill);
 }
 
@@ -336,8 +338,7 @@ void gatherHorses(Frame& f, const MinimapXform& t, u8 alpha) {
     const char* stage = dComIfGp_getStartStageName();
     const int8_t layer = static_cast<int8_t>(dComIfG_play_c::getLayerNo(0));
     const f32 unitsPerTexel = t.rectW / t.texW;
-    const f32 size =
-        std::max(t.cursorSize * unitsPerTexel * kRemoteScale, kMinArrow) * kHorseSize;
+    const f32 size = arrowHeight(t.cursorSize, unitsPerTexel) * kHorseSize;
     for (const auto& [id, c] : Session::instance().clients()) {
         horse::TagInfo info;
         if (c.self || !horse::tagInfo(id, info)) {
@@ -364,6 +365,7 @@ void gatherHorses(Frame& f, const MinimapXform& t, u8 alpha) {
             continue;  // no pin: at the edge it would pass for its rider
         }
         h.size = size;
+        h.outlineW = outlineWidth(unitsPerTexel);
         h.ridden = info.ridden;
         h.ownerAway = !ownerHere;
         Source s;
@@ -396,6 +398,16 @@ void beginFrame(Frame& f, Surface s) {
 }
 
 std::vector<Source> sSources;
+
+// As drawIcon sizes the Link icon: its table size, scaled with the menu's zoom.
+void pauseArrowSize(dMenuMapCommon_c& common, f32& height, f32& outline) {
+    f32 scale = 1.0f;
+    if (J2DPicture* link = common.mPictures[ICON_LINK_e]) {
+        scale = link->getScaleX();
+    }
+    height = common.getIconSizeX(ICON_LINK_e) * scale * kPauseArrowRatio * kRemoteScale;
+    outline = outlineWidth(scale);
+}
 
 // What collectPauseDmap gathered this tick, drawn by drawPauseDmap.
 struct PauseEntry {
@@ -460,10 +472,19 @@ Vec2 facingMinimap(const MinimapXform& t, s16 angle) {
     return normalized({cM_ssin(angle) * sx, cM_scos(angle) * sy});
 }
 
-void drawMinimap(dMap_c& map, f32 x, f32 y, f32 w, f32 h, u8 alpha) {
+f32 arrowHeight(f32 cursorSize, f32 scale) {
+    return cursorSize * scale * kRemoteScale;
+}
+
+f32 outlineWidth(f32 scale) {
+    return kOutline * std::clamp(scale, kMinOutlineScale, kMaxOutlineScale);
+}
+
+void drawMinimap(dMap_c& map, f32 x, f32 y, f32 w, f32 h, u8 alpha, bool captured) {
     Frame& f = sFrames[size_t(Surface::Minimap)];
     beginFrame(f, Surface::Minimap);
     f.mapAlpha = alpha;
+    f.rectCaptured = captured;
     MinimapXform& t = f.xform;
     // What entry() stored for this frame's offscreen pass, which ran before 2DOpa.
     t.centerX = map.mPosX;
@@ -505,7 +526,8 @@ void drawMinimap(dMap_c& map, f32 x, f32 y, f32 w, f32 h, u8 alpha) {
     stage_stag_info_class* stag = dComIfGp_getStageStagInfo();
     const bool floors =
         map.getStayType() == 1 && stag != nullptr && dStage_stagInfo_GetGapLevel(stag) > 0;
-    const f32 height = std::max(t.cursorSize * unitsPerTexel * kRemoteScale, kMinArrow);
+    const f32 height = arrowHeight(t.cursorSize, unitsPerTexel);
+    const f32 outline = outlineWidth(unitsPerTexel);
     for (const Source& s : sSources) {
         Drawn d;
         d.clientId = s.clientId;
@@ -518,9 +540,10 @@ void drawMinimap(dMap_c& map, f32 x, f32 y, f32 w, f32 h, u8 alpha) {
         d.anchor = projectMinimap(t, s.pose.x, s.pose.z);
         d.dir = facingMinimap(t, s.pose.angle);
         d.height = height;
+        d.outlineW = outline;
         // Never culled: a teammate in another room stays findable at the map's edge.
         const f32 pinnedHeight = height * kPinScale;
-        if (pinToRect(x, y, w, h, kTip * pinnedHeight + kOutline, d.anchor, d.dir)) {
+        if (pinToRect(x, y, w, h, kTip * pinnedHeight + outline, d.anchor, d.dir)) {
             d.pinned = true;
             d.height = pinnedHeight;
         }
@@ -536,7 +559,7 @@ void drawMinimap(dMap_c& map, f32 x, f32 y, f32 w, f32 h, u8 alpha) {
     GXPushDebugGroup("twili map cursors");
     beginPrims();
     for (const HorseIcon& h : f.horses) {
-        drawHorseshoe(h.anchor, h.size, h.fill, h.outline);
+        drawHorseshoe(h.anchor, h.size, h.outlineW, h.fill, h.outline);
     }
     for (const Drawn& d : f.cursors) {
         drawMarker(d);
@@ -615,12 +638,9 @@ void drawPauseDmap(dMenuMapCommon_c& common, f32 originX, f32 originY, f32 alpha
         }
     }
 
-    // Sized like the Link icon, which follows the menu's zoom.
-    f32 iconScale = 1.0f;
-    if (J2DPicture* link = common.mPictures[ICON_LINK_e]) {
-        iconScale = link->getScaleX();
-    }
-    const f32 height = std::max(kPauseArrow * iconScale * kRemoteScale, kMinArrow);
+    f32 height = 0.0f;
+    f32 outline = 0.0f;
+    pauseArrowSize(common, height, outline);
     const bool mirror = mirrorMode();
     for (const PauseEntry& e : sPause.entries) {
         Drawn d = e.drawn;
@@ -630,6 +650,7 @@ void drawPauseDmap(dMenuMapCommon_c& common, f32 originX, f32 originY, f32 alpha
             d.anchor.x = common.getMirrorCenterPosX(d.anchor.x, 0.0f);
         }
         d.height = height;
+        d.outlineW = outline;
         d.tip = d.anchor + d.dir * (kTip * d.height);
         Source s;
         s.r = e.drawn.fill[0];
@@ -723,11 +744,9 @@ void drawPauseFmap(dMenuMapCommon_c& common, f32 originX, f32 originY, f32 alpha
             f.linkIconValid = true;
         }
     }
-    f32 iconScale = 1.0f;
-    if (J2DPicture* link = common.mPictures[ICON_LINK_e]) {
-        iconScale = link->getScaleX();
-    }
-    const f32 height = std::max(kPauseArrow * iconScale * kRemoteScale, kMinArrow);
+    f32 height = 0.0f;
+    f32 outline = 0.0f;
+    pauseArrowSize(common, height, outline);
     const bool mirror = mirrorMode();
     for (const PauseEntry& e : sFmap.entries) {
         Drawn d = e.drawn;
@@ -738,6 +757,7 @@ void drawPauseFmap(dMenuMapCommon_c& common, f32 originX, f32 originY, f32 alpha
             d.dir.x = -d.dir.x;
         }
         d.height = height;
+        d.outlineW = outline;
         d.tip = d.anchor + d.dir * (kTip * d.height);
         Source s;
         s.r = e.drawn.fill[0];
