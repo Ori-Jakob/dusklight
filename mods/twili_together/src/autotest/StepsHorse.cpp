@@ -125,14 +125,24 @@ bool spawnHorse(StepContext& ctx) {
     return false;
 }
 
-// Our Link `dist` from `horse`'s left flank, facing her (acceptPlayerRide wants him off her front).
-void standBeside(daAlink_c* link, const fopAc_ac_c* horse, float dist) {
+// Our Link `dist` from `horse`'s left or right flank or her back, facing her (acceptPlayerRide
+// wants him off her front); getReinRideDirection picks the mount clip from there.
+void standBeside(daAlink_c* link, const fopAc_ac_c* horse, float dist,
+    const std::string& side = "left") {
     const s16 yaw = horse->shape_angle.y;
-    const cXyz pos(horse->current.pos.x + dist * cM_scos(yaw), horse->current.pos.y,
-        horse->current.pos.z - dist * cM_ssin(yaw));
+    cXyz dir(cM_scos(yaw), 0.0f, -cM_ssin(yaw));
+    s16 facing = static_cast<s16>(yaw - 0x4000);
+    if (side == "right") {
+        dir.set(-dir.x, 0.0f, -dir.z);
+        facing = static_cast<s16>(yaw + 0x4000);
+    } else if (side == "back") {
+        dir.set(-cM_ssin(yaw), 0.0f, -cM_scos(yaw));
+        facing = yaw;
+    }
+    const cXyz pos = horse->current.pos + dir * dist;
     link->current.pos = pos;
     link->old.pos = pos;
-    link->shape_angle.y = static_cast<s16>(yaw - 0x4000);
+    link->shape_angle.y = facing;
     link->current.angle.y = link->shape_angle.y;
     interp::requestPresentationSync();
 }
@@ -146,9 +156,10 @@ bool rideHorse(StepContext& ctx) {
         ctx.fail("rideHorse: no player or no horse");
         return false;
     }
+    const std::string side = ctx.step.value("side", std::string("left"));
     if (!ctx.begun) {
         if (ride && mode == "mount") {
-            standBeside(link, h, 110.0f);
+            standBeside(link, h, 110.0f, side);
             link->field_0x27f4 = h;
             link->procHorseRideInit();
         } else if (ride) {
@@ -157,7 +168,7 @@ bool rideHorse(StepContext& ctx) {
             link->initForceRideHorse();
             link->procHorseWaitInit();
         } else {
-            link->procHorseGetOffInit(0);
+            link->procHorseGetOffInit(side == "right" ? 1 : 0);
         }
         TwiliLog.info("[autotest] rideHorse {} {}: proc 0x{:X}", ride ? "on" : "off", mode,
             static_cast<int>(link->mProcID));
@@ -724,7 +735,101 @@ bool expectRiderBowTilt(StepContext& ctx) {
     return false;
 }
 
+// The first peer's dummy climbing onto (or off) its horse puppet, followed for `frames` ticks.
+struct ClimbProbe {
+    int lastTicks = -1;
+    bool haveHips = false;
+    cXyz lastHips = cXyz::Zero;
+    float maxStep = 0.0f;
+    bool seated = false;
+    float seatedY = 0.0f;   // the hips over the saddle when they first got there
+    float worstDip = 0.0f;  // the lowest they went after that, from seatedY
+    int inside = 0;         // ticks the hips were inside the horse's body
+    float deepest = 0.0f;
+    int samples = 0;
+    int riderTicks = 0;
+    float lastSeat = -1.0f;
+};
+ClimbProbe sClimb;
+
+bool measureRiderClimb(StepContext& ctx) {
+    if (!ctx.begun) {
+        sClimb = ClimbProbe{};
+    }
+    if (ctx.ticks == sClimb.lastTicks) {
+        return false;
+    }
+    sClimb.lastTicks = ctx.ticks;
+    const bool mount = ctx.step.value("phase", std::string("mount")) == "mount";
+    const float seatTol = ctx.step.value("seatTol", 60.0f);
+    for (const auto& [id, c] : Session::instance().clients()) {
+        fopAc_ac_c* dummy = c.self ? nullptr : Session::instance().dummyActorForClient(id);
+        daDummyHorse_c* horse = c.self ? nullptr : FindDummyHorse(id);
+        DummyHorseDebugInfo d;
+        if (dummy == nullptr || horse == nullptr || !GetDummyHorseDebugInfo(horse, d) || !d.shown) {
+            continue;
+        }
+        const cXyz hips = jointPos(static_cast<daAlink_c*>(dummy)->mpLinkModel, 0);
+        const cXyz rel = hips - cXyz(d.saddlePos[0], d.saddlePos[1], d.saddlePos[2]);
+        // In the horse's frame: x toward her left flank, z toward her head
+        const s16 yaw = horse->shape_angle.y;
+        const float x = rel.x * cM_scos(yaw) - rel.z * cM_ssin(yaw);
+        const float z = rel.x * cM_ssin(yaw) + rel.z * cM_scos(yaw);
+        if (sClimb.haveHips) {
+            sClimb.maxStep = std::max(sClimb.maxStep, hips.abs(sClimb.lastHips));
+        }
+        sClimb.haveHips = true;
+        sClimb.lastHips = hips;
+        if (std::fabs(x) < 25.0f && rel.y < -50.0f && std::fabs(z) < 80.0f) {
+            sClimb.inside++;
+            sClimb.deepest = std::min(sClimb.deepest, rel.y);
+        }
+        if (!sClimb.seated && rel.y > -seatTol && std::fabs(x) < 40.0f) {
+            sClimb.seated = true;
+            sClimb.seatedY = rel.y;
+        } else if (sClimb.seated) {
+            sClimb.worstDip = std::min(sClimb.worstDip, rel.y - sClimb.seatedY);
+        }
+        if (c.horse.rider.active) {
+            sClimb.riderTicks++;
+        }
+        sClimb.lastSeat = rel.abs();
+        sClimb.samples++;
+        break;
+    }
+    if (ctx.ticks < ctx.step.value("frames", 120)) {
+        return false;
+    }
+    TwiliLog.info("[autotest] rider climb ({}): samples {} rider {} maxStep {:.1f} seated {} "
+                  "dip {:.1f} inside {} (deepest {:.1f}) seat {:.1f}",
+        mount ? "mount" : "dismount", sClimb.samples, sClimb.riderTicks, sClimb.maxStep,
+        sClimb.seated, sClimb.worstDip, sClimb.inside, sClimb.deepest, sClimb.lastSeat);
+    std::string why;
+    if (sClimb.samples == 0 || sClimb.riderTicks == 0) {
+        why = fmt::format("{} samples, {} with a rider", sClimb.samples, sClimb.riderTicks);
+    } else if (sClimb.maxStep > ctx.step.value("maxStep", 45.0f)) {
+        why = fmt::format("the hips jumped {:.1f} in one tick", sClimb.maxStep);
+    } else if (sClimb.inside > 0) {
+        why = fmt::format("the hips were inside the horse on {} ticks, {:.0f} under the saddle",
+            sClimb.inside, -sClimb.deepest);
+    } else if (mount && !sClimb.seated) {
+        why = "the hips never reached the saddle";
+    } else if (mount && sClimb.worstDip < -ctx.step.value("maxDip", 40.0f)) {
+        why = fmt::format("the hips sank {:.1f} after reaching the saddle", -sClimb.worstDip);
+    } else if (mount && sClimb.lastSeat > ctx.step.value("maxSeatDist", 60.0f)) {
+        why = fmt::format("the hips ended {:.1f} from the saddle", sClimb.lastSeat);
+    }
+    if (!why.empty()) {
+        ctx.fail("measureRiderClimb: " + why);
+        return false;
+    }
+    return true;
+}
+
 std::optional<bool> horseSteps(const std::string& op, StepContext& ctx) {
+    if (op == "measureRiderClimb") {
+        return measureRiderClimb(ctx);
+    }
     if (op == "spawnHoZelda") {
         return spawnHoZelda(ctx);
     }

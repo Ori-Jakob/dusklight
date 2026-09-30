@@ -162,6 +162,15 @@ Motion (`StepsMotion.cpp`):
 | `dumpDummies` | | logs every remote client's pose and dummy state |
 | `teleportSelf` | `dx`, `dy`, `dz` | moves our player at once |
 | `expectDummyTeleport` | `minDist`, `maxPreStep`, `timeoutSec` | the first peer's dummy jumps `minDist` within one frame, without a slide before |
+| `measureBodyHeight` | `frames` (150), `settleFrames` (20), `self`, `jerk` (5), `maxJerkRatio` (0.05), `minTravel` (60) | the height of the first peer's dummy's body matrix (or our player's) per tick: fails when its climb rate changes by more than `jerk` on too many ticks |
+| `findSlope` | `minDeg` (12), `maxDeg` (30), `radius` (1200), `step` (60) | puts our Link on the nearest steady slope around it, standing across it |
+| `expectFeetOnGround` | `self`, `maxSpread` (4), `minBend` (0), `contact` (true), `frames` (30), `timeoutSec` | the feet (paws) of the first peer's dummy (or ours) stand at the same height over our ground, the legs bent at least `minBend` degrees, and the dummy's leg adjustment on |
+| `expectDummyAirborne` | `timeoutSec` (5) | the first peer's dummy has its feet off the ground (its sender's are) |
+
+Written for the steady body height and the leg adjustment of puppets, **not run yet** (the machine
+was in use): `puppet-ground-steady`, `puppet-feet-slope` and `puppet-feet-slope-wolf`
+(`scenarios/motion.js`), and the rider cut and ground blend checks new in `pose-selftest`. The
+`jerk`, `maxSpread` and `minBend` values are first guesses to set from the first run's logs.
 
 World sync (`StepsWorld.cpp`):
 
@@ -317,7 +326,7 @@ Epona (`StepsHorse.cpp`):
 | op | fields | does |
 | --- | --- | --- |
 | `spawnHorse` | `dist` (250), `side`, `timeoutSec` | our Epona shown in front of our Link (created when the stage has none) |
-| `rideHorse` | `ride` (true), `mode` (`force`, `mount`), `timeoutSec` | on (forced or the real mount) or off our horse |
+| `rideHorse` | `ride` (true), `mode` (`force`, `mount`), `side` (`left`, `right`, `back` for the mount; `left`, `right` to get off), `timeoutSec` | on (forced or the real mount) or off our horse |
 | `expectLocalHorse` | `present` (true), `ridden`, `timeoutSec` | our horse as shown and ridden |
 | `setHorseHidden` | `hidden` (true) | our horse's call wait on or off |
 | `expectRemoteHorse` | `count`, `name`, `ridden`, `parked`, `maxDist`, `maxSeatDist`, `zelda`, `maxZeldaDist` (150), `card`, `tagLine2`, `onScreen`, `tint`, `vanilla`, `hueGain`, `frames`, `timeoutSec` | peers' puppets as the fields say, held for `frames` ticks |
@@ -328,6 +337,10 @@ Epona (`StepsHorse.cpp`):
 | `expectNotRiding` | `frames` (30) | our Link rides nothing |
 | `clearEnemies` | `radius` (8000) | deletes the enemies near our Link |
 | `horseCamera` | `target` (`remote`, `own`, `both`, `dummy`), `back`, `up`, `side`, `height`, `hold` / `release` | the camera behind our Link looking at the horse (or the peer's dummy); `hold` keeps it (CameraService operator) |
+| `measureRiderClimb` | `phase` (`mount`, `dismount`), `frames` (120), `maxStep` (45), `seatTol` (60), `maxDip` (40), `maxSeatDist` (60) | the hips of the first peer's dummy against its horse puppet for `frames` ticks: never inside her body, no jump over `maxStep` in a tick; for a mount they reach the saddle and do not sink more than `maxDip` after |
+
+Written for smooth mounts and dismounts on a horse puppet, **not run yet** (the machine was in use):
+`horse-mount-smooth` (`scenarios/horse.js`).
 
 Teleport (`StepsTeleport.cpp`):
 
