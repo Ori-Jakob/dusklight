@@ -39,6 +39,8 @@ enum class Var : uint8_t {
     PlayersWidgetY,
     // Percent, of the widget's background and border.
     PlayersWidgetOpacity,
+    // Percent, the widget's zoom.
+    PlayersWidgetScale,
 #if TWILI_ENABLE_AUTOTEST
     AutotestScript,
 #endif

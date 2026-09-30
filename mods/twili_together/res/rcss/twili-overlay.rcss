@@ -44,7 +44,8 @@ toast.twili-item icon.item-fallback {
 }
 
 /* Players widget (src/ui/PlayersWidget.cpp), a UiService overlay panel. Its own frame carries the
-   opacity setting, so the host panel's frame is off. */
+   opacity setting, so the host panel's frame is off. Sizes are in em of the 14dp font size (times
+   the size setting) that the widget sets on .twili-pw, along with its border width. */
 
 mod-panel[mod-id="dev.n0ted.twili_together"] {
     padding: 0;
@@ -55,18 +56,17 @@ mod-panel[mod-id="dev.n0ted.twili_together"] {
 
 .twili-pw {
     display: block;
-    max-width: 420dp;
-    padding: 4dp 6dp 5dp 8dp;
-    border-width: 1dp;
-    border-radius: var(--radius-control);
+    max-width: 30em;
+    padding: 0.2857em 0.4286em 0.3571em 0.5714em;
+    border-radius: 0.5em;
 }
 
 .twili-pw-head {
     display: flex;
     align-items: center;
-    padding-bottom: 2dp;
+    padding-bottom: 0.1667em;
     font-family: var(--font-family-heading);
-    font-size: var(--font-size-2xs);
+    font-size: 0.8572em;
     font-weight: bold;
     text-transform: uppercase;
     color: var(--color-accent);
@@ -74,13 +74,13 @@ mod-panel[mod-id="dev.n0ted.twili_together"] {
 
 .twili-pw-title {
     flex: 1 1 auto;
-    margin-right: 6dp;
+    margin-right: 0.5em;
 }
 
 .twili-pw-grip {
     display: none;
     font-family: var(--font-family-icons);
-    font-size: var(--font-size-md);
+    font-size: 1.3334em;
     font-weight: normal;
     line-height: 1;
     color: var(--color-text);
@@ -90,50 +90,54 @@ mod-panels[interactive] .twili-pw-grip {
     display: block;
 }
 
-/* Positioned: a row is its tooltip's box, which wraps to the row's width. */
+/* Inline boxes, not flex: RmlUi sizes the panel to flex rows too narrow. The row holds the
+   teleport button in its right padding and is the tooltip's box, so the tooltip wraps to it. */
 .twili-pw-row {
     position: relative;
-    display: flex;
-    align-items: center;
-    height: 20dp;
+    display: block;
+    height: 1.4286em;
+    padding-right: 1.4286em;
+    line-height: 1.4286em;
+    white-space: nowrap;
+}
+
+.twili-pw-row > span {
+    display: inline-block;
+    vertical-align: middle;
 }
 
 .twili-pw-dot {
-    flex: 0 0 8dp;
-    width: 8dp;
-    height: 8dp;
-    margin-right: 6dp;
-    border-radius: 4dp;
+    width: 0.5714em;
+    height: 0.5714em;
+    margin-right: 0.4286em;
+    border-radius: 0.2857em;
 }
 
 .twili-pw-name {
-    flex: 0 0 auto;
-    min-width: 56dp;
-    max-width: 150dp;
-    margin-right: 10dp;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    min-width: 4em;
+    margin-right: 0.7143em;
     font-weight: bold;
     color: var(--color-white);
 }
 
 .twili-pw-area {
-    flex: 1 1 auto;
-    max-width: 200dp;
-    margin-right: 6dp;
+    max-width: 14.2857em;
+    margin-right: 0.4286em;
     overflow: hidden;
     text-overflow: ellipsis;
     color: rgba(var(--color-text-rgb), 80%);
 }
 
-.twili-pw-tp {
-    flex: 0 0 18dp;
-    width: 18dp;
-    height: 18dp;
-    border-radius: var(--radius-small);
+.twili-pw-row > .twili-pw-tp {
+    position: absolute;
+    top: 0.0625em;
+    right: 0;
+    width: 1.125em;
+    height: 1.125em;
+    border-radius: 0.25em;
     font-family: var(--font-family-icons);
-    font-size: var(--font-size-md);
-    line-height: 18dp;
+    font-size: 1.1429em;
+    line-height: 1.125em;
     text-align: center;
     color: var(--color-accent);
 }
@@ -146,25 +150,26 @@ mod-panels[interactive] .twili-pw-tp:hover {
     background-color: rgba(var(--color-interactive-rgb), 30%);
 }
 
-.twili-pw-tip {
+.twili-pw-row > .twili-pw-tip {
     display: none;
     position: absolute;
+    pointer-events: none;
     z-index: 10;
-    top: 20dp;
+    top: 1.5385em;
     right: 0;
-    padding: 4dp 8dp;
+    padding: 0.3077em 0.6154em;
     border-width: 1dp;
     border-color: var(--color-border);
-    border-radius: var(--radius-small);
+    border-radius: 0.3077em;
     background-color: rgba(var(--color-surface-rgb), 96%);
     font-family: var(--font-family-body);
-    font-size: var(--font-size-xs);
+    font-size: 0.9286em;
     line-height: 1.2;
     text-align: left;
     color: var(--color-text);
     white-space: normal;
 }
 
-mod-panels[interactive] .twili-pw-tp:hover .twili-pw-tip {
+mod-panels[interactive] .twili-pw-tp:hover + .twili-pw-tip {
     display: block;
 }

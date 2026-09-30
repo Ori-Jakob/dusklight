@@ -91,6 +91,7 @@ Personal settings, on the Connection tab:
 | Story Prompts | on | ask whether to follow when a teammate's story event moves them |
 | Players Widget | on | the players list on screen (below) |
 | Players Widget Opacity | 80% | how solid its background and border are, 0% to 100% |
+| Players Widget Size | 100% | zooms the whole widget, 50% to 200% |
 | Server URL | empty | see Connecting |
 | Reconnect Automatically | on | |
 | Always Sync Unverified Randomizer Games | off | (Room tab) skip the Sync Unverified Match question |
@@ -165,12 +166,12 @@ collects count for the whole team.
 
 ## The players widget
 
-A small list on screen of your teammates, or everyone in the room without a team: their colour,
-name, area and a teleport button (same rules and tooltip as the Players tab). It stays put and
-ignores the controller while you play; with the menu open, drag it by its title to move it (the
-spot is saved) or click a teleport button. It hides while you are not connected, have nobody to
-list, or watch a cutscene or the game's own menus. It needs a Dusklight with UiService 2.4 (overlay
-panels); older builds just go without it.
+A small list on screen of your teammates, or everyone in the room without a team: their colour, name
+(the first 12 characters of a longer one), area and a teleport button (same rules and tooltip as the
+Players tab). It stays put and ignores the controller while you play; with the menu open, drag it by
+its title to move it (the spot is saved) or click a teleport button. It hides while you are not
+connected, have nobody to list, or watch a cutscene or the game's own menus. It needs a Dusklight
+with UiService 2.4 (overlay panels); older builds just go without it.
 
 ## Known limitations
 

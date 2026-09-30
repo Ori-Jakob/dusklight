@@ -24,6 +24,7 @@ void shutdown();
 
 struct Row {
     uint32_t clientId = 0;
+    // As shown: at most 12 characters and "...".
     std::string name;
     std::string area;
     teleport::Offer offer = teleport::Offer::None;
@@ -40,6 +41,11 @@ struct Probe {
     int x = 0;
     int y = 0;
     int opacity = 0;
+    int scale = 0;
+    // Drags so far and where the last one left the panel, as on_moved reports it.
+    uint32_t moves = 0;
+    float movedX = 0.0f;
+    float movedY = 0.0f;
     std::string header;
     std::vector<Row> rows;
 };

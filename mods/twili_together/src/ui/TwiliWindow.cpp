@@ -260,6 +260,17 @@ ModResult buildConnectionTab(ModContext*, UiWindowHandle, UiElementHandle left, 
     opacity.step = 5;
     opacity.suffix = "%";
     addControl(left, opacity);
+    UiControlDesc scale = UI_CONTROL_DESC_INIT;
+    scale.kind = UI_CONTROL_NUMBER;
+    scale.label = "Players Widget Size";
+    scale.help_rml = "<p>Zooms the whole players widget: text, rows, buttons and frame.</p>";
+    scale.binding = UI_BINDING_CONFIG_VAR;
+    scale.config_var = config::handle(Var::PlayersWidgetScale);
+    scale.min = 50;
+    scale.max = 200;
+    scale.step = 10;
+    scale.suffix = "%";
+    addControl(left, scale);
 
     svc_ui->pane_add_section(mod_ctx, left, "Server");
     addString(left, Var::ServerUrl, "Server URL",

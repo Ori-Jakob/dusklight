@@ -39,6 +39,9 @@ using config::Var;
 
 constexpr const char* kTeleportIdPrefix = "twili-tp-";
 constexpr auto kCreateRetry = std::chrono::seconds(1);
+constexpr size_t kMaxNameChars = 12;
+// The rcss sizes everything in em of this font size, which the scale setting zooms.
+constexpr float kBaseFontDp = 14.0f;
 
 UiElementHandle s_panel = 0;
 Clock::time_point s_retryAt{};
@@ -60,6 +63,17 @@ bool menuOpen() {
     return svc_ui->is_any_document_visible(mod_ctx, &visible) == MOD_OK && visible;
 }
 
+// Longer names keep their first kMaxNameChars characters (whole UTF-8 sequences) and "...".
+std::string shortName(const std::string& name) {
+    size_t chars = 0;
+    for (size_t i = 0; i < name.size(); ++i) {
+        if ((static_cast<unsigned char>(name[i]) & 0xC0) != 0x80 && chars++ == kMaxNameChars) {
+            return name.substr(0, i) + "...";
+        }
+    }
+    return name;
+}
+
 std::vector<Row> buildRows() {
     std::vector<Row> rows;
     const Session& session = Session::instance();
@@ -70,7 +84,7 @@ std::vector<Row> buildRows() {
         }
         Row row;
         row.clientId = id;
-        row.name = teleport::clientName(id);
+        row.name = shortName(teleport::clientName(id));
         row.area = areaText(c);
         row.offer = teleport::offer(id);
         if (row.offer != teleport::Offer::None) {
@@ -86,14 +100,16 @@ std::string colorCss(const Client& c) {
 }
 
 // The frame is ours, so its opacity setting leaves the text and buttons opaque.
-std::string buildRml(const std::string& header, const std::vector<Row>& rows, int opacity) {
+std::string buildRml(
+    const std::string& header, const std::vector<Row>& rows, int opacity, int scale) {
     const Session& session = Session::instance();
+    const float zoom = static_cast<float>(scale) / 100.0f;
     std::string rml = fmt::format(
-        "<div class=\"twili-pw\" style=\"background-color: rgba(21, 22, 16, {0}%); "
-        "border-color: rgba(146, 135, 91, {0}%);\"><div class=\"twili-pw-head\" "
-        "drag-handle=\"\"><span class=\"twili-pw-title\">{1}</span><span "
-        "class=\"twili-pw-grip\">&#xe945;</span></div>",
-        std::clamp(opacity, 0, 100), escapeRml(header));
+        "<div class=\"twili-pw\" style=\"font-size: {2:.1f}dp; border-width: {3:.2f}dp; "
+        "background-color: rgba(21, 22, 16, {0}%); border-color: rgba(146, 135, 91, {0}%);\">"
+        "<div class=\"twili-pw-head\" drag-handle=\"\"><span class=\"twili-pw-title\">{1}"
+        "</span><span class=\"twili-pw-grip\">&#xe945;</span></div>",
+        opacity, escapeRml(header), kBaseFontDp * zoom, std::max(1.0f, zoom));
     for (const Row& row : rows) {
         const Client& c = session.clients().at(row.clientId);
         rml += fmt::format("<div class=\"twili-pw-row\"><span class=\"twili-pw-dot\" "
@@ -102,8 +118,8 @@ std::string buildRml(const std::string& header, const std::vector<Row>& rows, in
                            "class=\"twili-pw-area\">{}</span>",
             colorCss(c), escapeRml(row.name), escapeRml(row.area));
         if (row.offer != teleport::Offer::None) {
-            rml += fmt::format("<span id=\"{}{}\" class=\"twili-pw-tp{}\">&#xe5c8;<span "
-                               "class=\"twili-pw-tip\">{}</span></span>",
+            rml += fmt::format("<span id=\"{}{}\" class=\"twili-pw-tp{}\">&#xe5c8;</span><span "
+                               "class=\"twili-pw-tip\">{}</span>",
                 kTeleportIdPrefix, row.clientId,
                 row.offer == teleport::Offer::Blocked ? " blocked" : "", escapeRml(row.tooltip));
         }
@@ -157,6 +173,9 @@ void onClick(ModContext*, UiElementHandle, const char* elementId, void*) {
 }
 
 void onMoved(ModContext*, UiElementHandle, float x, float y, void*) {
+    ++s_probe.moves;
+    s_probe.movedX = x;
+    s_probe.movedY = y;
     s_placedX = perMille(x);
     s_placedY = perMille(y);
     config::setInt(Var::PlayersWidgetX, s_placedX);
@@ -225,7 +244,9 @@ void tick() {
         static_cast<int>(std::clamp<int64_t>(config::getInt(Var::PlayersWidgetY), 0, 1000));
     const int opacity =
         static_cast<int>(std::clamp<int64_t>(config::getInt(Var::PlayersWidgetOpacity), 0, 100));
-    const std::string rml = buildRml(s_probe.header, s_probe.rows, opacity);
+    const int scale =
+        static_cast<int>(std::clamp<int64_t>(config::getInt(Var::PlayersWidgetScale), 50, 200));
+    const std::string rml = buildRml(s_probe.header, s_probe.rows, opacity, scale);
     if (s_panel == 0) {
         if (Clock::now() < s_retryAt || !createPanel(rml, x, y)) {
             s_probe.shown = false;
@@ -248,6 +269,7 @@ void tick() {
     s_probe.x = x;
     s_probe.y = y;
     s_probe.opacity = opacity;
+    s_probe.scale = scale;
 }
 
 void shutdown() {
