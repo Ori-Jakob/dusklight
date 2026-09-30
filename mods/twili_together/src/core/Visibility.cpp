@@ -26,12 +26,20 @@ bool isCutsceneEvent(bool eventRunning, uint8_t eventMode, uint16_t eventFlags) 
            (eventFlags & (kEventFlagDoor | kEventFlagTreasure)) == 0;
 }
 
+// Freestanding items, heart containers and gifts show their item in this event, like a chest.
+bool itemGetEventRunning() {
+    const dEvt_control_c* evt = dComIfGp_getEvent();
+    return evt != nullptr && evt->mEventId >= 0 &&
+           evt->mEventId == dComIfGp_getEventManager().getEventIdx("DEFAULT_GETITEM", 0xFF, -1);
+}
+
 bool localCutsceneRunning() {
     const bool running =
         s_cutsceneOverride >= 0 ?
             s_cutsceneOverride != 0 :
             isCutsceneEvent(dComIfGp_event_runCheck() != FALSE, dComIfGp_event_getMode(),
-                            dComIfGp_event_chkEventFlag(0xFFFF));
+                            dComIfGp_event_chkEventFlag(0xFFFF)) &&
+                !itemGetEventRunning();
     const auto now = std::chrono::steady_clock::now();
     if (running) {
         s_cutsceneReleaseAt = now + kCutsceneReleaseDelay;
