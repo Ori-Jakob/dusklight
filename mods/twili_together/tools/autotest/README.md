@@ -299,7 +299,7 @@ Life, PvP and enemies (`StepsPvp.cpp`, `StepsEnemy.cpp`):
 | `expectHitMarker` | `target`, `result` (`applied`, `blocked`), `text`, `damage`, `drawn`, `timeoutSec` (10) | the latest marker a DAMAGE_RESULT from `target` made (`drawn`: a frame drew markers) |
 | `expectLockOn` | `locked` (true), `stance`, `frames` (30), `timeoutSec` (5) | Z-targeting (hold L with an async `walk`, buttons 0x40) is locked on the first peer's dummy (`stance`: and our Link is in its enemy lock, battle stance with the shield allowed); `locked: false`: neither for `frames` |
 | `expectPvpToast` | `text`, `count` (1), `max`, `none`, `frames`, `timeoutSec` (10) | knockout toasts with that text ("A beat B", "A knocked out B") |
-| `chargeDummy` | `dist` (600), `charge` (true), `timeoutSec` (10) | our ridden Epona, `dist` in front of the first peer's dummy, gallops at it (spurred) until we send it a hit |
+| `chargeDummy` | `dist` (600), `charge` (true), `trace` (false), `timeoutSec` (10) | our ridden Epona, `dist` from the first peer's dummy on open ground (its front first, then either side), faces it with the camera behind her, then gallops straight at it (spurred) until we send it a hit; `trace` logs each tick |
 | `spawnEnemy` | `name`, `param`, `dx`, `dy`, `dz`, `tag`, `anchor` (`player`, `playerHome`), `setId`, `placed` | an actor in the current room's layer (`placed`: seen by Enemy Count as a stage placement) |
 | `expectEnemyHealth` | `tag`, `health`, `max`, `tracked`, `timeoutSec` | until the tagged actor runs with that health, max and scaling |
 | `setEnemyHealthPercent` | `value`, `timeoutSec` | once we own the room: its enemy health percent |

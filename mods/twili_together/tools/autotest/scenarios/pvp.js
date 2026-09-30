@@ -496,7 +496,7 @@ module.exports = [
                     ...barrier("b-marked", "B"),
                     { op: "expectDummyHurtbox", registered: true, timeoutSec: 10 },
                     { op: "clearEnemies", radius: 0 },
-                    { op: "chargeDummy", dist: 450, charge: true, timeoutSec: 15 },
+                    { op: "chargeDummy", dist: 450, charge: true, timeoutSec: 15, trace: true },
                     { op: "expectPvpStats", target: "B", applied: 1, damage: 3, hitStops: 0, timeoutSec: 10 },
                     { op: "expectHitMarker", target: "B", result: "applied", text: "-3/4" },
                     ...barrier("charged", "B"),

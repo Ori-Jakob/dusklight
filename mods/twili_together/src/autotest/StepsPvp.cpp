@@ -10,10 +10,13 @@
 #include "ui/HitMarkers.hpp"
 
 #include "SSystem/SComponent/c_lib.h"
+#include "SSystem/SComponent/c_m3d.h"
 #include "SSystem/SComponent/c_math.h"
 #include "d/actor/d_a_alink.h"
 #include "d/actor/d_a_horse.h"
 #include "d/d_attention.h"
+#include "d/d_bg_s_gnd_chk.h"
+#include "d/d_bg_s_lin_chk.h"
 #include "d/d_camera.h"
 #include "d/d_com_inf_game.h"
 #include "d/d_s_play.h"
@@ -426,50 +429,115 @@ bool expectPvpToast(StepContext& ctx) {
     return false;
 }
 
-// Our ridden Epona gallops at the first peer's dummy until our collision pass sends it a hit.
-uint32_t sChargeSentBefore = 0;
+// Our ridden Epona starts `dist` from the first peer's dummy on open ground facing it, and gallops
+// straight at it (spurred) until our collision pass sends it a hit.
+struct ChargeState {
+    uint32_t sentBefore = 0;
+    cXyz start;
+} sCharge;
+
+// Ticks she stands facing the dummy before the gallop, while the camera swings in behind her.
+constexpr int kChargeSettleTicks = 8;
+
+// A spot `dist` from the dummy on its ground with no wall across the lane to it; the dummy's
+// front first, then either side of it.
+bool findChargeStart(const fopAc_ac_c* dummy, float dist, cXyz& out) {
+    const cXyz& d = dummy->current.pos;
+    for (int i = 0; i < 16; i++) {
+        const int step = (i + 1) / 2 * (i % 2 != 0 ? 1 : -1);
+        const s16 yaw = static_cast<s16>(dummy->shape_angle.y + step * 0x1000);
+        const cXyz front(cM_ssin(yaw), 0.0f, cM_scos(yaw));
+        const cXyz side(front.z, 0.0f, -front.x);
+        cXyz spot = d + front * dist;
+        dBgS_ObjGndChk gnd;
+        const cXyz top(spot.x, d.y + 300.0f, spot.z);
+        gnd.SetPos(&top);
+        const f32 y = dComIfG_Bgsp().GroundCross(&gnd);
+        if (y == -G_CM3D_F_INF || std::fabs(y - d.y) > 60.0f) {
+            continue;
+        }
+        spot.y = y;
+        // Her width either side, from the dummy to past her hindquarters
+        bool clear = true;
+        for (f32 lane : {-80.0f, 0.0f, 80.0f}) {
+            for (f32 height : {60.0f, 150.0f}) {
+                const cXyz lift = side * lane + cXyz(0.0f, height, 0.0f);
+                const cXyz from = d + lift;
+                const cXyz to = spot + front * 200.0f + lift;
+                dBgS_ObjLinChk lin;
+                lin.Set(&from, &to, nullptr);
+                clear = clear && !dComIfG_Bgsp().LineCross(&lin);
+            }
+        }
+        if (clear) {
+            out = spot;
+            return true;
+        }
+    }
+    return false;
+}
 
 bool chargeDummy(StepContext& ctx) {
     daAlink_c* link = daAlink_getAlinkActorClass();
     daHorse_c* h = dComIfGp_getHorseActor();
     uint32_t victimId = 0;
     fopAc_ac_c* dummy = firstPeerDummy(&victimId);
-    if (link == nullptr || h == nullptr || dummy == nullptr || !link->checkHorseRide()) {
+    camera_process_class* camera = dComIfGp_getCamera(dComIfGp_getPlayerCameraID(0));
+    if (link == nullptr || h == nullptr || dummy == nullptr || camera == nullptr ||
+        !link->checkHorseRide())
+    {
         ctx.fail("chargeDummy: not riding our horse, or no dummy for a peer in our layer");
         return false;
     }
     const pvp::AttackStats* st = pvp::attackStats(victimId);
     const uint32_t sent = st != nullptr ? st->sent : 0;
+    const s16 want = cLib_targetAngleY(&h->current.pos, &dummy->current.pos);
     if (!ctx.begun) {
-        sChargeSentBefore = sent;
-        const float dist = ctx.step.value("dist", 600.0f);
-        const s16 yaw = dummy->shape_angle.y;
-        cXyz pos(dummy->current.pos.x + cM_ssin(yaw) * dist, dummy->current.pos.y,
-            dummy->current.pos.z + cM_scos(yaw) * dist);
-        const cXyz delta = pos - h->current.pos;
-        h->setHorsePosAndAngle(&pos, static_cast<s16>(yaw + 0x8000));
-        h->initHorseMtx();
-        if (camera_process_class* camera = dComIfGp_getCamera(dComIfGp_getPlayerCameraID(0))) {
-            camera->mCamera.Reset(camera->mCamera.mCenter + delta, camera->mCamera.mEye + delta);
+        sCharge.sentBefore = sent;
+        if (!findChargeStart(dummy, ctx.step.value("dist", 600.0f), sCharge.start)) {
+            ctx.fail("chargeDummy: no open ground around the dummy");
+            return false;
         }
+        const s16 yaw = cLib_targetAngleY(&sCharge.start, &dummy->current.pos);
+        h->setHorsePosAndAngle(&sCharge.start, yaw);
+        h->initHorseMtx();
+        // Behind her, so the stick's forward is hers from the first tick
+        const cXyz fwd(cM_ssin(yaw), 0.0f, cM_scos(yaw));
+        camera->mCamera.Reset(sCharge.start + fwd * 200.0f + cXyz(0.0f, 130.0f, 0.0f),
+            sCharge.start - fwd * 350.0f + cXyz(0.0f, 220.0f, 0.0f));
+        TwiliLog.info("[autotest] charge from ({:.0f} {:.0f} {:.0f}), {:.0f} from the dummy",
+            sCharge.start.x, sCharge.start.y, sCharge.start.z,
+            sCharge.start.absXZ(dummy->current.pos));
         return false;
     }
-    if (sent > sChargeSentBefore) {
+    if (sent > sCharge.sentBefore) {
         TwiliLog.info("[autotest] charged the dummy: hit sent after {} ticks", ctx.ticks);
         return true;
     }
-    // Stick input is camera-relative: aim it at the dummy, and keep her at a gallop (spurred).
-    const s16 want = cLib_targetAngleY(&h->current.pos, &dummy->current.pos);
-    const s16 camY = dCam_getControledAngleY(dComIfGp_getCamera(dComIfGp_getPlayerCameraID(0)));
-    const float theta = static_cast<s16>(want - camY + 0x8000) * (3.14159265f / 32768.0f);
-    pulsePad(std::sin(theta), -std::cos(theta), 0, 2);
-    h->speedF = std::max(h->speedF, h->getNormalMaxSpeedF());
-    if (ctx.step.value("charge", true)) {
-        h->m_lashAccelerationTime = std::max<s16>(h->m_lashAccelerationTime, 10);
+    const s16 camY = dCam_getControledAngleY(camera);
+    if (ctx.ticks <= kChargeSettleTicks) {
+        h->setHorsePosAndAngle(&sCharge.start, want);
+    } else {
+        // Facing the dummy's current spot all the way (her own steering is slow while spurred)
+        h->setHorsePosAndAngle(nullptr, want);
+        // Stick input is camera-relative
+        const float theta = static_cast<s16>(want - camY + 0x8000) * (3.14159265f / 32768.0f);
+        pulsePad(std::sin(theta), -std::cos(theta), 0, 2);
+        h->speedF = std::max(h->speedF, h->getNormalMaxSpeedF());
+        if (ctx.step.value("charge", true)) {
+            h->m_lashAccelerationTime = std::max<s16>(h->m_lashAccelerationTime, 10);
+        }
+    }
+    if (ctx.step.value("trace", false)) {
+        TwiliLog.info("[autotest] charge t{} pos ({:.0f} {:.0f} {:.0f}) yaw 0x{:04X} cam 0x{:04X} "
+                      "speed {:.1f} proc {} dist {:.0f}",
+            ctx.ticks, h->current.pos.x, h->current.pos.y, h->current.pos.z,
+            static_cast<u16>(h->shape_angle.y), static_cast<u16>(camY), h->speedF, h->m_procID,
+            h->current.pos.absXZ(dummy->current.pos));
     }
     if (ctx.seconds > ctx.timeout(10.0)) {
-        ctx.fail(fmt::format("chargeDummy: no hit sent, {:.0f} units from the dummy",
-            h->current.pos.absXZ(dummy->current.pos)));
+        ctx.fail(fmt::format("chargeDummy: no hit sent, {:.0f} units from the dummy (proc {})",
+            h->current.pos.absXZ(dummy->current.pos), h->m_procID));
     }
     return false;
 }
