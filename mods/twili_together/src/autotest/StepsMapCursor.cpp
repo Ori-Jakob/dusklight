@@ -100,8 +100,9 @@ std::string describe(const mc::Frame& f) {
     std::string s = fmt::format("frame valid={} age={} gate={} alpha={} markers=[", f.valid,
                                 g_Counter.mCounter0 - f.tick, mc::gateName(f.gate), f.mapAlpha);
     for (const mc::Drawn& d : f.cursors) {
-        s += fmt::format(" #{} {} a={} at ({:.1f},{:.1f}) dir ({:.2f},{:.2f}){}{}", d.clientId,
-                         hex(d.fill), d.fill[3], d.anchor.x, d.anchor.y, d.dir.x, d.dir.y,
+        s += fmt::format(" #{} {} a={} at ({:.1f},{:.1f}) dir ({:.2f},{:.2f}) h {:.1f}{}{}",
+                         d.clientId, hex(d.fill), d.fill[3], d.anchor.x, d.anchor.y, d.dir.x,
+                         d.dir.y, d.height,
                          d.pinned ? " pinned" : "",
                          d.floorDelta != 0 ? fmt::format(" floor{:+d}", d.floorDelta) : "");
     }
@@ -334,6 +335,23 @@ std::optional<bool> checkMapCursorTransform(StepContext& ctx) {
         ctx.fail(fmt::format("checkMapCursorTransform: our facing is {:.1f} degrees off", localErr));
         return false;
     }
+    // Sizes follow the picture's scale: J2D units per texel, the HUD scale at a native-size map.
+    const f32 scale = t.rectW / t.texW;
+    if (step.contains("captured") && f.rectCaptured != step.value("captured", true)) {
+        ctx.fail(fmt::format("checkMapCursorTransform: rect captured={}", f.rectCaptured));
+        return false;
+    }
+    if (step.contains("scale") && std::fabs(scale - step.value("scale", 1.0f)) > 0.01f) {
+        ctx.fail(fmt::format("checkMapCursorTransform: {:.3f} units per texel, want {:.3f} (rect "
+                             "{:.1f}x{:.1f} on {}x{} texels)",
+            scale, step.value("scale", 1.0f), t.rectW, t.rectH, t.texW, t.texH));
+        return false;
+    }
+    if (std::fabs(f.localHeight - t.cursorSize * scale) > 0.01f) {
+        ctx.fail(fmt::format("checkMapCursorTransform: our arrow {:.2f} high, want {:.2f}",
+            f.localHeight, t.cursorSize * scale));
+        return false;
+    }
 
     const std::string target = step.value("target", std::string{});
     const uint32_t only = target.empty() ? 0 : resolveTarget(target);
@@ -360,6 +378,15 @@ std::optional<bool> checkMapCursorTransform(StepContext& ctx) {
                                  kTip * d.height));
             return false;
         }
+        if (std::fabs(d.height - mc::arrowHeight(t.cursorSize, scale)) > 0.01f ||
+            std::fabs(d.outlineW - mc::outlineWidth(scale)) > 0.01f)
+        {
+            ctx.fail(fmt::format("checkMapCursorTransform: #{} {:.2f} high with a {:.2f} outline, "
+                                 "want {:.2f} and {:.2f}",
+                d.clientId, d.height, d.outlineW, mc::arrowHeight(t.cursorSize, scale),
+                mc::outlineWidth(scale)));
+            return false;
+        }
         checked++;
     }
     if (only != 0 && checked == 0) {
@@ -369,9 +396,9 @@ std::optional<bool> checkMapCursorTransform(StepContext& ctx) {
         return false;
     }
     TwiliLog.info("[autotest] map transform ok: {} marker(s), world {:.0f}x{:.0f} cm on {}x{} "
-                 "texels, rect ({:.1f}, {:.1f}) {:.0f}x{:.0f}, mirror={}",
+                 "texels, rect ({:.1f}, {:.1f}) {:.0f}x{:.0f}{}, mirror={}",
                  checked, t.worldW, t.worldH, t.texW, t.texH, t.rectX, t.rectY, t.rectW, t.rectH,
-                 t.mirror);
+                 f.rectCaptured ? " (captured)" : "", t.mirror);
     return true;
 }
 

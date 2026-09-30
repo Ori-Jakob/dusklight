@@ -162,6 +162,29 @@ module.exports = [
         })),
     },
     {
+        name: "map-cursor-hudscale",
+        description: "HUD scale 0.5 on A and 2 on B: markers sit in the picture's captured rect and scale with it like our arrow",
+        timeoutSec: 300,
+        cvars: NORMAL,
+        instances: [["A", 0.5], ["B", 2]].map(([name, scale]) => ({
+            name,
+            start: STAGES.southFaron,
+            cvars: [...colorCvars(COLORS[name]), `game.hudScale=${scale}`],
+            steps: [
+                ...connect,
+                ...meetIn(STAGES.southFaron, other(name)),
+                { op: "showMinimap" },
+                ...(name === "A"
+                    ? [{ op: "checkMapCursorTransform", captured: true, scale }, ...injected(false)]
+                    : [seesPeer(name, { holdTicks: 30 }),
+                       { op: "checkMapCursorTransform", target: "A", captured: true, scale },
+                       { op: "mark", msg: "MAPCURSOR_HOLD hudscale" }, { op: "wait", frames: 150 }]),
+                ...barrier("checked-hudscale", other(name)),
+                { op: "quit" },
+            ],
+        })),
+    },
+    {
         name: "map-cursor-visibility",
         description: "markers follow Show Locations, the local cutscene rule (the remote's own cutscene keeps it), disconnect and reconnect, and stage changes, each for the stated reason",
         timeoutSec: 480,

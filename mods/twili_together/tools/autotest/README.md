@@ -258,7 +258,7 @@ Life, PvP and enemies (`StepsPvp.cpp`, `StepsEnemy.cpp`):
 
 | op | fields | does |
 | --- | --- | --- |
-| `setLife` / `markLife` | `value` (12, quarter hearts) | sets / remembers our life |
+| `setLife` / `markLife` | `value` (12, quarter hearts), `hearts` (containers, 1 to 20) | sets / remembers our life |
 | `expectLife` / `expectLifeDelta` | `value`, `min`, `max` / `delta`, `frames`, `timeoutSec` | our life (saved plus the meter's pending change) |
 | `approachDummy` | `dist` (110) | our Link in front of the first peer's dummy, facing it |
 | `sendPvpHit` | `target`, `kind` (`sword`), `damage` (2), `knockback` (`light`, `knockdown`), `dirY`, `blocked` | a real DAMAGE_PLAYER without our collision pass or cooldown |
@@ -269,7 +269,7 @@ Life, PvP and enemies (`StepsPvp.cpp`, `StepsEnemy.cpp`):
 | `expectReaction` | `knockback` (`light`, `knockdown`, `none`), `timeoutSec` | our Link plays that reaction (`none`: neither, and no i-frames) |
 | `expectHitStop` | `target`, `count` (1), `maxFrames` (3), `none`, `frames` (30), `timeoutSec` (5) | the scene's pause timer runs after `count` hit-stops of ours on `target`, at most `maxFrames` long (start the swing with an async `walk`); `none`: no pause for `frames` |
 | `expectHitMarker` | `target`, `result` (`applied`, `blocked`), `text`, `damage`, `drawn`, `timeoutSec` (10) | the latest marker a DAMAGE_RESULT from `target` made (`drawn`: a frame drew markers) |
-| `expectLockOn` | `locked` (true), `frames` (30), `timeoutSec` (5) | Z-targeting (hold L with an async `walk`, buttons 0x40) is locked on the first peer's dummy; `locked: false`: not for `frames` |
+| `expectLockOn` | `locked` (true), `stance`, `frames` (30), `timeoutSec` (5) | Z-targeting (hold L with an async `walk`, buttons 0x40) is locked on the first peer's dummy (`stance`: and our Link is in its enemy lock, battle stance with the shield allowed); `locked: false`: neither for `frames` |
 | `expectPvpToast` | `text`, `count` (1), `max`, `none`, `frames`, `timeoutSec` (10) | knockout toasts with that text ("A beat B", "A knocked out B") |
 | `chargeDummy` | `dist` (600), `charge` (true), `timeoutSec` (10) | our ridden Epona, `dist` in front of the first peer's dummy, gallops at it (spurred) until we send it a hit |
 | `spawnEnemy` | `name`, `param`, `dx`, `dy`, `dz`, `tag`, `anchor` (`player`, `playerHome`), `setId`, `placed` | an actor in the current room's layer (`placed`: seen by Enemy Count as a stage placement) |
@@ -410,7 +410,7 @@ Map cursors (`StepsMapCursor.cpp`). Targets are peer names or `#<client id>`:
 | `injectMapCursorClients` / `clearMapCursorClients` | `clients` (`id`, `color`, `dx`, `dz`, `dy`, `angle`), `unit` (`cm`, `texel`) | extra markers around our map position |
 | `expectMapCursor` | `surface` (`minimap`, `dmap`, `fmap`), `target(s)`, `color(s)`, `pinned`, `floorDelta`, `facing`, `count`, `holdTicks`, `maxAgeTicks`, `timeoutSec` | a fresh frame with those markers in exactly those colours |
 | `expectNoMapCursor` | `surface`, `target`, `reason`, `holdTicks` (30), `timeoutSec` | no marker, for that reason: a frame reason (`locationsOff`, `cutscene`, `notConnected`, `alphaZero`, `notInField`, `otherRegion`), a client reason (`noSave`, `noUpdate`, `otherStage`, `otherLayer`, `otherFloor`, `badPose`) or `absent` |
-| `checkMapCursorTransform` | `target`, `tolPx` | anchors and facings against the offscreen pass's matrices |
+| `checkMapCursorTransform` | `target`, `tolPx`, `captured`, `scale` | anchors and facings against the offscreen pass's matrices; arrow and outline sizes against the picture's units per texel (`scale`, the HUD scale); `captured`: the rect came from the picture's own draw |
 | `expectMapPaletteClean` | `groups`, `holdTicks` | the dungeon map palette is untouched |
 | `dumpMapCursors` | `surface` | logs the frame and `MAPCURSOR_PROBE` screen fractions |
 | `openPauseMap` | `surface` (`dmap`, `fmap`), `timeoutSec` | the dungeon or field map, as the map button opens it (a B press closes it) |
@@ -433,8 +433,14 @@ Name tags (`StepsNameTags.cpp`):
 
 | op | fields | does |
 | --- | --- | --- |
-| `expectNameTag` | `name`, `shown`, `gate`, `line2`, `rgb`, `holdTicks`, `timeoutSec` | the peer's tag in the last presented frame (or none, for `gate`); `rgb` is its frame colour |
+| `expectNameTag` | `name`, `shown`, `gate`, `line2`, `rgb`, `health`, `life`, `maxLife`, `maxWidth`, `holdTicks`, `timeoutSec` | the peer's tag in the last presented frame (or none, for `gate`); `rgb` is its frame colour; `life` / `maxLife` its health bar in quarter hearts (`health: false`: no bar); `maxWidth` the tag's width |
 | `viewPeer` | `name`, `yaw`, `beyond` | moves our player past the peer's dummy, seen from our camera, so the peer shows `yaw` degrees off centre |
+| `showPlayerHealth` | `value` (true) | the Show Player Health option |
+
+Written for the PvP battle stance, player health on name tags and HUD-scaled map markers, **not
+run yet** (the machine was in use): `pvp-lockon` (now with `stance`), `name-tag-health`
+(`scenarios/nametags.js`) and `map-cursor-hudscale` (`scenarios/mapcursor.js`). Every scenario
+with `checkMapCursorTransform` now also checks the marker and outline sizes.
 
 Players widget and the Players tab rows (`StepsPlayersWidget.cpp`). Mouse steps push SDL events
 at window coordinates (an 800x450 window at UI scale 1), so a real pointer over the test window

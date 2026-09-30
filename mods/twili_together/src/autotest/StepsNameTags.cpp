@@ -2,6 +2,7 @@
 
 #include "autotest/AutoTestSteps.hpp"
 
+#include "core/Config.hpp"
 #include "core/Host.hpp"
 #include "core/Log.hpp"
 #include "core/Session.hpp"
@@ -34,9 +35,10 @@ const Client* clientNamed(const std::string& name) {
 std::string describe() {
     std::string s = fmt::format("frames={} gate='{}' tags=[", tags::frameCount(), tags::lastGate());
     for (const tags::Probe& p : tags::drawn()) {
-        s += fmt::format(" #{} {} '{}'{} at ({:.0f},{:.0f}) #{:02X}{:02X}{:02X}", p.clientId,
-            p.kind == tags::Probe::Kind::Player ? "tag" : "card", p.line1,
-            p.line2.empty() ? "" : " / '" + p.line2 + "'", p.x, p.y, p.r, p.g, p.b);
+        s += fmt::format(" #{} {} '{}'{} at ({:.0f},{:.0f}) w {:.0f} #{:02X}{:02X}{:02X} hp {}/{}",
+            p.clientId, p.kind == tags::Probe::Kind::Player ? "tag" : "card", p.line1,
+            p.line2.empty() ? "" : " / '" + p.line2 + "'", p.x, p.y, p.width, p.r, p.g, p.b, p.life,
+            p.maxLife);
     }
     return s + " ]";
 }
@@ -69,6 +71,19 @@ std::optional<bool> expectNameTag(StepContext& ctx) {
     if (ok && found != nullptr && step.contains("rgb")) {
         ok = fmt::format("#{:02X}{:02X}{:02X}", found->r, found->g, found->b) ==
              step.value("rgb", std::string{});
+    }
+    // Quarter hearts; `health: false` wants no bar.
+    if (ok && found != nullptr && step.contains("health")) {
+        ok = (found->maxLife > 0) == step.value("health", true);
+    }
+    if (ok && found != nullptr && step.contains("life")) {
+        ok = found->maxLife > 0 && found->life == step.value("life", 0);
+    }
+    if (ok && found != nullptr && step.contains("maxLife")) {
+        ok = found->maxLife == step.value("maxLife", 0);
+    }
+    if (ok && found != nullptr && step.contains("maxWidth")) {
+        ok = found->width <= step.value("maxWidth", 0.0f);
     }
     if (ok && !wantShown && step.contains("gate")) {
         ok = step.value("gate", std::string{}) == tags::lastGate();
@@ -119,6 +134,10 @@ std::optional<bool> viewPeer(StepContext& ctx) {
 std::optional<bool> nameTagSteps(const std::string& op, StepContext& ctx) {
     if (op == "expectNameTag") return expectNameTag(ctx);
     if (op == "viewPeer") return viewPeer(ctx);
+    if (op == "showPlayerHealth") {
+        config::setBool(config::Var::ShowPlayerHealth, ctx.step.value("value", true));
+        return true;
+    }
     return std::nullopt;
 }
 

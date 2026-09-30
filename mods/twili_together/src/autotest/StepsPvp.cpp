@@ -375,22 +375,28 @@ bool expectLockOn(StepContext& ctx) {
     const bool locked = dummy != nullptr && attention != nullptr && attention->LockonTruth() &&
                         attention->LockonTarget(0) == dummy;
     const u32 flags = dummy != nullptr ? dummy->attention_info.flags : 0;
+    // `stance`: our Link is also in its enemy lock (battle stance, shield up allowed)
+    daAlink_c* link = daAlink_getAlinkActorClass();
+    const bool battle = link != nullptr && dummy != nullptr && link->getAtnActor() == dummy &&
+                        link->checkEnemyAttentionLock() && link->checkGuardActionChange();
     if (!want) {
-        if (locked) {
-            ctx.fail(fmt::format("expectLockOn: locked on the dummy (flags 0x{:X})", flags));
+        if (locked || battle) {
+            ctx.fail(fmt::format("expectLockOn: locked on the dummy {} (flags 0x{:X})",
+                locked ? "and battle stance" : "stance only", flags));
             return false;
         }
         return ctx.ticks >= ctx.step.value("frames", 30);
     }
-    if (locked) {
-        TwiliLog.info(
-            "[autotest] locked on the dummy after {} ticks (flags 0x{:X})", ctx.ticks, flags);
+    const bool wantStance = ctx.step.value("stance", false);
+    if (locked && (!wantStance || battle)) {
+        TwiliLog.info("[autotest] locked on the dummy after {} ticks (flags 0x{:X}, stance {})",
+            ctx.ticks, flags, battle);
         return true;
     }
     if (ctx.seconds > ctx.timeout(5.0)) {
-        ctx.fail(
-            fmt::format("expectLockOn: not locked on the dummy (flags 0x{:X}, target {})", flags,
-                attention != nullptr && attention->LockonTarget(0) != nullptr ? "other" : "none"));
+        ctx.fail(fmt::format("expectLockOn: {} (flags 0x{:X}, target {})",
+            locked ? "locked but no battle stance" : "not locked on the dummy", flags,
+            attention != nullptr && attention->LockonTarget(0) != nullptr ? "other" : "none"));
     }
     return false;
 }
@@ -477,6 +483,10 @@ std::optional<bool> pvpSteps(const std::string& op, StepContext& ctx) {
 
     if (op == "setLife") {
         dComIfGp_clearItemLifeCount();
+        if (step.contains("hearts")) {
+            // Heart containers; the save counts fifths (pieces)
+            dComIfGs_setMaxLife(static_cast<u8>(std::clamp(step.value("hearts", 3), 1, 20) * 5));
+        }
         dComIfGs_setLife(static_cast<u16>(step.value("value", 12)));
         return true;
     }

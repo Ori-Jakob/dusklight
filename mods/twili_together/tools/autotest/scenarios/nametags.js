@@ -36,4 +36,58 @@ module.exports = [
             ],
         })),
     },
+    {
+        name: "name-tag-health",
+        description: "A sees B's health on B's tag in quarter hearts out of B's containers, following B's changes; Show Player Health off hides the bar live; 20 hearts keep the tag narrow",
+        timeoutSec: 300,
+        // Life stays where the steps put it.
+        cvars: [...COMMON_CVARS, "game.infiniteHearts=false"],
+        instances: [
+            {
+                name: "A",
+                start: STAGES.southFaron,
+                steps: [
+                    ...connect,
+                    ...meetIn(STAGES.southFaron, "B"),
+                    ...barrier("b-hp-1", "B"),
+                    // 5 containers, 2 3/4 hearts left.
+                    { op: "expectNameTag", name: "B", life: 11, maxLife: 20, holdTicks: 10 },
+                    { op: "showPlayerHealth", value: false },
+                    { op: "expectNameTag", name: "B", health: false, holdTicks: 10 },
+                    { op: "showPlayerHealth", value: true },
+                    { op: "expectNameTag", name: "B", life: 11, maxLife: 20, holdTicks: 10 },
+                    ...barrier("a-toggled", "B"),
+                    ...barrier("b-hp-2", "B"),
+                    { op: "expectNameTag", name: "B", life: 20, maxLife: 20, holdTicks: 10 },
+                    ...barrier("b-hp-3", "B"),
+                    // A one-letter name with 20 containers: bar, pads and dot stay under 110.
+                    { op: "expectNameTag", name: "B", life: 3, maxLife: 80, maxWidth: 110, holdTicks: 10 },
+                    { op: "mark", msg: "NAMETAG_HOLD health" },
+                    { op: "wait", sec: 2 },
+                    ...barrier("hp-done", "B"),
+                    { op: "quit" },
+                ],
+            },
+            {
+                name: "B",
+                start: STAGES.southFaron,
+                steps: [
+                    ...connect,
+                    ...meetIn(STAGES.southFaron, "A"),
+                    { op: "setLife", hearts: 5, value: 11 },
+                    { op: "wait", frames: 10 },
+                    ...barrier("b-hp-1", "A"),
+                    ...barrier("a-toggled", "A"),
+                    { op: "setLife", value: 20 },
+                    { op: "wait", frames: 10 },
+                    ...barrier("b-hp-2", "A"),
+                    { op: "setLife", hearts: 20, value: 3 },
+                    { op: "wait", frames: 10 },
+                    ...barrier("b-hp-3", "A"),
+                    ...barrier("hp-done", "A"),
+                    { op: "quit" },
+                ],
+            },
+        ],
+    },
 ];

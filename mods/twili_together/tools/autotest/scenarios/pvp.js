@@ -426,7 +426,7 @@ module.exports = [
     },
     {
         name: "pvp-lockon",
-        description: "A Z-targets B's dummy only once PvP is on, and the lock holds through B's i-frames after a hit",
+        description: "A Z-targets B's dummy only once PvP is on, in battle stance as on an enemy, and the lock holds through B's i-frames after a hit",
         timeoutSec: 300,
         cvars: CVARS,
         instances: [
@@ -445,12 +445,12 @@ module.exports = [
                     ...barrier("pvp-on", "B"),
                     { op: "approachDummy" },
                     holdL(150),
-                    { op: "expectLockOn", locked: true, timeoutSec: 3 },
+                    { op: "expectLockOn", locked: true, stance: true, timeoutSec: 3 },
                     // B's i-frames turn its hurtbox off; the lock stays.
                     { op: "sendPvpHit", target: "B", damage: 1 },
                     { op: "expectPvpResult", target: "B", result: "applied", damage: 1 },
                     { op: "wait", frames: 10 },
-                    { op: "expectLockOn", locked: true, timeoutSec: 1 },
+                    { op: "expectLockOn", locked: true, stance: true, timeoutSec: 1 },
                     { op: "wait", frames: 90 },
                     ...barrier("lock-checked", "B"),
                     { op: "quit" },
