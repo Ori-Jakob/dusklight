@@ -13,6 +13,8 @@ const I = {
 const TBOX = 62;
 const FARON_TBL = 2;
 const FOREST_TBL = 0x10;
+// The randomizer's Ordon portal is this switch of the Ordon stage table (Link's house is in it).
+const ORDON_PORTAL_SWITCH = 0x34;
 
 // Pickups are off so the chest's rupees do not reach the other player.
 const noPickups = [
@@ -125,7 +127,8 @@ module.exports = [
         name: "pickup-share",
         description: "A's rupees, heart and arrows are added for B within B's limits (wallet, hearts, a bow), never echoed back, and not with Share Pickups off",
         timeoutSec: 360,
-        cvars: COMMON_CVARS,
+        // The runner copies the user's config: pin the 300 rupee wallet.
+        cvars: [...COMMON_CVARS, "game.biggerWallets=false"],
         instances: [
             {
                 name: "A",
@@ -251,10 +254,11 @@ module.exports = [
                     ...meetIn(STAGES.linksHouse, "A"),
                     ...barrier("ready", "A"),
                     ...barrier("given", "A"),
-                    { op: "expectItem", item: I.randoOrdonPortal, timeoutSec: 30 },
+                    // The portal's switch arrives ahead of its grant, which is then skipped as owned.
+                    { op: "expectSwitch", no: ORDON_PORTAL_SWITCH, timeoutSec: 30 },
                     { op: "expectInventory", tbl: FOREST_TBL, keys: 2, poes: 2, bottles: 1, timeoutSec: 30 },
                     { op: "expectInventory", tbl: FOREST_TBL, keys: 2, poes: 2, bottles: 1, forSec: 5 },
-                    { op: "expectPickups", min: { grantsApplied: 6 } },
+                    { op: "expectPickups", min: { grantsApplied: 5 } },
                     ...barrier("done", "A"),
                     { op: "quit" },
                 ],
