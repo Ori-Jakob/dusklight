@@ -167,11 +167,27 @@ World sync (`StepsWorld.cpp`):
 
 | op | fields | does |
 | --- | --- | --- |
-| `setRoomOption` / `waitRoomOption` | `name` (`syncWorldState`, `shareWoodenShield`, `teleportMode`, `hidePlayersInCutscene`, `syncNPCs`, `syncEnemyDamage`, `pvpMode`, `pvpFriendlyFire`, `pvpLethal`, `showLocationsMode`, `cutsceneSync`), `value`, `timeoutSec` | sets our room-setting default (the owner's is the room's, so every instance sets it) / waits until the room reports that value |
+| `setRoomOption` / `waitRoomOption` | `name` (`syncWorldState`, `shareWoodenShield`, `sharePickups`, `teleportMode`, `hidePlayersInCutscene`, `syncNPCs`, `syncEnemyDamage`, `pvpMode`, `pvpFriendlyFire`, `pvpLethal`, `showLocationsMode`, `cutsceneSync`), `value`, `timeoutSec` | sets our room-setting default (the owner's is the room's, so every instance sets it) / waits until the room reports that value |
 | `forceLayout` | `layout` (16 hex digits) | before `connect`: announce another save layout, as a different game build would |
 | `waitLayoutMismatch` | `peer`, `timeoutSec` | until the incompatible-layout toast was shown for that peer |
 | `expectNoItem` | `item`, `forSec` (5) | fails if the item's first-get bit gets set within `forSec` |
 | `expectMerges` | `min`, `max`, `timeoutSec` | world-state merges applied so far: waits for `min`, fails above `max` |
+
+Chests, shared pickups and traps (`StepsPickups.cpp`):
+
+| op | fields | does |
+| --- | --- | --- |
+| `spawnChest` | `tag`, `tbox` (TBOX number), `shape` (0 small, 1 big, 2 boss), `item`, `dist` (110) | a closed chest `dist` units in front of our player, facing him |
+| `openChest` | `tag` or `tbox`; `refused`, `frames` (60); `timeoutSec` | orders the chest's open as an A press does and presses A through the item message, until its bit is set and the event ended / with `refused`: for `frames` ticks no open may start an event |
+| `expectChestOpen` | `tag` or `tbox`, `open` (true), `forSec`, `timeoutSec` | the chest's TBOX bit is set and its lid at the last frame, with no event of ours (or, `open: false`, still closed) |
+| `expectTbox` | `no`, `tbl` (another stage table: its save slot), `set`, `forSec`, `timeoutSec` | a TBOX bit |
+| `setInventory` | `rupees`, `life` (quarter hearts), `arrows` | sets them in the save |
+| `expectInventory` | `rupees`, `life`, `arrows`, `bombs` (bag 0), `seeds`, `poes`, `bottles` (filled slots), `keys` with `tbl`; `forSec`, `timeoutSec` | waits until each given value matches (and holds `forSec`) |
+| `expectPickups` | `sent`, `applied`, `skipped`, `rupees`, `life`, `arrows`, `seeds`, `bombs`, `trapsSent`, `trapsReceived`, `trapsApplied`, `grantsApplied`; `min`/`max` objects of the same; `forSec`, `timeoutSec` | the SHARE_PICKUP and GIVE_ITEM counters |
+
+Written for the chest sync, shared pickups, randomizer items, traps and toast batching, and **not run
+yet** (the machine was in use): `chest-sync`, `chest-sync-away`, `pickup-share`, `pickup-no-replay`,
+`rando-item-sync`, `rando-trap-spread` and `item-toast-burst` (`scenarios/pickups.js`).
 
 Fidelity (`StepsFidelity.cpp`):
 
