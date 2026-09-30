@@ -1,6 +1,7 @@
 #pragma once
 
 #include "actors/DummyFishing.hpp"
+#include "actors/DummyGetItem.hpp"
 #include "actors/DummyItemFx.hpp"
 #include "actors/DummyMidna.hpp"
 #include "actors/PrivateArchives.hpp"
@@ -125,6 +126,8 @@ struct DummyPlayerDebugInfo {
     int16_t midnaHairAimAngle = 0;
     // The remote's weapons and items out in the world (DummyItemFx).
     DummyItemFxDebug itemFx;
+    // The item it holds up (DummyGetItem).
+    DummyGetItemDebug getItem;
     uint32_t heapUsed = 0;  // of the solid heap, at the end of createHeap
     // Held items (updateRemoteHeldItemMatrix)
     bool hookChain = false;
@@ -167,6 +170,7 @@ public:
     void playPvpHitSe(uint32_t hitSe, uint32_t guardSe, bool blocked);
 
     bool privateArchivesBusy() const { return mDummyArchives.busy(); }
+    bool getItemSettled() { return mDummyGetItem.settled(); }
 
 private:
     cPhs_Step loadPrivateArchives();
@@ -290,6 +294,7 @@ private:
     J3DModel* mpDummyWolfChainModels[4] = {};
     twili::DummyMidna mDummyMidna;
     twili::DummyItemFx mDummyItemFx;
+    twili::DummyGetItem mDummyGetItem;
     twili::DummyFishing mDummyFishing;
     uint32_t mDummyHeapUsed = 0;
     uint32_t mDummyClientId = 0;

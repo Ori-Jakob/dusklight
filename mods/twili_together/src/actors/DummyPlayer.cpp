@@ -3350,6 +3350,7 @@ void daDummyPlayer_c::getDebugInfo(twili::DummyPlayerDebugInfo& out) const {
     out.midnaHairAim = mDummyMidna.hairAimApplied();
     out.midnaHairAimAngle = mDummyMidna.hairAimAngle();
     out.itemFx = mDummyItemFx.debug();
+    out.getItem = mDummyGetItem.debug();
     out.heapUsed = mDummyHeapUsed;
     const bool hook = checkHookshotItem(mEquipItem) && mHeldItemModel != nullptr && !checkWolf();
     out.hookChain = hook && mDummyHookChain;
@@ -4155,6 +4156,7 @@ int daDummyPlayer_c::execute() {
         client.layerNo != myLayer)
     {
         mDummyItemFx.stopAll();
+        mDummyGetItem.stop();
         return TRUE;
     }
 
@@ -4163,6 +4165,7 @@ int daDummyPlayer_c::execute() {
     if (!ev.valid) {
         // The client entry was rebuilt (ALL_CLIENT_STATE) and holds no pose yet
         mDummyItemFx.stopAll();
+        mDummyGetItem.stop();
         return TRUE;
     }
     const double shownSeq = (std::max)(mDummyPlayout.renderSeq, mDummyPlayout.holdSeq);
@@ -4190,6 +4193,7 @@ int daDummyPlayer_c::execute() {
         clearRemoteStatus();
         clearRemoteWolfFx();
         mDummyItemFx.update(*this, state, shownSeq, client.itemFxEvents, ev.snapped, false);
+        mDummyGetItem.update(state.getItem, current.pos, shape_angle.y, !isHidden());
         playQueuedSfx(client, shownSeq, ev.snapped);
         return TRUE;
     }
@@ -4210,6 +4214,7 @@ int daDummyPlayer_c::execute() {
     }
     // Whatever the remote's body does
     mDummyItemFx.update(*this, state, shownSeq, client.itemFxEvents, ev.snapped, !isHidden());
+    mDummyGetItem.update(state.getItem, current.pos, shape_angle.y, !isHidden());
     mDummyFishing.update(*this, fr, applied && isBodyShown() && !checkWolf(), ev.snapped);
     playQueuedSfx(client, shownSeq, ev.snapped);
     if (ev.snapped) {
@@ -4255,6 +4260,7 @@ int daDummyPlayer_c::draw() {
     mDummyDrawLogged = false;
     // Its arrows, boomerang and bombs are not part of its body
     mDummyItemFx.draw(*this);
+    mDummyGetItem.draw(*this);
     // Whatever hides the remote's body there (a sky cannon, a boss door) hides it here too.
     if (mDummyVisFlags & twili::kVisNoDraw) {
         return TRUE;
@@ -4361,6 +4367,7 @@ void daDummyPlayer_c::destroy() {
     clearRemoteStatus();
     clearRemoteWolfFx();
     mDummyItemFx.destroy();
+    mDummyGetItem.destroy();
     // The lantern's swing fire calls back into this actor (field_0x2f20) while it fades.
     if (JPABaseEmitter* flame = dComIfGp_particle_getEmitter(field_0x31c4)) {
         flame->setEmitterCallBackPtr(nullptr);
@@ -4425,7 +4432,8 @@ int daDummyPlayer_execute(void* i_this) {
 }
 
 int daDummyPlayer_isDelete(void* i_this) {
-    return !static_cast<daDummyPlayer_c*>(i_this)->privateArchivesBusy();
+    auto* dummy = static_cast<daDummyPlayer_c*>(i_this);
+    return !dummy->privateArchivesBusy() && dummy->getItemSettled();
 }
 
 int daDummyPlayer_draw(void* i_this) {
