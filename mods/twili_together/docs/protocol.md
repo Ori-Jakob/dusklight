@@ -160,6 +160,7 @@ play them back a little behind the newest one, so network jitter does not show. 
 | `wx` | wolf attacks: spin, Midna's dome, lock-on jumps |
 | `x0`..`x7`, `xe`, `hk`, `bc`, `ls`, `hx`, `fr` | items in the world (arrows, bombs, boomerang, ...), one-shot events, clawshot, ball and chain, level sounds, bottle, fishing rod |
 | `ox`, `op`, `os`, `oa`, `of`, `ow`, `ok`, `or`, `oz` | the player's Epona, and Zelda behind its rider |
+| `hp` | `[life, maxLife]` in quarter hearts, for the name tag's health bar; optional (a keyframe without it means unknown) |
 
 Presence is best effort: when the send queue is full, deltas are dropped and the next keyframe
 repairs the stream.

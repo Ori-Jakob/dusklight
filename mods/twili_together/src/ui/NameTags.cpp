@@ -1,6 +1,7 @@
 #include "ui/NameTags.hpp"
 
 #include "actors/DummyPlayer.hpp"
+#include "core/Config.hpp"
 #include "core/Host.hpp"
 #include "core/Log.hpp"
 #include "core/Session.hpp"
@@ -44,6 +45,13 @@ struct TagDraw {
     f32 distanceSq = 0.0f;
     TagLine lines[2];
     int lineCount = 1;
+    f32 linesHeight = 0.0f;
+    // Quarter hearts; no bar while hpMax is 0.
+    int hpLife = 0;
+    int hpMax = 0;
+    f32 hpSegW = 0.0f;
+    f32 hpWidth = 0.0f;
+    f32 alpha = 1.0f;
     JUtility::TColor fill;
     JUtility::TColor border;
     JUtility::TColor text;
@@ -62,6 +70,13 @@ constexpr f32 kDotX = 7.0f;
 constexpr f32 kDotSize = 4.0f;
 // Left of the text: the dot plus a gap.
 constexpr f32 kDotRoom = kDotX + kDotSize + 7.0f - kPadX;
+// The health bar under the name: a segment per heart container, filled in quarters.
+constexpr f32 kHpBarH = 5.0f;
+constexpr f32 kHpBarGap = 3.0f;
+constexpr f32 kHpSegGap = 1.0f;
+constexpr f32 kHpMinSegW = 3.0f;
+constexpr f32 kHpMaxSegW = 8.0f;
+constexpr f32 kHpMinWidth = 40.0f;
 constexpr size_t kMaxOwnerGlyphs = 24;
 constexpr size_t kMaxHorseGlyphs = 16;
 // A jump this far between two ticks is a teleport or respawn: no lerp across it.
@@ -268,6 +283,16 @@ void layoutTag(JUTFont* font, TagDraw& tag, const Vec& screen, f32 minX, f32 max
         textWidth = std::max(textWidth, line.width);
         textHeight += line.glyphH + (i > 0 ? kLineGap : 0.0f);
     }
+    tag.linesHeight = textHeight;
+    if (tag.hpMax > 0) {
+        const int hearts = (tag.hpMax + 3) / 4;
+        const f32 gaps = kHpSegGap * static_cast<f32>(hearts - 1);
+        tag.hpSegW =
+            std::clamp((std::max(textWidth, kHpMinWidth) - gaps) / hearts, kHpMinSegW, kHpMaxSegW);
+        tag.hpWidth = tag.hpSegW * static_cast<f32>(hearts) + gaps;
+        textWidth = std::max(textWidth, tag.hpWidth);
+        textHeight += kHpBarGap + kHpBarH;
+    }
     tag.width = textWidth + kPadX * 2.0f + kDotRoom;
     tag.height = textHeight + kPadY * 2.0f;
     tag.x = std::clamp(screen.x - tag.width * 0.5f, minX + 4.0f, maxX - tag.width - 4.0f);
@@ -285,11 +310,30 @@ void drawTagBox(const TagDraw& tag) {
     // The owner's dot, level with the name.
     J2DFillBox(tag.x + kDotX, tag.y + kPadY + tag.lines[0].glyphH * 0.5f - kDotSize * 0.5f,
         kDotSize, kDotSize, tag.border);
+    if (tag.hpMax <= 0) {
+        return;
+    }
+    // Centred under the text like the lines.
+    f32 x = tag.x + kDotRoom + (tag.width - kDotRoom - tag.hpWidth) * 0.5f;
+    const f32 y = tag.y + kPadY + tag.linesHeight + kHpBarGap;
+    const JUtility::TColor full = fadedColor(232, 48, 56, 255, tag.alpha);
+    const JUtility::TColor empty = fadedColor(78, 30, 36, 230, tag.alpha);
+    for (int heart = 0; heart * 4 < tag.hpMax; heart++, x += tag.hpSegW + kHpSegGap) {
+        const int quarters = std::clamp(tag.hpLife - heart * 4, 0, 4);
+        const f32 filled = tag.hpSegW * static_cast<f32>(quarters) / 4.0f;
+        if (quarters < 4) {
+            J2DFillBox(x + filled, y, tag.hpSegW - filled, kHpBarH, empty);
+        }
+        if (quarters > 0) {
+            J2DFillBox(x, y, filled, kHpBarH, full);
+        }
+    }
 }
 
 void addProbe(uint32_t id, Probe::Kind kind, const TagDraw& tag) {
     s_drawn.push_back({id, kind, tag.lines[0].text, tag.lineCount > 1 ? tag.lines[1].text : "",
-        tag.x, tag.y, tag.width, tag.height, tag.border.r, tag.border.g, tag.border.b});
+        tag.x, tag.y, tag.width, tag.height, tag.border.r, tag.border.g, tag.border.b, tag.hpLife,
+        tag.hpMax});
 }
 
 void draw() {
@@ -327,6 +371,7 @@ void draw() {
 
     const int8_t myLayer = static_cast<int8_t>(dComIfG_play_c::getLayerNo(0));
     const fopAc_ac_c* player = dComIfGp_getPlayer(0);
+    const bool showHealth = config::getBool(config::Var::ShowPlayerHealth);
     const f32 minX = mDoGph_gInf_c::getMinXF();
     const f32 minY = mDoGph_gInf_c::getMinYF();
     const f32 maxX = minX + mDoGph_gInf_c::getWidthF();
@@ -406,6 +451,11 @@ void draw() {
             tag.lines[1] = {std::move(line2), kSmallGlyphWidth, kSmallGlyphHeight};
             tag.lineCount = 2;
         }
+        if (showHealth && client.maxLife > 0) {
+            tag.hpLife = client.life;
+            tag.hpMax = client.maxLife;
+        }
+        tag.alpha = alpha;
         tag.distanceSq = distanceSq;
         tag.fill = fadedColor(10, 12, 16, 190, alpha);
         tag.border = fadedColor(client.colorR, client.colorG, client.colorB, 240, alpha);

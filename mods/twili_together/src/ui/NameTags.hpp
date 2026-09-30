@@ -20,6 +20,8 @@ struct Probe {
     float x = 0.0f, y = 0.0f, width = 0.0f, height = 0.0f;
     // The frame's colour: the player's display colour.
     uint8_t r = 0, g = 0, b = 0;
+    // The health bar in quarter hearts; maxLife 0 when none is drawn.
+    int life = 0, maxLife = 0;
 };
 const std::vector<Probe>& drawn();
 // Frames the callback ran, and the last one's reason for drawing nothing ("" when it drew).

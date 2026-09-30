@@ -50,6 +50,7 @@ constexpr VarDef kVars[] = {
     {Var::PlayersWidgetOpacity, "players_widget_opacity", CONFIG_VAR_INT, false, 80},
     {Var::PlayersWidgetScale, "players_widget_scale", CONFIG_VAR_INT, false, 100},
     {Var::SharePickups, "share_pickups", CONFIG_VAR_BOOL, true},
+    {Var::ShowPlayerHealth, "show_player_health", CONFIG_VAR_BOOL, true},
 #if TWILI_ENABLE_AUTOTEST
     {Var::AutotestScript, "autotest_script", CONFIG_VAR_STRING},
 #endif

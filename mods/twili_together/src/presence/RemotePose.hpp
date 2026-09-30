@@ -537,6 +537,8 @@ struct WirePose {
     int32_t hk[11]{}, bc[7]{}, ls[8]{}, hx[4]{}, fr[27 + 3 * kFishingLinePoints]{};
     int32_t hsx[6]{}, hsp[3]{}, hss[3]{}, hsa[3]{}, hsf[3]{}, hsw[2]{}, hsk[16]{}, hsr[7]{};
     int32_t hsz[8]{};
+    // Life and max life in quarter hearts
+    int32_t hp[2]{};
 };
 
 struct RemotePoseSample {

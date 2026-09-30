@@ -244,6 +244,9 @@ ModResult buildConnectionTab(ModContext*, UiWindowHandle, UiElementHandle left, 
         "<p>Also notify for items you pick up yourself.</p>");
     addToggle(left, Var::StoryPrompts, "Story Prompts",
         "<p>Ask whether to follow when a teammate's story event moves them somewhere else.</p>");
+    addToggle(left, Var::ShowPlayerHealth, "Show Player Health",
+        "<p>A heart bar on other players' name tags: their current health in quarter hearts, one "
+        "segment per heart container.</p>");
     addToggle(left, Var::PlayersWidget, "Players Widget",
         "<p>A small list on screen of your teammates (everyone in the room without a team), where "
         "they are and a teleport button. While the menu is open, drag it by its title to move it "

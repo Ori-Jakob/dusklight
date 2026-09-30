@@ -306,6 +306,8 @@ bool Session::captureLocalMidna(bool inCutscene, RemoteMidnaPose& out) {
 }
 
 static constexpr uint32_t kKeyframeInterval = 30;
+// Past vanilla's 20 hearts for cheats; more is junk
+static constexpr int32_t kMaxLifeQuarters = 30 * 4;
 // While nothing changes, still send this often
 static constexpr uint32_t kHeartbeatInterval = 5;
 static constexpr const char* kItemFxSlotKeys[kItemFxSlots] = {"x0", "x1", "x2", "x3",
@@ -624,6 +626,8 @@ void Session::sendPlayerUpdate(float posX, float posY, float posZ,
     RemoteHorsePose horsePose;
     horse::captureLocal(horsePose);
     horse::encode(horsePose, cur);
+    cur.hp[0] = dComIfGs_getLife();
+    cur.hp[1] = dComIfGs_getMaxLifeGauge();
 
     uint8_t flags = 0;
     if (attentionLock) flags |= kPresenceAttentionLock;
@@ -742,6 +746,9 @@ static void sendPose(Session& session, PoseSender& tx, const WirePose& cur, uint
     }
     if (!keyframe || anyNonZero(cur.hsz)) {
         putField(packet, "oz", cur.hsz, o.hsz, keyframe, changed);
+    }
+    if (!keyframe || anyNonZero(cur.hp)) {
+        putField(packet, "hp", cur.hp, o.hp, keyframe, changed);
     }
     if (keyframe) {
         packet["xv"] = 1;
@@ -1006,6 +1013,7 @@ void Session::handlePlayerUpdate(const nlohmann::json& packet) {
     takeItemGroup("ok", w.hsk);
     takeItemGroup("or", w.hsr);
     takeItemGroup("oz", w.hsz);
+    takeItemGroup("hp", w.hp);
     if (keyframe) {
         c.sendsItemFx = packet.find("xv") != packet.end();
     }
@@ -1065,6 +1073,8 @@ void Session::handlePlayerUpdate(const nlohmann::json& packet) {
     c.itemProjectileType = static_cast<uint8_t>(w.pr[1]);
     c.swordChargeFrame = w.cf / kFrameScale;
     c.visFlags = static_cast<uint16_t>(w.vf);
+    c.maxLife = static_cast<uint16_t>(std::clamp<int32_t>(w.hp[1], 0, kMaxLifeQuarters));
+    c.life = static_cast<uint16_t>(std::clamp<int32_t>(w.hp[0], 0, c.maxLife));
     c.attentionLock = (flags & kPresenceAttentionLock) != 0;
     c.shieldInHand = (flags & kPresenceShieldInHand) != 0;
     c.swordBlurActive = (flags & kPresenceSwordBlur) != 0;

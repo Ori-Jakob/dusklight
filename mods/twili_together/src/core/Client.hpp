@@ -80,6 +80,9 @@ struct Client {
     bool shieldInHand = false;
     uint8_t presenceFlags = 0;
     uint16_t visFlags = 0;
+    // Quarter hearts from "hp"; maxLife 0 while unknown.
+    uint16_t life = 0;
+    uint16_t maxLife = 0;
     RemoteMidnaPose midna;
     RemoteTransformFx transformFx;
     bool sendsTransformFx = false;
