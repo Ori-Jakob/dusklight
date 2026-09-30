@@ -92,7 +92,7 @@ bool poseSelfTest(StepContext& ctx) {
         {true, dEvt_mode_TALK_e, 0, false, "talk"},
         {true, dEvt_mode_DEMO_e, 0, true, "demo"},
         {true, dEvt_mode_DEMO_e, 0x40, false, "door"},
-        {true, dEvt_mode_DEMO_e, 4, true, "chest"},
+        {true, dEvt_mode_DEMO_e, 4, false, "chest"},
         {true, dEvt_mode_COMPULSORY_e, 0, false, "compulsory"},
         {true, dEvt_mode_WAIT_e, 0, false, "ending"},
     };
