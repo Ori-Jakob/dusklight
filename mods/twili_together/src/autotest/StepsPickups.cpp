@@ -1,4 +1,4 @@
-// Steps for chest sync, shared pickups and traps; reference in the runner README.
+// Steps for chest sync, freestanding items, shared pickups and traps; reference in the runner README.
 
 #include "autotest/AutoTest.hpp"
 #include "autotest/AutoTestSteps.hpp"
@@ -9,6 +9,7 @@
 
 #include "SSystem/SComponent/c_malloc.h"
 #include "SSystem/SComponent/c_math.h"
+#include "d/actor/d_a_obj_item.h"
 #include "d/actor/d_a_tbox.h"
 #include "d/d_com_inf_game.h"
 #include "d/d_stage.h"
@@ -27,6 +28,7 @@ namespace twili::autotest {
 namespace {
 
 std::map<std::string, fpc_ProcID> sChests;
+std::map<std::string, fpc_ProcID> sFieldItems;
 
 bool liveTbox(int no) {
     const dSv_memBit_c& bit = dComIfGs_getSaveInfo()->getMemory().getBit();
@@ -152,6 +154,119 @@ std::optional<bool> expectChestOpen(StepContext& ctx) {
     return false;
 }
 
+fopAc_ac_c* fieldItemOf(const nlohmann::json& step) {
+    const auto it = sFieldItems.find(step.value("tag", std::string("item")));
+    if (it == sFieldItems.end() || !fopAcM_IsExecuting(it->second)) {
+        return nullptr;
+    }
+    return fopAcM_SearchByID(it->second);
+}
+
+// A field item, or a heart piece for items 0x21/0x22, with item bit `bit`, `dist` units ahead.
+std::optional<bool> spawnFieldItem(StepContext& ctx) {
+    fopAc_ac_c* player = dComIfGp_getPlayer(0);
+    const int roomNo = dStage_roomControl_c::getStayNo();
+    scene_class* room =
+        roomNo >= 0 ? fopScnM_SearchByID(dStage_roomControl_c::getStatusProcID(roomNo)) : nullptr;
+    if (player == nullptr || room == nullptr) {
+        ctx.fail("spawnFieldItem: no player or no room");
+        return false;
+    }
+    const int item = ctx.step.value("item", 0x01) & 0xFF;
+    const int bit = ctx.step.value("bit", 0x9C) & 0xFF;
+    const float dist = ctx.step.value("dist", 150.0f);
+    const s16 facing = player->shape_angle.y;
+    const cXyz pos(player->current.pos.x + dist * cM_ssin(facing), player->current.pos.y + 20.0f,
+        player->current.pos.z + dist * cM_scos(facing));
+    const csXyz angle(0, facing, 0);
+    layer_class* saved = fpcLy_CurrentLayer();
+    fpcLy_SetCurrentLayer(&room->base.layer);
+    const fpc_ProcID id =
+        fopAcM_createItem(&pos, item, bit, roomNo, &angle, nullptr, daItem_c::TYPE_WAIT_e);
+    fpcLy_SetCurrentLayer(saved);
+    if (id == fpcM_ERROR_PROCESS_ID_e) {
+        ctx.fail("spawnFieldItem: create request failed");
+        return false;
+    }
+    sFieldItems[ctx.step.value("tag", std::string("item"))] = id;
+    TwiliLog.info("[autotest] field item 0x{:02X} (bit {}) requested", item, bit);
+    return true;
+}
+
+// Puts the item on Link until he takes it, pressing A through the item message after `holdSec`;
+// done once the item is gone and no event runs.
+std::optional<bool> takeFieldItem(StepContext& ctx) {
+    fopAc_ac_c* item = fieldItemOf(ctx.step);
+    fopAc_ac_c* player = dComIfGp_getPlayer(0);
+    const bool running = dComIfGp_event_runCheck() != FALSE;
+    if (item == nullptr && !running) {
+        return true;
+    }
+    if (item != nullptr && player != nullptr && !running) {
+        item->current.pos = player->current.pos;
+    } else if (running && !padBusy() && ctx.seconds >= ctx.step.value("holdSec", 0.0) &&
+               ctx.ticks % 20 == 0)
+    {
+        pulsePad(0.0f, 0.0f, PAD_BUTTON_A, 3);
+    }
+    if (ctx.seconds > ctx.timeout(45.0)) {
+        ctx.fail("takeFieldItem: the item was never taken");
+    }
+    return false;
+}
+
+// Marks the item as pulled by the clawshot (hold: true) or lets it go, as a busy item.
+std::optional<bool> holdFieldItem(StepContext& ctx) {
+    fopAc_ac_c* item = fieldItemOf(ctx.step);
+    if (item == nullptr) {
+        ctx.fail("holdFieldItem: no such item");
+        return false;
+    }
+    if (ctx.step.value("hold", true)) {
+        fopAcM_setHookCarryNow(item);
+    } else {
+        fopAcM_cancelHookCarryNow(item);
+    }
+    return true;
+}
+
+std::optional<bool> expectFieldItem(StepContext& ctx) {
+    const bool want = ctx.step.value("present", true);
+    if ((fieldItemOf(ctx.step) != nullptr) == want) {
+        return ctx.seconds >= ctx.step.value("forSec", 0.0);
+    }
+    if (ctx.seconds > ctx.timeout(20.0)) {
+        ctx.fail(fmt::format("field item '{}' present={}, want {}",
+            ctx.step.value("tag", std::string("item")), !want, want));
+    }
+    return false;
+}
+
+// A dungeon (below 0x80) or memory item bit; `tbl` reads a memory bit from that stage's save slot.
+std::optional<bool> expectItemBit(StepContext& ctx) {
+    const int bit = ctx.step.value("bit", -1);
+    const int tbl = ctx.step.value("tbl", -1);
+    const bool want = ctx.step.value("set", true);
+    dSv_info_c* info = dComIfGs_getSaveInfo();
+    bool have = false;
+    if (bit >= 0 && bit < dSv_info_c::MEMORY_ITEM) {
+        have = info->getDan().isItem(bit) != FALSE;
+    } else if (bit >= dSv_info_c::MEMORY_ITEM && bit < dSv_info_c::MEMORY_ITEM + dSv_info_c::DAN_ITEM) {
+        const bool live = tbl < 0 || tbl == Session::instance().currentSaveTblNo();
+        const dSv_memBit_c& mem = live || tbl >= dSv_save_c::STAGE_MAX ?
+                                      info->getMemory().getBit() :
+                                      info->getSavedata().getSave(tbl).getBit();
+        have = mem.isItem(bit - dSv_info_c::MEMORY_ITEM) != FALSE;
+    }
+    if (have == want) {
+        return ctx.seconds >= ctx.step.value("forSec", 0.0);
+    }
+    if (ctx.seconds > ctx.timeout(20.0)) {
+        ctx.fail(fmt::format("item bit {} (table {}) never became {}", bit, tbl, want));
+    }
+    return false;
+}
+
 // The bit in stage table `tbl` (default: the live one of the current stage).
 std::optional<bool> expectTbox(StepContext& ctx) {
     const int no = ctx.step.value("no", -1);
@@ -179,7 +294,9 @@ std::optional<bool> expectPickups(StepContext& ctx) {
         {"rupees", s.rupeesAdded}, {"life", s.lifeAdded}, {"arrows", s.arrowsAdded},
         {"seeds", s.seedsAdded}, {"bombs", s.bombsAdded}, {"trapsSent", s.trapsSent},
         {"trapsReceived", s.trapsReceived}, {"trapsApplied", s.trapsApplied},
-        {"grantsApplied", s.grantsApplied},
+        {"grantsApplied", s.grantsApplied}, {"grantsQueued", s.grantsQueued},
+        {"removed", s.freestandingRemoved}, {"blocked", s.freestandingBlocked},
+        {"deduped", s.grantsDeduped},
     };
     std::string bad;
     for (const auto& [name, value] : have) {
@@ -219,6 +336,10 @@ std::optional<bool> setInventory(StepContext& ctx) {
     if (step.contains("arrows")) {
         dComIfGs_setArrowNum(static_cast<u8>(step.value("arrows", 0)));
     }
+    if (step.contains("maxLife")) {
+        dComIfGs_getSaveInfo()->getPlayer().getPlayerStatusA().setMaxLife(
+            static_cast<u16>(step.value("maxLife", 15)));
+    }
     return true;
 }
 
@@ -239,6 +360,7 @@ std::optional<bool> expectInventory(StepContext& ctx) {
         {"arrows", dComIfGs_getArrowNum()}, {"bombs", dComIfGs_getBombNum(0)},
         {"seeds", dComIfGs_getPachinkoNum()}, {"poes", dComIfGs_getPohSpiritNum()},
         {"keys", keys}, {"bottles", bottles},
+        {"maxLife", info->getPlayer().getPlayerStatusA().getMaxLife()},
     };
     std::string bad;
     for (const auto& [name, value] : have) {
@@ -267,6 +389,21 @@ std::optional<bool> pickupSteps(const std::string& op, StepContext& ctx) {
     }
     if (op == "expectTbox") {
         return expectTbox(ctx);
+    }
+    if (op == "spawnFieldItem") {
+        return spawnFieldItem(ctx);
+    }
+    if (op == "takeFieldItem") {
+        return takeFieldItem(ctx);
+    }
+    if (op == "holdFieldItem") {
+        return holdFieldItem(ctx);
+    }
+    if (op == "expectFieldItem") {
+        return expectFieldItem(ctx);
+    }
+    if (op == "expectItemBit") {
+        return expectItemBit(ctx);
     }
     if (op == "expectPickups") {
         return expectPickups(ctx);
