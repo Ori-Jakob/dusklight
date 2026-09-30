@@ -2,12 +2,17 @@
 
 #include <mods/svc/host.h>
 
+#include <string>
+
 class daAlink_c;
 
 namespace twili::host {
 
 // False when the host has no request_quit.
 bool requestQuit(int exitCode);
+
+// Empty when the host is new enough, else the message to fail with.
+std::string versionProblem();
 
 }  // namespace twili::host
 

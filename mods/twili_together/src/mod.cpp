@@ -15,6 +15,7 @@
 #include "actors/DummyPlayer.hpp"
 #include "actors/Profiles.hpp"
 #include "core/Config.hpp"
+#include "core/Host.hpp"
 #include "core/Layout.hpp"
 #include "core/Log.hpp"
 #include "core/Session.hpp"
@@ -42,7 +43,7 @@ IMPORT_SERVICE_VERSION(ConfigService, svc_config, 0);
 IMPORT_SERVICE(ActorService, svc_actor);
 // Minor 4 (overlay panels, the players widget) is checked with SERVICE_HAS.
 IMPORT_SERVICE_VERSION(UiService, svc_ui, 3);
-// Upstream's, since Dusklight 2.0.3.
+// Upstream's since Dusklight 2.0.3; an older fork build had another layout under this id.
 IMPORT_SERVICE_VERSION(InterpService, svc_interp, 0);
 // Name tags only.
 IMPORT_OPTIONAL_SERVICE(GfxService, svc_gfx);
@@ -66,6 +67,12 @@ extern "C" {
 
 MOD_EXPORT ModResult mod_initialize(ModError* error) {
     using namespace twili;
+
+    // Before anything touches InterpService.
+    if (const std::string problem = host::versionProblem(); !problem.empty()) {
+        TwiliLog.error("[core] {}", problem);
+        return mods::set_error(error, MOD_UNSUPPORTED, problem.c_str());
+    }
 
     TwiliLog.info("[core] Twili-Together {} starting (save layout {}; host: {} "
                   "request_quit={} find_host_var={} websocket={} net={})",
