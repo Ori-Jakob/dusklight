@@ -204,6 +204,11 @@ bool createPanel(const std::string& rml, int x, int y) {
     s_visible = true;
     s_placedX = x;
     s_placedY = y;
+    // UiService 2.5: the teleport buttons also take a click while playing, with the cursor shown.
+    s_probe.clickableInGame =
+        SERVICE_HAS(svc_ui, UiService, overlay_panel_set_clickable_in_game) &&
+        svc_ui->overlay_panel_set_clickable_in_game != nullptr &&
+        svc_ui->overlay_panel_set_clickable_in_game(mod_ctx, s_panel, true) == MOD_OK;
     return true;
 }
 

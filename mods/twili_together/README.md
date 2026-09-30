@@ -176,10 +176,13 @@ collects count for the whole team.
 
 A small list on screen of your teammates, or everyone in the room without a team: their colour, name
 (the first 12 characters of a longer one), area and a teleport button (same rules and tooltip as the
-Players tab). It stays put and ignores the controller while you play; with the menu open, drag it by
-its title to move it (the spot is saved) or click a teleport button. It hides while you are not
-connected, have nobody to list, or watch a cutscene or the game's own menus. It needs a Dusklight
-with UiService 2.4 (overlay panels); older builds just go without it.
+Players tab). It stays put and ignores the controller while you play. Its teleport buttons take a
+mouse click whether the menu is open or not, as long as the mouse cursor shows (move the mouse to
+bring it up; it stays hidden while the mouse drives the camera or aiming), and that click does not
+reach the game. Moving it by dragging its title (the spot is saved) needs the menu open. It hides
+while you are not connected, have nobody to list, or watch a cutscene or the game's own menus. It
+needs a Dusklight with UiService 2.4 (overlay panels), and 2.5 for clicks with the menu closed;
+older builds go without it or without those clicks.
 
 ## Known limitations
 

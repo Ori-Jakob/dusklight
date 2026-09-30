@@ -36,6 +36,8 @@ struct Probe {
     bool supported = true;
     bool created = false;
     bool shown = false;
+    // The host lets its teleport buttons take clicks with the menu closed (UiService 2.5).
+    bool clickableInGame = false;
     // Why it is hidden: "off", "notConnected", "noSave", "empty", "cutscene", "menu", "" shown.
     const char* gate = "";
     int x = 0;

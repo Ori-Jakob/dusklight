@@ -146,7 +146,9 @@ mod-panels[interactive] .twili-pw-grip {
     color: rgba(var(--color-accent-rgb), 40%);
 }
 
-mod-panels[interactive] .twili-pw-tp:hover {
+/* The pointer reaches the button with the menu open, or in play with the cursor shown. */
+mod-panels[interactive] .twili-pw-tp:hover,
+mod-panels[cursor] .twili-pw-tp:hover {
     background-color: rgba(var(--color-interactive-rgb), 30%);
 }
 
@@ -170,6 +172,7 @@ mod-panels[interactive] .twili-pw-tp:hover {
     white-space: normal;
 }
 
-mod-panels[interactive] .twili-pw-tp:hover + .twili-pw-tip {
+mod-panels[interactive] .twili-pw-tp:hover + .twili-pw-tip,
+mod-panels[cursor] .twili-pw-tp:hover + .twili-pw-tip {
     display: block;
 }
