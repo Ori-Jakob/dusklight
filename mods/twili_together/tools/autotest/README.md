@@ -173,7 +173,7 @@ World sync (`StepsWorld.cpp`):
 | `expectNoItem` | `item`, `forSec` (5) | fails if the item's first-get bit gets set within `forSec` |
 | `expectMerges` | `min`, `max`, `timeoutSec` | world-state merges applied so far: waits for `min`, fails above `max` |
 
-Chests, shared pickups and traps (`StepsPickups.cpp`):
+Chests, freestanding items, shared pickups and traps (`StepsPickups.cpp`):
 
 | op | fields | does |
 | --- | --- | --- |
@@ -181,13 +181,22 @@ Chests, shared pickups and traps (`StepsPickups.cpp`):
 | `openChest` | `tag` or `tbox`; `refused`, `frames` (60); `timeoutSec` | orders the chest's open as an A press does and presses A through the item message, until its bit is set and the event ended / with `refused`: for `frames` ticks no open may start an event |
 | `expectChestOpen` | `tag` or `tbox`, `open` (true), `forSec`, `timeoutSec` | the chest's TBOX bit is set and its lid at the last frame, with no event of ours (or, `open: false`, still closed) |
 | `expectTbox` | `no`, `tbl` (another stage table: its save slot), `set`, `forSec`, `timeoutSec` | a TBOX bit |
-| `setInventory` | `rupees`, `life` (quarter hearts), `arrows` | sets them in the save |
-| `expectInventory` | `rupees`, `life`, `arrows`, `bombs` (bag 0), `seeds`, `poes`, `bottles` (filled slots), `keys` with `tbl`; `forSec`, `timeoutSec` | waits until each given value matches (and holds `forSec`) |
-| `expectPickups` | `sent`, `applied`, `skipped`, `rupees`, `life`, `arrows`, `seeds`, `bombs`, `trapsSent`, `trapsReceived`, `trapsApplied`, `grantsApplied`; `min`/`max` objects of the same; `forSec`, `timeoutSec` | the SHARE_PICKUP and GIVE_ITEM counters |
+| `spawnFieldItem` | `tag`, `item` (0x21/0x22: a heart piece or container), `bit` (item bit), `dist` (150) | a resting field item `dist` units in front of our player |
+| `takeFieldItem` | `tag`, `holdSec` (0), `timeoutSec` | puts the item on our player until he takes it, pressing A through its message only after `holdSec`; done when it is gone and no event runs |
+| `holdFieldItem` | `tag`, `hold` (true) | marks the item as pulled by the clawshot, or lets it go |
+| `expectFieldItem` | `tag`, `present` (true), `forSec`, `timeoutSec` | the item exists |
+| `expectItemBit` | `bit` (below 0x80 dungeon, else memory), `tbl` (another stage table: its save slot), `set`, `forSec`, `timeoutSec` | an item bit |
+| `setInventory` | `rupees`, `life` (quarter hearts), `arrows`, `maxLife` (heart pieces, 5 a heart) | sets them in the save |
+| `expectInventory` | `rupees`, `life`, `arrows`, `bombs` (bag 0), `seeds`, `poes`, `bottles` (filled slots), `maxLife`, `keys` with `tbl`; `forSec`, `timeoutSec` | waits until each given value matches (and holds `forSec`) |
+| `expectPickups` | `sent`, `applied`, `skipped`, `rupees`, `life`, `arrows`, `seeds`, `bombs`, `trapsSent`, `trapsReceived`, `trapsApplied`, `grantsApplied`, `grantsQueued`, `removed`, `blocked`, `deduped` (freestanding items removed, pickups stopped, GIVE_ITEMs dropped); `min`/`max` objects of the same; `forSec`, `timeoutSec` | the SHARE_PICKUP, GIVE_ITEM and freestanding counters |
 
 Written for the chest sync, shared pickups, randomizer items, traps and toast batching, and **not run
 yet** (the machine was in use): `chest-sync`, `chest-sync-away`, `pickup-share`, `pickup-no-replay`,
 `rando-item-sync`, `rando-trap-spread` and `item-toast-burst` (`scenarios/pickups.js`).
+
+Written for freestanding items and item names, **not run yet** (the machine was in use):
+`freestanding-sync`, `freestanding-overlap`, `freestanding-busy`, `freestanding-away`,
+`item-name-audit` and `item-name-audit-rando` (`scenarios/freestanding.js`).
 
 Fidelity (`StepsFidelity.cpp`):
 
@@ -422,6 +431,7 @@ Item toasts (`StepsItemToast.cpp`), checked through the toast history:
 | op | fields | does |
 | --- | --- | --- |
 | `itemToastSelfTest` | `items` | icons and names from the game files |
+| `itemNameAudit` | `items`, `rando` (our game's kind) | every toastable item this game hands out (the randomizer's list, or all but the unused ids) has a proper name: not unknown, "Reserved", a number or a lower-case noun |
 | `itemToastOption` | `name` (`item_toasts`, `item_toasts_own`), `value` | |
 | `clearItemToasts` | | forgets the history and what waits |
 | `testItemToast` | `item`, `name`, `r`, `g`, `b`, `count`, `saveTbl` | a live toast as if a teammate picked the item up |
