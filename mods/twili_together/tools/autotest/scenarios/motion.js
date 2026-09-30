@@ -1,6 +1,6 @@
 // Smooth remote motion and hiding players in cutscenes.
 
-const { STAGES, COMMON_CVARS, tt, waitStage, barrier, meetIn, connect } = require("../lib");
+const { STAGES, COMMON_CVARS, tt, warp, waitStage, barrier, meetIn, connect } = require("../lib");
 
 // B measures its own motion, A measures B's dummy: one sender tick per local tick.
 const smoothMotion = (name, description, cvars, serverEnv = {}) => ({
@@ -43,9 +43,10 @@ const hideInCutscenes = [...COMMON_CVARS, tt("hide_players_in_cutscene", 1)];
 const roomHidesInCutscenes = { op: "waitRoomState", key: "hidePlayersInCutscene", value: true, timeoutSec: 20 };
 
 // The body's climb rate may change sharply on few ticks, for our Link and for the dummy alike.
-const steadyBody = { frames: 240, settleFrames: 20, jerk: 5, maxJerkRatio: 0.05 };
+const steadyBody = { frames: 240, settleFrames: 20, jerk: 3, maxJerkRatio: 0.05 };
 
 // B stands across a slope (and falls from over it); A's dummy of B plants both feet like B's Link.
+// A standing wolf, B's own too, keeps a paw up to about 8 over its ground at times.
 const feetOnSlope = (name, description, stage, wolf) => ({
     name,
     description,
@@ -59,7 +60,7 @@ const feetOnSlope = (name, description, stage, wolf) => ({
                 ...connect,
                 ...meetIn(stage, "B"),
                 { op: "waitSignal", name: "on-slope", from: "B", timeoutSec: 90 },
-                { op: "expectFeetOnGround", maxSpread: wolf ? 6 : 4, minBend: 3, frames: 30 },
+                { op: "expectFeetOnGround", maxSpread: wolf ? 10 : 2, minBend: 3, frames: 30 },
                 ...barrier("feet-checked", "B"),
                 { op: "expectDummyAirborne", timeoutSec: 5 },
                 ...barrier("fell", "B"),
@@ -76,7 +77,7 @@ const feetOnSlope = (name, description, stage, wolf) => ({
                 { op: "findSlope", minDeg: 12, maxDeg: 30 },
                 { op: "wait", frames: 30 },
                 // Our own Link on the same spot is the yardstick for the check on A
-                { op: "expectFeetOnGround", self: true, maxSpread: wolf ? 6 : 4, minBend: 3, frames: 10 },
+                { op: "expectFeetOnGround", self: true, maxSpread: wolf ? 10 : 2, minBend: 3, frames: 30 },
                 { op: "signal", name: "on-slope" },
                 ...barrier("feet-checked", "A"),
                 { op: "teleportSelf", dy: 250 },
@@ -129,7 +130,7 @@ module.exports = [
         [], { TT_TEST_JITTER_MS: "90" }),
     {
         name: "puppet-ground-steady",
-        description: "B walks in circles in Faron Field and then on a slope: the height of A's dummy of B changes as smoothly as B's own body (no hop at every step or slope change)",
+        description: "B walks in circles in Faron Field and then on a slope in South Faron: the height of A's dummy of B changes as smoothly as B's own body (no hop at every step or slope change)",
         timeoutSec: 360,
         cvars: COMMON_CVARS,
         instances: [
@@ -141,6 +142,9 @@ module.exports = [
                     ...meetIn(STAGES.faronField, "B"),
                     ...barrier("walk", "B"),
                     { op: "measureBodyHeight", ...steadyBody },
+                    // The field is flat around here: the slope is in South Faron
+                    warp(STAGES.southFaron),
+                    ...meetIn(STAGES.southFaron, "B"),
                     ...barrier("slope", "B"),
                     { op: "measureBodyHeight", ...steadyBody },
                     ...barrier("measured", "B"),
@@ -157,6 +161,8 @@ module.exports = [
                     { op: "walk", frames: 300, circle: true, async: true },
                     { op: "measureBodyHeight", self: true, ...steadyBody },
                     { op: "wait", frames: 60 },
+                    warp(STAGES.southFaron),
+                    ...meetIn(STAGES.southFaron, "A"),
                     { op: "findSlope", minDeg: 10, maxDeg: 30 },
                     { op: "wait", frames: 20 },
                     ...barrier("slope", "A"),
@@ -169,8 +175,8 @@ module.exports = [
         ],
     },
     feetOnSlope("puppet-feet-slope",
-        "B stands across a slope in Faron Field: A's dummy of B bends its legs and drops to the lower foot like B's Link, both feet on A's ground; in B's fall the dummy's legs let go",
-        STAGES.faronField, false),
+        "B stands across a slope in South Faron: A's dummy of B bends its legs and drops to the lower foot like B's Link, both feet on A's ground; in B's fall the dummy's legs let go",
+        STAGES.southFaron, false),
     feetOnSlope("puppet-feet-slope-wolf",
         "the same for B as a wolf in South Faron: all four paws of A's dummy on the slope",
         STAGES.southFaron, true),

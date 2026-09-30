@@ -281,6 +281,10 @@ bool findSlope(StepContext& ctx) {
     float bestDist = FLT_MAX;
     cXyz best;
     cXyz bestNormal;
+    int hits = 0;
+    int level = 0;
+    int sloped = 0;
+    float steepest = 0.0f;
     for (float dx = -radius; dx <= radius; dx += step) {
         for (float dz = -radius; dz <= radius; dz += step) {
             const float x = home.x + dx;
@@ -290,10 +294,17 @@ bool findSlope(StepContext& ctx) {
             if (y == -G_CM3D_F_INF) {
                 continue;
             }
+            hits++;
             const float ny = plane.mNormal.y;
-            if (std::fabs(y - home.y) > 150.0f || ny < minNy || ny > maxNy) {
+            if (std::fabs(y - home.y) > 150.0f) {
                 continue;
             }
+            level++;
+            steepest = std::max(steepest, std::acos(std::min(ny, 1.0f)) * 180.0f / 3.14159265f);
+            if (ny < minNy || ny > maxNy) {
+                continue;
+            }
+            sloped++;
             // The same plane 40 units around, not an edge or a step
             bool steady = true;
             for (int k = 0; k < 4 && steady; k++) {
@@ -310,6 +321,9 @@ bool findSlope(StepContext& ctx) {
             }
         }
     }
+    TwiliLog.info("[autotest] findSlope from ({:.0f} {:.0f} {:.0f}): {} ground hits, {} near our "
+                  "height (steepest {:.1f} degrees), {} in the range",
+                  home.x, home.y, home.z, hits, level, steepest, sloped);
     if (bestDist == FLT_MAX) {
         ctx.fail("findSlope: no steady slope within reach");
         return false;
@@ -361,10 +375,12 @@ float legBendDeg(daAlink_c* link) {
 }
 
 int sFeetHeldAt = -1;
+float sFeetWorstSpread = 0.0f;
 
 bool expectFeetOnGround(StepContext& ctx) {
     if (!ctx.begun) {
         sFeetHeldAt = -1;
+        sFeetWorstSpread = 0.0f;
     }
     const bool self = ctx.step.value("self", false);
     daAlink_c* link = bodyTarget(ctx);
@@ -378,6 +394,7 @@ bool expectFeetOnGround(StepContext& ctx) {
         const int n = bodyFeet(link, feet);
         float lo = FLT_MAX;
         float hi = -FLT_MAX;
+        std::string heights;
         dBgS_LinkGndChk chk;
         for (int i = 0; i < n; i++) {
             cXyz start(feet[i].x, feet[i].y + 50.0f, feet[i].z);
@@ -389,9 +406,14 @@ bool expectFeetOnGround(StepContext& ctx) {
             }
             lo = std::min(lo, feet[i].y - ground);
             hi = std::max(hi, feet[i].y - ground);
+            heights += fmt::format(" {:.1f}", feet[i].y - ground);
         }
         spread = hi - lo;
         bend = legBendDeg(link);
+        if (ctx.step.value("trace", false)) {
+            TwiliLog.info("[autotest] feet t{} spread {:.1f} bend {:.1f} heights{}", ctx.ticks,
+                          spread, bend, heights);
+        }
         DummyPlayerDebugInfo info;
         if (!why.empty()) {
             // no ground under a foot
@@ -411,9 +433,10 @@ bool expectFeetOnGround(StepContext& ctx) {
         if (sFeetHeldAt < 0) {
             sFeetHeldAt = ctx.ticks;
         }
+        sFeetWorstSpread = std::max(sFeetWorstSpread, spread);
         if (ctx.ticks - sFeetHeldAt >= ctx.step.value("frames", 30)) {
-            TwiliLog.info("[autotest] {} feet on the ground: spread {:.1f} bend {:.1f}",
-                          self ? "self" : "dummy", spread, bend);
+            TwiliLog.info("[autotest] {} feet on the ground: spread {:.1f} (worst {:.1f}) bend "
+                          "{:.1f}", self ? "self" : "dummy", spread, sFeetWorstSpread, bend);
             return true;
         }
         return false;

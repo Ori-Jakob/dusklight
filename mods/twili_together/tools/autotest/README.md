@@ -163,14 +163,14 @@ Motion (`StepsMotion.cpp`):
 | `teleportSelf` | `dx`, `dy`, `dz` | moves our player at once |
 | `expectDummyTeleport` | `minDist`, `maxPreStep`, `timeoutSec` | the first peer's dummy jumps `minDist` within one frame, without a slide before |
 | `measureBodyHeight` | `frames` (150), `settleFrames` (20), `self`, `jerk` (5), `maxJerkRatio` (0.05), `minTravel` (60) | the height of the first peer's dummy's body matrix (or our player's) per tick: fails when its climb rate changes by more than `jerk` on too many ticks |
-| `findSlope` | `minDeg` (12), `maxDeg` (30), `radius` (1200), `step` (60) | puts our Link on the nearest steady slope around it, standing across it |
-| `expectFeetOnGround` | `self`, `maxSpread` (4), `minBend` (0), `contact` (true), `frames` (30), `timeoutSec` | the feet (paws) of the first peer's dummy (or ours) stand at the same height over our ground, the legs bent at least `minBend` degrees, and the dummy's leg adjustment on |
+| `findSlope` | `minDeg` (12), `maxDeg` (30), `radius` (1200), `step` (60) | puts our Link on the nearest steady slope around it, standing across it (none near Faron Field's start; South Faron's spawn is on one) |
+| `expectFeetOnGround` | `self`, `maxSpread` (4), `minBend` (0), `contact` (true), `frames` (30), `trace`, `timeoutSec` | the feet (paws) of the first peer's dummy (or ours) stand at the same height over our ground, the legs bent at least `minBend` degrees, and the dummy's leg adjustment on |
 | `expectDummyAirborne` | `timeoutSec` (5) | the first peer's dummy has its feet off the ground (its sender's are) |
 
-Written for the steady body height and the leg adjustment of puppets, **not run yet** (the machine
-was in use): `puppet-ground-steady`, `puppet-feet-slope` and `puppet-feet-slope-wolf`
-(`scenarios/motion.js`), and the rider cut and ground blend checks new in `pose-selftest`. The
-`jerk`, `maxSpread` and `minBend` values are first guesses to set from the first run's logs.
+The thresholds of `puppet-ground-steady` and `puppet-feet-slope(-wolf)` come from their runs: the
+body's climb rate changed by at most 1.45 a tick, ours and the dummy's (`jerk` 3), a human's feet
+stood 0.3 apart (`maxSpread` 2) and a standing wolf, B's own too, keeps a paw up to 7.6 over its
+ground (`maxSpread` 10).
 
 World sync (`StepsWorld.cpp`):
 
