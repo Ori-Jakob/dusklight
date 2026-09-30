@@ -104,6 +104,8 @@ bool classifyLocalAttack(
 bool hurtboxEnabled(const Client& client);
 // Whether we may Z-target `client`'s dummy; unlike the hurtbox it stays on through their i-frames.
 bool lockOnEnabled(const Client& client);
+// A dummy our Link may Z-target now (its dummy set the battle attention entry this tick).
+bool lockOnTarget(const fopAc_ac_c* actor);
 // Our bomb arrow exploded at `pos`: that NBOMB counts as ours for a moment.
 void noteLocalExplosion(const cXyz& pos);
 

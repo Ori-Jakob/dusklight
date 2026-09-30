@@ -3,6 +3,7 @@
 #include "pvp/Pvp.hpp"
 
 #include "core/Client.hpp"
+#include "core/GameAccess.hpp"
 #include "core/SaveGate.hpp"
 #include "core/Session.hpp"
 
@@ -356,6 +357,10 @@ bool lockOnEnabled(const Client& client) {
     const Session& s = Session::instance();
     return s.isConnected() && s.roomState().pvpMode && isSaveLoaded() && client.isSaveLoaded &&
            pvpAllowedWith(client);
+}
+
+bool lockOnTarget(const fopAc_ac_c* actor) {
+    return isDummyPlayer(actor) && (actor->attention_info.flags & fopAc_AttnFlag_BATTLE_e) != 0;
 }
 
 uint16_t localVisFlags(daAlink_c* link) {
