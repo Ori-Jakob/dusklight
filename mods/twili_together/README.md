@@ -160,8 +160,14 @@ Lists everyone in the room, grouped by team, with where they are and whether the
 Each player has small buttons beside them: teleport to them (on a team only teammates are offered,
 unless the room allows teleporting across teams; greyed out with the reason in its tooltip while
 teleporting is off or not possible now), and, for the room owner or team leader, hand over the room
-or the team. Below the list is **Catch up to story**: when a teammate's story event moved them (for
-example Link's capture into Hyrule Castle) and you were not there, this takes you to the matching
+or the team. A teleport puts you right beside the other player, facing their way, in your own form:
+at once when their room is loaded around you, else after loading their area (the version of it your
+story progress loads, when they stand in a cutscene-only one). It works while they watch a
+cutscene, which plays on for them alone. Where the ground beside them is no place to stand (a pit,
+deep water, a wall) you land on the last solid ground they stood on, or the nearest entrance of
+their room. Not during your own cutscene, in a menu, while riding, swimming or carrying something;
+in mid-air it waits for you to land. Below the list is **Catch up to story**: when a teammate's
+story event moved them (for example Link's capture into Hyrule Castle) and you were not there, this takes you to the matching
 place with the matching form. It prefers the team's latest strong story move to a later minor one,
 and it also works offline from the moves this game learned before. Tears of light a teammate
 collects count for the whole team.

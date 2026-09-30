@@ -1462,6 +1462,18 @@ test("TELEPORT_TO with an unusable destination becomes a refusal", () => withSer
     assert.equal((await a.waitType("TELEPORT_TO", (p) => p.requestId === 4)).reason, "bad-destination");
 }));
 
+test("TELEPORT_TO passes the target's own pose, and drops an unusable one", () => withServer(async (mk) => {
+    const [a, b] = await teleportRoom(mk);
+    const spot = { ok: true, stageName: "F_SP108", roomNo: 1, layerNo: 0, pos: { x: 1, y: 2, z: 3 }, angleY: 0 };
+    b.send({ type: "TELEPORT_TO", targetClientId: a.id, requestId: 5, ...spot,
+             at: { x: 10.5, y: -20, z: 30, angleY: -16384, room: 7 } });
+    const ans = await a.waitType("TELEPORT_TO", (p) => p.requestId === 5);
+    assert.deepEqual([ans.ok, ans.at], [true, { x: 10.5, y: -20, z: 30, angleY: -16384 }]);
+    b.send({ type: "TELEPORT_TO", targetClientId: a.id, requestId: 6, ...spot, at: { x: 1, y: "2", z: 3 } });
+    const bad = await a.waitType("TELEPORT_TO", (p) => p.requestId === 6);
+    assert.deepEqual([bad.ok, bad.at, bad.pos], [true, undefined, { x: 1, y: 2, z: 3 }]);
+}));
+
 test("REQUEST_TELEPORT to someone gone or in another room is refused", () => withServer(async (mk) => {
     const [a] = await teleportRoom(mk);
     const other = mk();

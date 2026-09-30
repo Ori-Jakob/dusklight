@@ -208,8 +208,15 @@ this queue's epoch); a state without `seenSeq` empties the queue.
    `offline`, `not-in-game`, `other-team` (unless `teleportAcrossTeams`), `other-game` (always
    between different team games).
 3. The target answers `TELEPORT_TO {targetClientId, requestId, ok, stageName, roomNo, layerNo,
-   pos, angleY, ageMs}` with the last spot it stood on solid ground, or `ok: false` and a reason.
-   The relay checks the fields and passes it back.
+   pos, angleY, ageMs, at}`, also during its own cutscenes: `pos`/`angleY`/`roomNo` is where a
+   stage load puts the requester (the last spot the target stood on solid ground in its room, else
+   the nearest standable start point of the room; `ageMs` 0 for a start point), and `at {x, y, z,
+   angleY}` is the target's own position and facing. Or `ok: false` and a reason (`busy`,
+   `loading` during a stage change, `no-safe-spot`). The relay checks the fields and passes it
+   back, leaving out an unusable `at`.
+4. The requester lands beside `at` (or the target's newer `PLAYER_UPDATE` when they share a stage
+   and layer), without a reload when that room is loaded, else after loading `pos` on the layer
+   its own progress picks; ground there that is not standable leaves it on `pos`.
 
 ### PvP (one target, while `pvpMode` is on)
 

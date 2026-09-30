@@ -942,6 +942,12 @@ function handleTeleportTo(room, client, packet) {
                 angleY: asInt(packet.angleY, 0, -32768, 32767),
                 ageMs: asInt(packet.ageMs, 0, 0, 0x7fffffff),
             });
+            // The target's own pose; an unusable one is left out, the spot above still works.
+            const at = packet.at && typeof packet.at === "object" ? packet.at : {};
+            const ax = coord(at.x), ay = coord(at.y), az = coord(at.z);
+            if (ax !== null && ay !== null && az !== null) {
+                out.at = { x: ax, y: ay, z: az, angleY: asInt(at.angleY, 0, -32768, 32767) };
+            }
         }
     } else {
         out.reason = asString(packet.reason, "refused", 32);

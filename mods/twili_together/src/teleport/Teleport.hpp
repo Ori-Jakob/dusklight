@@ -14,6 +14,8 @@ enum class Phase : uint8_t {
     AwaitingAnswer,
     Executing,
     AwaitingArrival,
+    // After a stage load: waits for Link and the target's room to move him beside the target.
+    Placing,
 };
 
 enum class Result : uint8_t { None, MovedLocally, ChangedStage, Refused, TimedOut, Failed };
@@ -24,6 +26,8 @@ struct Status {
     uint32_t targetClientId = 0;
     std::string reason;
     std::string message;
+    // After an arrival: "exact" beside the target, "fallback" on the spot it sent; else "".
+    std::string placement;
     // Bumped whenever lastResult is written.
     uint32_t resultSeq = 0;
 };
@@ -35,7 +39,7 @@ const char* blockCode(uint32_t clientId);
 // another team's players the room keeps apart; Blocked while blockCode says no.
 enum class Offer : uint8_t { None, Ready, Blocked };
 Offer offer(uint32_t clientId);
-// "Teleport to <name>", with the reason while blocked.
+// "Teleport to <name>", with the reason while blocked ("you are ..." when it is our own state).
 std::string offerTooltip(uint32_t clientId);
 // Text for a reason code, also used for story codes ("in a cutscene").
 std::string reasonText(std::string_view code);
@@ -53,5 +57,8 @@ std::string clientName(uint32_t clientId);
 bool handlePacket(const std::string& type, const nlohmann::json& packet);
 // Every Session::update, connected or not: a stage change under way is seen through.
 void tick();
+
+// Autotest: shifts the target pose our placement aims at (an unstandable spot tests the fallback).
+void setPlacementOffsetForTest(float dx, float dy, float dz);
 
 }  // namespace twili::teleport
