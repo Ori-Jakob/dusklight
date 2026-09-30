@@ -7,8 +7,6 @@
 #include "d/d_item_data.h"
 #include "d/d_stage.h"
 
-#include <fmt/format.h>
-
 #include <array>
 #include <cctype>
 #include <cstring>
@@ -42,9 +40,6 @@ constexpr std::pair<uint8_t, const char*> kEnglishNames[] = {
     {dItemNo_ARROW_30_e, "Arrows (30)"},
     {dItemNo_ARROW_1_e, "Arrows (1)"},
     {dItemNo_PACHINKO_SHOT_e, "Pumpkin Seeds"},
-    {dItemNo_NOENTRY_19_e, "Reserved"},
-    {dItemNo_NOENTRY_20_e, "Reserved"},
-    {dItemNo_NOENTRY_21_e, "Reserved"},
     {dItemNo_WATER_BOMB_5_e, "Water Bombs (5)"},
     {dItemNo_WATER_BOMB_10_e, "Water Bombs (10)"},
     {dItemNo_WATER_BOMB_20_e, "Water Bombs (20)"},
@@ -78,12 +73,6 @@ constexpr std::pair<uint8_t, const char*> kEnglishNames[] = {
     {dItemNo_WALLET_LV1_e, "Wallet"},
     {dItemNo_WALLET_LV2_e, "Big Wallet"},
     {dItemNo_WALLET_LV3_e, "Giant Wallet"},
-    {dItemNo_NOENTRY_55_e, "Reserved"},
-    {dItemNo_NOENTRY_56_e, "Reserved"},
-    {dItemNo_NOENTRY_57_e, "Reserved"},
-    {dItemNo_NOENTRY_58_e, "Reserved"},
-    {dItemNo_NOENTRY_59_e, "Reserved"},
-    {dItemNo_NOENTRY_60_e, "Reserved"},
     {dItemNo_ZORAS_JEWEL_e, "Coral Earring"},
     {dItemNo_HAWK_EYE_e, "Hawkeye"},
     {dItemNo_WOOD_STICK_e, "Wooden Sword"},
@@ -100,17 +89,13 @@ constexpr std::pair<uint8_t, const char*> kEnglishNames[] = {
     {dItemNo_FISHING_ROD_1_e, "Fishing Rod"},
     {dItemNo_PACHINKO_e, "Slingshot"},
     {dItemNo_COPY_ROD_2_e, "Dominion Rod (Uncharged)"},
-    {dItemNo_NOENTRY_77_e, "Reserved"},
-    {dItemNo_NOENTRY_78_e, "Reserved"},
     {dItemNo_BOMB_BAG_LV2_e, "Giant Bomb Bag"},
     {dItemNo_BOMB_BAG_LV1_e, "Empty Bomb Bag"},
     {dItemNo_BOMB_IN_BAG_e, "Bomb Bag"},
-    {dItemNo_NOENTRY_82_e, "Reserved"},
     {dItemNo_LIGHT_ARROW_e, "Light Arrow"},
     {dItemNo_ARROW_LV1_e, "Quiver"},
     {dItemNo_ARROW_LV2_e, "Big Quiver"},
     {dItemNo_ARROW_LV3_e, "Giant Quiver"},
-    {dItemNo_NOENTRY_87_e, "Reserved"},
     {dItemNo_LURE_ROD_e, "Fishing Rod (Lure)"},
     {dItemNo_BOMB_ARROW_e, "Bomb Arrow"},
     {dItemNo_HAWK_ARROW_e, "Hawk Arrow"},
@@ -156,32 +141,11 @@ constexpr std::pair<uint8_t, const char*> kEnglishNames[] = {
     {dItemNo_WOOD_STATUE_e, "Wooden Statue"},
     {dItemNo_IRIAS_PENDANT_e, "Ilia's Charm"},
     {dItemNo_HORSE_FLUTE_e, "Horse Call"},
-    {dItemNo_NOENTRY_133_e, "Reserved"},
-    {dItemNo_NOENTRY_134_e, "Reserved"},
-    {dItemNo_NOENTRY_135_e, "Reserved"},
-    {dItemNo_NOENTRY_136_e, "Reserved"},
-    {dItemNo_NOENTRY_137_e, "Reserved"},
-    {dItemNo_NOENTRY_138_e, "Reserved"},
-    {dItemNo_NOENTRY_139_e, "Reserved"},
-    {dItemNo_NOENTRY_140_e, "Reserved"},
-    {dItemNo_NOENTRY_141_e, "Reserved"},
-    {dItemNo_NOENTRY_142_e, "Reserved"},
-    {dItemNo_NOENTRY_143_e, "Reserved"},
     {dItemNo_RAFRELS_MEMO_e, "Auru's Memo"},
     {dItemNo_ASHS_SCRIBBLING_e, "Ashei's Sketch"},
-    {dItemNo_NOENTRY_146_e, "Reserved"},
-    {dItemNo_NOENTRY_147_e, "Reserved"},
-    {dItemNo_NOENTRY_148_e, "Reserved"},
-    {dItemNo_NOENTRY_149_e, "Reserved"},
-    {dItemNo_NOENTRY_150_e, "Reserved"},
-    {dItemNo_NOENTRY_151_e, "Reserved"},
-    {dItemNo_NOENTRY_152_e, "Reserved"},
-    {dItemNo_NOENTRY_153_e, "Reserved"},
-    {dItemNo_NOENTRY_154_e, "Reserved"},
-    {dItemNo_NOENTRY_155_e, "Reserved"},
     {dItemNo_CHUCHU_YELLOW2_e, "Lantern Refill (Yellow Chu)"},
     {dItemNo_OIL_BOTTLE3_e, "Lantern Oil (Coro)"},
-    {dItemNo_SHOP_BEE_CHILD_e, "Bee Larve (Shop)"},
+    {dItemNo_SHOP_BEE_CHILD_e, "Bee Larva (Shop)"},
     {dItemNo_CHUCHU_BLACK_e, "Black Chu Jelly"},
     {dItemNo_LIGHT_DROP_e, "Tear of Light"},
     {dItemNo_DROP_CONTAINER_e, "Vessel of Light (Faron)"},
@@ -191,30 +155,12 @@ constexpr std::pair<uint8_t, const char*> kEnglishNames[] = {
     {dItemNo_MIRROR_PIECE_2_e, "Mirror Shard (Snowpeak Ruins)"},
     {dItemNo_MIRROR_PIECE_3_e, "Mirror Shard (Temple of Time)"},
     {dItemNo_MIRROR_PIECE_4_e, "Mirror Shard (City in the Sky)"},
-    {dItemNo_NOENTRY_168_e, "Reserved"},
-    {dItemNo_NOENTRY_169_e, "Reserved"},
-    {dItemNo_NOENTRY_170_e, "Reserved"},
-    {dItemNo_NOENTRY_171_e, "Reserved"},
-    {dItemNo_NOENTRY_172_e, "Reserved"},
-    {dItemNo_NOENTRY_173_e, "Reserved"},
-    {dItemNo_NOENTRY_174_e, "Reserved"},
-    {dItemNo_NOENTRY_175_e, "Reserved"},
     {dItemNo_SMELL_YELIA_POUCH_e, "Scent of Ilia"},
     {dItemNo_SMELL_PUMPKIN_e, "Pumpkin Scent"},
     {dItemNo_SMELL_POH_e, "Poe Scent"},
     {dItemNo_SMELL_FISH_e, "Reekfish Scent"},
     {dItemNo_SMELL_CHILDREN_e, "Youth's Scent"},
     {dItemNo_SMELL_MEDICINE_e, "Medicine Scent"},
-    {dItemNo_NOENTRY_182_e, "Reserved"},
-    {dItemNo_NOENTRY_183_e, "Reserved"},
-    {dItemNo_NOENTRY_184_e, "Reserved"},
-    {dItemNo_NOENTRY_185_e, "Reserved"},
-    {dItemNo_NOENTRY_186_e, "Reserved"},
-    {dItemNo_NOENTRY_187_e, "Reserved"},
-    {dItemNo_NOENTRY_188_e, "Reserved"},
-    {dItemNo_NOENTRY_189_e, "Reserved"},
-    {dItemNo_NOENTRY_190_e, "Reserved"},
-    {dItemNo_NOENTRY_191_e, "Reserved"},
     {dItemNo_M_BEETLE_e, "Beetle (M)"},
     {dItemNo_F_BEETLE_e, "Beetle (F)"},
     {dItemNo_M_BUTTERFLY_e, "Butterfly (M)"},
@@ -239,23 +185,7 @@ constexpr std::pair<uint8_t, const char*> kEnglishNames[] = {
     {dItemNo_F_ANT_e, "Ant (F)"},
     {dItemNo_M_MAYFLY_e, "Mayfly (M)"},
     {dItemNo_F_MAYFLY_e, "Mayfly (F)"},
-    {dItemNo_NOENTRY_216_e, "Reserved"},
-    {dItemNo_NOENTRY_217_e, "Reserved"},
-    {dItemNo_NOENTRY_218_e, "Reserved"},
-    {dItemNo_NOENTRY_219_e, "Reserved"},
-    {dItemNo_NOENTRY_220_e, "Reserved"},
-    {dItemNo_NOENTRY_221_e, "Reserved"},
-    {dItemNo_NOENTRY_222_e, "Reserved"},
-    {dItemNo_NOENTRY_223_e, "Reserved"},
     {dItemNo_POU_SPIRIT_e, "Poe Soul"},
-    {dItemNo_NOENTRY_225_e, "Reserved"},
-    {dItemNo_NOENTRY_226_e, "Reserved"},
-    {dItemNo_NOENTRY_227_e, "Reserved"},
-    {dItemNo_NOENTRY_228_e, "Reserved"},
-    {dItemNo_NOENTRY_229_e, "Reserved"},
-    {dItemNo_NOENTRY_230_e, "Reserved"},
-    {dItemNo_NOENTRY_231_e, "Reserved"},
-    {dItemNo_NOENTRY_232_e, "Reserved"},
     {dItemNo_ANCIENT_DOCUMENT_e, "Ancient Sky Book"},
     {dItemNo_AIR_LETTER_e, "Ancient Sky Book (Partial)"},
     {dItemNo_ANCIENT_DOCUMENT2_e, "Ancient Sky Book (Filled)"},
@@ -281,16 +211,57 @@ constexpr std::pair<uint8_t, const char*> kEnglishNames[] = {
     {dItemNo_NONE_e, "None"},
 };
 
-// The randomizer's items in ids the game leaves unused (mods/randomizer/src/item_ids.h); the game
-// files have no names for them.
+// Where the game's name reads wrong in a toast: plurals, lower-case bugs without their sex, the
+// light arrow's placeholder, the Light Sword's "Master Sword", bottles found filled.
+constexpr std::pair<uint8_t, const char*> kToastNames[] = {
+    {dItemNo_KAKERA_HEART_e, "Piece of Heart"},
+    {dItemNo_LIGHT_SWORD_e, "Light Sword"},
+    {dItemNo_LIGHT_ARROW_e, "Light Arrow"},
+    {dItemNo_HALF_MILK_BOTTLE_e, "Bottle with Half Milk"},
+    {dItemNo_DROP_BOTTLE_e, "Bottle with Great Fairy's Tears"},
+    {dItemNo_OIL_BOTTLE3_e, "Bottle with Lantern Oil"},
+    {dItemNo_MIRROR_PIECE_2_e, "Mirror Shard"},
+    {dItemNo_MIRROR_PIECE_3_e, "Mirror Shard"},
+    {dItemNo_MIRROR_PIECE_4_e, "Mirror Shard"},
+    {dItemNo_M_BEETLE_e, "Male Beetle"},
+    {dItemNo_F_BEETLE_e, "Female Beetle"},
+    {dItemNo_M_BUTTERFLY_e, "Male Butterfly"},
+    {dItemNo_F_BUTTERFLY_e, "Female Butterfly"},
+    {dItemNo_M_STAG_BEETLE_e, "Male Stag Beetle"},
+    {dItemNo_F_STAG_BEETLE_e, "Female Stag Beetle"},
+    {dItemNo_M_GRASSHOPPER_e, "Male Grasshopper"},
+    {dItemNo_F_GRASSHOPPER_e, "Female Grasshopper"},
+    {dItemNo_M_NANAFUSHI_e, "Male Phasmid"},
+    {dItemNo_F_NANAFUSHI_e, "Female Phasmid"},
+    {dItemNo_M_DANGOMUSHI_e, "Male Pill Bug"},
+    {dItemNo_F_DANGOMUSHI_e, "Female Pill Bug"},
+    {dItemNo_M_MANTIS_e, "Male Mantis"},
+    {dItemNo_F_MANTIS_e, "Female Mantis"},
+    {dItemNo_M_LADYBUG_e, "Male Ladybug"},
+    {dItemNo_F_LADYBUG_e, "Female Ladybug"},
+    {dItemNo_M_SNAIL_e, "Male Snail"},
+    {dItemNo_F_SNAIL_e, "Female Snail"},
+    {dItemNo_M_DRAGONFLY_e, "Male Dragonfly"},
+    {dItemNo_F_DRAGONFLY_e, "Female Dragonfly"},
+    {dItemNo_M_ANT_e, "Male Ant"},
+    {dItemNo_F_ANT_e, "Female Ant"},
+    {dItemNo_M_MAYFLY_e, "Male Dayfly"},
+    {dItemNo_F_MAYFLY_e, "Female Dayfly"},
+    {dItemNo_POU_SPIRIT_e, "Poe Soul"},
+    {dItemNo_AIR_LETTER_e, "Sky Character"},
+};
+
+// The randomizer's items in ids the game leaves unused, and ids it gives another meaning
+// (mods/randomizer/src/item_ids.h; names as its generator/data/text/languages/english.yaml).
 constexpr std::pair<uint8_t, const char*> kRandoNames[] = {
     {0x13, "Foolish Item"},
-    {0x14, "Ordon Portal"},
+    {0x14, "Ordon Spring Portal"},
     {0x15, "South Faron Portal"},
     {0x39, "Upper Zora's River Portal"},
     {0x3A, "Castle Town Portal"},
     {0x3B, "Gerudo Desert Portal"},
     {0x3C, "North Faron Portal"},
+    {0x4C, "Restored Dominion Rod"},
     {0x4D, "Kakariko Gorge Portal"},
     {0x4E, "Kakariko Village Portal"},
     {0x52, "Death Mountain Portal"},
@@ -334,6 +305,10 @@ constexpr std::pair<uint8_t, const char*> kRandoNames[] = {
     {0xBD, "Palace of Twilight Dungeon Map"},
     {0xBE, "Hyrule Castle Dungeon Map"},
     {0xBF, "Sacred Grove Portal"},
+    {0xD8, "Fused Shadow"},
+    {0xD9, "Fused Shadow"},
+    {0xDA, "Fused Shadow"},
+    {0xDB, "Mirror Shard"},
     {0xE1, "Ending Blow"},
     {0xE2, "Shield Attack"},
     {0xE3, "Back Slice"},
@@ -341,9 +316,15 @@ constexpr std::pair<uint8_t, const char*> kRandoNames[] = {
     {0xE5, "Mortal Draw"},
     {0xE6, "Jump Strike"},
     {0xE7, "Great Spin"},
-    {0xE8, "Eldin Bridge Portal"},
-    {0xEE, "North Faron Gate Key"},
-    {0xFE, "Coro Gate Key"},
+    {0xE8, "Bridge of Eldin Portal"},
+    {0xEE, "North Faron Woods Gate Key"},
+    {0xF3, "Gate Keys"},
+    {0xF6, "Snowpeak Ruins Bedroom Key"},
+    {0xF9, "Goron Mines Key Shard"},
+    {0xFA, "Goron Mines Key Shard"},
+    {0xFB, "Goron Mines Key Shard"},
+    {0xFD, "Goron Mines Big Key"},
+    {0xFE, "Faron Woods Coro Key"},
 };
 
 const std::string* randoName(uint8_t itemNo) {
@@ -360,9 +341,18 @@ const std::string* randoName(uint8_t itemNo) {
     return &sTable[itemNo];
 }
 
+const char* toastName(uint8_t itemNo) {
+    for (const auto& [no, name] : kToastNames) {
+        if (no == itemNo) {
+            return name;
+        }
+    }
+    return nullptr;
+}
+
 struct NameEntry {
     bool known = false;
-    bool fromGame = false;
+    ItemNameSource source = ItemNameSource::Unknown;
     std::string text;
 };
 
@@ -549,13 +539,14 @@ bool isUsableName(const std::string& s) {
     return false;
 }
 
-std::string fallbackName(uint8_t itemNo) {
+// Ids no game or mod item uses are "Unknown Item", never a placeholder or a number.
+NameEntry fallbackEntry(uint8_t itemNo) {
     for (const auto& [no, name] : kEnglishNames) {
         if (no == itemNo) {
-            return name;
+            return {true, ItemNameSource::Fallback, name};
         }
     }
-    return fmt::format("item 0x{:02X}", itemNo);
+    return {true, ItemNameSource::Unknown, "Unknown Item"};
 }
 
 const NameEntry& lookup(uint8_t itemNo, int saveTbl) {
@@ -564,20 +555,24 @@ const NameEntry& lookup(uint8_t itemNo, int saveTbl) {
     if (e.known) {
         return e;
     }
+    if (const char* name = snowpeakMap ? nullptr : toastName(itemNo)) {
+        e = {true, ItemNameSource::Mod, name};
+        return e;
+    }
     // Nothing is cached before the message archive is mounted (title screen).
     if (dComIfGp_getMsgDtArchive(0) == nullptr) {
         static NameEntry sTransient;
-        sTransient = {false, false, fallbackName(itemNo)};
+        sTransient = fallbackEntry(itemNo);
+        sTransient.known = false;
         return sTransient;
     }
-    // The game's heart piece name is the plural, which reads wrong for one pickup.
-    std::string text = itemNo == dItemNo_KAKERA_HEART_e
-                           ? std::string{}
-                           : gameMessage(snowpeakMap ? kSnowpeakMapMessage
-                                                     : itemNo + kItemNameMessageBase);
-    e.known = true;
-    e.fromGame = isUsableName(text);
-    e.text = e.fromGame ? std::move(text) : fallbackName(itemNo);
+    std::string text =
+        gameMessage(snowpeakMap ? kSnowpeakMapMessage : itemNo + kItemNameMessageBase);
+    if (isUsableName(text)) {
+        e = {true, ItemNameSource::Game, std::move(text)};
+    } else {
+        e = fallbackEntry(itemNo);
+    }
     return e;
 }
 
@@ -590,8 +585,11 @@ const std::string& itemDisplayName(uint8_t itemNo, int saveTbl) {
     return lookup(itemNo, saveTbl).text;
 }
 
-bool itemNameFromGame(uint8_t itemNo, int saveTbl) {
-    return lookup(itemNo, saveTbl).fromGame;
+ItemNameSource itemNameSource(uint8_t itemNo, int saveTbl) {
+    if (randoName(itemNo) != nullptr) {
+        return ItemNameSource::Mod;
+    }
+    return lookup(itemNo, saveTbl).source;
 }
 
 const char* dungeonNameForSaveTbl(int saveTbl) {

@@ -48,7 +48,8 @@ std::string iconSelfTest(const std::vector<int>& items) {
         const auto no = static_cast<uint8_t>(item);
         const toasts::IconProbe px = toasts::iconProbe(no);
         const std::string& name = ui::itemDisplayName(no);
-        const bool fromGame = ui::itemNameFromGame(no);
+        const ui::ItemNameSource source = ui::itemNameSource(no);
+        const bool fromGame = source == ui::ItemNameSource::Game;
         TwiliLog.info("[toast] icon 0x{:02X} {}x{} layers={} crc={:08x} name=\"{}\" fromGame={}",
             item, px.width, px.height, px.layers, px.checksum, name, fromGame);
         if (!px.ok || px.width < 16 || px.width > 64 || px.height < 16 || px.height > 64) {
@@ -61,7 +62,8 @@ std::string iconSelfTest(const std::vector<int>& items) {
         if (!fresh) {
             return fmt::format("items 0x{:02X} and 0x{:02X} have the same icon", it->second, item);
         }
-        if (!validUtf8Printable(name) || (!fromGame && no != 0x21)) {
+        // The game's text, or our fixed name where it reads wrong (the heart piece's plural).
+        if (!validUtf8Printable(name) || (!fromGame && source != ui::ItemNameSource::Mod)) {
             return fmt::format("item 0x{:02X}: name \"{}\" (from game: {})", item, name, fromGame);
         }
         first[item] = px.checksum;

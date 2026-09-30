@@ -169,7 +169,8 @@ std::string itemLabel(const ItemCount& ic) {
         ic.saveTbl != Session::instance().currentSaveTblNo())
     {
         const char* dungeon = ui::dungeonNameForSaveTbl(ic.saveTbl);
-        if (dungeon[0] != '\0') {
+        // A randomizer name already says it ("Snowpeak Ruins Bedroom Key").
+        if (dungeon[0] != '\0' && label.find(dungeon) == std::string::npos) {
             label += fmt::format(" ({})", dungeon);
         }
     }
