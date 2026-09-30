@@ -97,6 +97,7 @@ static constexpr u16 kBmdlBmdBlHands = 0x10;
 static constexpr u16 kBmdlBmdBlHead = 0x11;
 static constexpr f32 kDummyRemoteMorfFrames = 3.0f;
 static constexpr u16 kDummyRemoteMorfStartJoint = 0;
+static constexpr int kDummySnapTurn = 0x2000;
 static constexpr f32 kRemotePlayerSfxMaxDistance = 3500.0f;
 static constexpr f32 kRemotePlayerSfxMaxDistanceSq =
     kRemotePlayerSfxMaxDistance * kRemotePlayerSfxMaxDistance;
@@ -1953,6 +1954,11 @@ bool daDummyPlayer_c::setRemoteAnimations(const LinkPuppetState& state) {
     if (mDummyAnimationBlendInitialized && changedDominantAnm && field_0x2060) {
         field_0x2060->initOldFrameMorf(kDummyRemoteMorfFrames, kDummyRemoteMorfStartJoint,
                                        bodyJointNum());
+        // A facing snap with the new clip (a mount, a back jump): the old pose keeps its facing
+        const s16 turn = static_cast<s16>(mDummyCalcShapeY - shape_angle.y);
+        if (mDummyCalcValid && std::abs(turn) >= kDummySnapTurn) {
+            setOldRootQuaternion(0, turn, 0);
+        }
     }
     mDummyLowerDominantAnm = lowerDominant;
     mDummyUpperDominantAnm = upperDominant;
@@ -2001,7 +2007,18 @@ void daDummyPlayer_c::modelCalcRemoteBody(bool attentionLock, const twili::Remot
         field_0x2f99 |= 2;
         field_0x33b0 = ground.rootBaseY;
     }
+    // From the mount's pinned root into the saddle-relative one, as procHorseRide's end moves it
+    const bool saddle = mDummyRider.active && !checkWolf() && field_0x2f99 == 0x60;
+    if (mDummyCalcValid && saddle && mDummyCalcRootMode != 0x60 && (mDummyCalcRootMode & 2)) {
+        J3DTransformInfo* root = field_0x2060->getOldFrameTransInfo(0);
+        root->mTranslate.x += kDummyHorseBaseAnime.x;
+        root->mTranslate.y += kDummyHorseBaseAnime.y;
+        root->mTranslate.z += kDummyHorseBaseAnime.z;
+    }
     modelCalc(mpLinkModel);
+    mDummyCalcRootMode = saddle ? 0x60 : field_0x2f99 & 7;
+    mDummyCalcShapeY = shape_angle.y;
+    mDummyCalcValid = true;
     if (bowTilt) {
         mDummyBowTiltTicks++;
         mDummyBowTiltDeg = jointExtraTurnDeg(5);

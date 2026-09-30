@@ -359,6 +359,10 @@ private:
     bool mDummyFeetReset = true;
     bool mDummyFeetContact = false;  // autotest
     uint8_t mDummyGroundFlags = 0;   // autotest
+    // The root mode (0x60 in the saddle) and facing of the last body calc
+    u8 mDummyCalcRootMode = 0;
+    s16 mDummyCalcShapeY = 0;
+    bool mDummyCalcValid = false;
     J3DModel* mpDummyLoadedAmmoModel = nullptr;
     twili::RemoteHorseRider mDummyRider;
     uint8_t mDummyColorR = 255;

@@ -53,6 +53,11 @@ bool horseContinues(const RemoteHorsePose& a, const RemoteHorsePose& b) {
     return dx * dx + dy * dy + dz * dz <= kTeleportDistanceSq;
 }
 
+// A mount moves current.pos from the feet to the hips: no pose in between
+bool riderContinues(const LinkPuppetState& a, const LinkPuppetState& b) {
+    return a.horse.rider.active == b.horse.rider.active;
+}
+
 // The horse moves between the samples only while it is the same horse, uninterrupted
 void blendHorse(const RemoteHorsePose& a, const RemoteHorsePose& b, float t,
                 RemoteHorsePose& out) {
@@ -284,7 +289,9 @@ bool RemotePoseBuffer::sampleAt(double renderSeq, LinkPuppetState& out,
         // A seq gap means the sender skipped ticks that changed nothing
         const float t = static_cast<float>(
             std::clamp(renderSeq - (static_cast<double>(b.seq) - 1.0), 0.0, 1.0));
-        if (a.epoch == b.epoch && distSq(a.state, b.state) <= kTeleportDistanceSq) {
+        if (a.epoch == b.epoch && distSq(a.state, b.state) <= kTeleportDistanceSq &&
+            riderContinues(a.state, b.state))
+        {
             blendPose(a.state, b.state, t, out);
         } else {
             out = a.state;  // never a pose between the two sides of a teleport
@@ -297,7 +304,7 @@ bool RemotePoseBuffer::sampleAt(double renderSeq, LinkPuppetState& out,
     if (ahead > 0.0 && mCount >= 2) {
         const RemotePoseSample& p = at(mCount - 2);
         if (p.epoch == a.epoch && a.seq - p.seq == 1 &&
-            distSq(p.state, a.state) <= kTeleportDistanceSq)
+            distSq(p.state, a.state) <= kTeleportDistanceSq && riderContinues(p.state, a.state))
         {
             const float k = static_cast<float>(ahead);
             out.posX += (a.state.posX - p.state.posX) * k;
@@ -854,6 +861,35 @@ bool checkGetItemBlend(std::string& why) {
     return true;
 }
 
+// The first mounting sample shows whole: its position is the hips
+bool checkRiderCut(std::string& why) {
+    RemotePoseBuffer buf;
+    RemotePoseSample a = poseSample(1, 0.0f);
+    RemotePoseSample b = poseSample(2, 0.0f);
+    RemotePoseSample c = poseSample(3, 0.0f);
+    b.state.posY = c.state.posY = 102.0f;
+    for (RemotePoseSample* s : {&b, &c}) {
+        s->state.horse.flags = kHorsePresent;
+        s->state.horse.rider.active = true;
+        s->state.horse.rider.rootMode = 7;
+    }
+    buf.push(a, 0.0);
+    buf.push(b, tickSec(1));
+    buf.push(c, tickSec(2));
+    LinkPuppetState out;
+    const RemotePoseSample* shown = nullptr;
+    buf.sampleAt(1.5, out, &shown);
+    const float cutY = out.posY;
+    const bool cutRider = out.horse.rider.active;
+    buf.sampleAt(2.5, out, &shown);
+    if (cutY != 0.0f || cutRider || out.posY != 102.0f || !out.horse.rider.active) {
+        return failCheck(why, "rider cut: y %.1f rider %d into the mount (want 0, 0), %.1f %d "
+                         "while mounted (want 102, 1)", cutY, cutRider ? 1 : 0, out.posY,
+                         out.horse.rider.active ? 1 : 0);
+    }
+    return true;
+}
+
 // The body's offsets over its position blend like the position
 bool checkGroundBlend(std::string& why) {
     RemotePoseBuffer steps;
@@ -881,7 +917,7 @@ bool runRemotePoseSelfTest(std::string& why) {
            checkSenderPause(why) && checkReceiverPause(why) && checkRing(why) &&
            checkFrameBlend(why) && checkMidnaBlend(why) && checkWolfFxBlend(why) &&
            checkItemFxBlend(why) && checkHookBallBlend(why) && checkHorseBlend(why) &&
-           checkGetItemBlend(why) && checkGroundBlend(why);
+           checkGetItemBlend(why) && checkGroundBlend(why) && checkRiderCut(why);
 }
 
 }  // namespace twili

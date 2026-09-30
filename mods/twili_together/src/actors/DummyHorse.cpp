@@ -563,7 +563,8 @@ bool daDummyHorse_c::riderWorldPos(const RemoteHorseRider& rider, cXyz& out) {
 }
 
 void daDummyHorse_c::applyRider(daAlink_c& rider, const RemoteHorsePose& p) {
-    if (!mPosed || mParked || mDemoHeld || !mRidden) {
+    // setHorseStirrup runs from the mount's first tick to the dismount's rideGetOff
+    if (!mPosed || mParked || mDemoHeld || !p.rider.active) {
         return;
     }
     const RemoteHorseRider& r = p.rider;
