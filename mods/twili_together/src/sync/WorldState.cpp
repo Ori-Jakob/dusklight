@@ -352,6 +352,8 @@ void handleUpdateWorldState(const nlohmann::json& packet) {
     const dSv_memBit_c& liveBit = info->getMemory().getBit();
     const int liveKeyNumBefore = liveBit.mKeyNum;
     const uint8_t liveDungeonItemsBefore = liveBit.mDungeonItem;
+    const uint32_t liveTboxBefore[2] = {
+        static_cast<u32>(liveBit.mTbox[0]), static_cast<u32>(liveBit.mTbox[1])};
     // A broadcast that beats our catch-up request: nothing was replayed yet.
     if (!st.catchUpRequested) {
         st.keyCountAdoptable = untouchedStageMask(*info, saveTbl);
@@ -384,6 +386,14 @@ void handleUpdateWorldState(const nlohmann::json& packet) {
 
     if (saveTbl >= 0) {
         info->getSave(saveTbl);
+        for (int no = 0; no < TBOX_MAX; no++) {
+            const uint32_t mask = 1u << (no & 31);
+            if ((static_cast<u32>(liveBit.mTbox[no >> 5]) & mask) != 0 &&
+                (liveTboxBefore[no >> 5] & mask) == 0)
+            {
+                onRemoteTbox(saveTbl, no, false);
+            }
+        }
     }
 
     // Dungeon bits are not saved and only mean something inside that dungeon.

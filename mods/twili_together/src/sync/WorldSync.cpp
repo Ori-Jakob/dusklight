@@ -194,6 +194,7 @@ void onStageSaveTableLoaded() {
 
 void onStageSaveTableUnloaded() {
     s_state.dungeonBaselineValid = false;
+    clearOpeningChests();
 }
 
 bool handlePacket(const std::string& type, const nlohmann::json& packet) {

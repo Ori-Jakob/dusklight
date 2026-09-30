@@ -176,6 +176,7 @@ void handleSetFlag(const nlohmann::json& packet) {
         if (flagNo >= 0 && flagNo < TBOX_MAX) {
             if (dSv_memBit_c* bit = memBitForSaveTbl(saveTblNo)) {
                 bit->onTbox(flagNo);
+                onRemoteTbox(saveTblNo, flagNo, true);
             }
         }
     }

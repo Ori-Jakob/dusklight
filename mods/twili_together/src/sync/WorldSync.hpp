@@ -55,6 +55,12 @@ void keepTakenTearsForTest(bool keep);
 #endif
 bool installItemObserver();
 void removeItemObserver();
+// daTbox_c / daTbox2_c actionOpenWait pre (true: a teammate opened it, skip the original) and
+// actionWait post (plays the lid of a chest we opened).
+bool remoteOpenTbox(void* tbox);
+void animateOpenedTbox(void* tbox);
+bool remoteOpenTbox2(void* tbox2);
+void animateOpenedTbox2(void* tbox2);
 
 // GIVE_ITEM's filter: progression items, no consumables or dungeon items.
 bool isSyncedItemNo(int itemNo);

@@ -6,6 +6,8 @@
 #include "sync/RemoteApplyGuard.hpp"
 #include "sync/WorldSync.hpp"
 
+#include "d/actor/d_a_tbox.h"
+#include "d/actor/d_a_tbox2.h"
 #include "d/d_com_inf_game.h"
 #include "d/d_item.h"
 #include "d/d_save.h"
@@ -30,6 +32,10 @@ DEFINE_HOOK(&dSv_info_c::onItem, InfoOnItem);
 DEFINE_HOOK(&dSv_info_c::memory_to_card, SaveMemoryToCard);
 DEFINE_HOOK(&execItemGet, ItemExecItemGet);
 DEFINE_HOOK(&fpcM_Management, ProcManagement);
+DEFINE_HOOK(&daTbox_c::actionOpenWait, TboxActionOpenWait);
+DEFINE_HOOK(&daTbox_c::actionWait, TboxActionWait);
+DEFINE_HOOK(&daTbox2_c::actionOpenWait, Tbox2ActionOpenWait);
+DEFINE_HOOK(&daTbox2_c::actionWait, Tbox2ActionWait);
 
 namespace {
 
@@ -306,6 +312,29 @@ HookAction onProcManagementPre(ModContext*, void*, void*, void*) {
     return HOOK_CONTINUE;
 }
 
+HookAction onTboxOpenWaitPre(ModContext*, void* args, void* retval, void*) {
+    if (Session::active() && sync::remoteOpenTbox(mods::arg<daTbox_c*>(args, 0))) {
+        *static_cast<int*>(retval) = TRUE;
+        return HOOK_SKIP_ORIGINAL;
+    }
+    return HOOK_CONTINUE;
+}
+
+void onTboxWaitPost(ModContext*, void* args, void*, void*) {
+    sync::animateOpenedTbox(mods::arg<daTbox_c*>(args, 0));
+}
+
+HookAction onTbox2OpenWaitPre(ModContext*, void* args, void*, void*) {
+    if (Session::active() && sync::remoteOpenTbox2(mods::arg<daTbox2_c*>(args, 0))) {
+        return HOOK_SKIP_ORIGINAL;
+    }
+    return HOOK_CONTINUE;
+}
+
+void onTbox2WaitPost(ModContext*, void* args, void*, void*) {
+    sync::animateOpenedTbox2(mods::arg<daTbox2_c*>(args, 0));
+}
+
 template <class Entry>
 ModResult addObserver(HookPreFn pre, HookPostFn post, const char* what, std::string& error) {
     ModResult result = addPre<Entry>(pre, kObserve, what, error);
@@ -339,6 +368,12 @@ ModResult installSync(std::string& error) {
         addPost<SaveMemoryToCard>(onMemoryToCardPost, kDefault, "memory_to_card", error),
         addObserver<ItemExecItemGet>(onExecItemGetPre, onExecItemGetPost, "execItemGet", error),
         addPre<ProcManagement>(onProcManagementPre, kObserve, "fpcM_Management", error),
+        addPre<TboxActionOpenWait>(
+            onTboxOpenWaitPre, kDefault, "daTbox_c::actionOpenWait", error),
+        addPost<TboxActionWait>(onTboxWaitPost, kDefault, "daTbox_c::actionWait", error),
+        addPre<Tbox2ActionOpenWait>(
+            onTbox2OpenWaitPre, kDefault, "daTbox2_c::actionOpenWait", error),
+        addPost<Tbox2ActionWait>(onTbox2WaitPost, kDefault, "daTbox2_c::actionWait", error),
     };
     for (const ModResult r : results) {
         if (r != MOD_OK) {
