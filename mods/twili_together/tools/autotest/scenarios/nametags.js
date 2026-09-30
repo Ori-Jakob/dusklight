@@ -59,6 +59,7 @@ module.exports = [
                     ...barrier("a-toggled", "B"),
                     ...barrier("b-hp-2", "B"),
                     { op: "expectNameTag", name: "B", life: 20, maxLife: 20, holdTicks: 10 },
+                    ...barrier("a-hp-2", "B"),
                     ...barrier("b-hp-3", "B"),
                     // A one-letter name with 20 containers: bar, pads and dot stay under 110.
                     { op: "expectNameTag", name: "B", life: 3, maxLife: 80, maxWidth: 110, holdTicks: 10 },
@@ -81,6 +82,8 @@ module.exports = [
                     { op: "setLife", value: 20 },
                     { op: "wait", frames: 10 },
                     ...barrier("b-hp-2", "A"),
+                    // Keep 20/20 until A has checked it.
+                    ...barrier("a-hp-2", "A"),
                     { op: "setLife", hearts: 20, value: 3 },
                     { op: "wait", frames: 10 },
                     ...barrier("b-hp-3", "A"),
