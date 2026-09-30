@@ -170,7 +170,7 @@ repairs the stream.
 | --- | --- | --- |
 | `SET_FLAG` / `UNSET_FLAG` | `category`, `flagNo`, `roomNo`, `stageName`, `saveTblNo` | switches, chests, item flags |
 | `SET_EVENT_BIT` / `UNSET_EVENT_BIT` | `no` | story event bits; a few local-only bits are never sent |
-| `GIVE_ITEM` | `itemNo` | the receiver grants it through the game's item service, so a randomizer applies its own logic |
+| `GIVE_ITEM` | `itemNo` | the receiver grants it through the game's item service, so a randomizer applies its own logic. Skipped when the receiver has it, except items that come more than once (heart pieces and containers, bottles, bomb bags, Poe souls, the randomizer's dungeon small keys and Sky Characters). A bottle found filled arrives empty. Randomizer items in unused ids (portals, dungeon keys, maps, compasses) travel here too; its trap does not |
 | `UPDATE_DUNGEON_ITEMS` | `saveTblNo`, `keyDelta`, `dungeonItemBits` | small keys, map, compass, boss key |
 | `LIGHT_DROP` | `area`, `tbl`, `tbox` | a tear of light picked up. Unless that tear's TBOX bit is already set, the receiver sets it, adds one to the area's count (at most 16) and removes the tear from its screen; the bit keeps replays from counting twice |
 | `SHARE_PICKUP` | `items` (item numbers, at most 64) | consumables the sender just collected (rupees, hearts, fairies, arrows, seeds, bombs; no purchases, no bottled fairy, no tear) and, in a randomizer game, its trap item `0x13`. The receiver adds the same gain within its own limits (wallet, hearts, quiver or slingshot owned, bomb bags of that kind or empty ones; no heal while knocked out) with `sharePickups` on, and passes a trap to its own randomizer. Never queued or cached; receivers ignore replays |

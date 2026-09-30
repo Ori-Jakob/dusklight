@@ -1,5 +1,7 @@
 #include "ui/ItemNames.hpp"
 
+#include "game/GameIdentity.hpp"
+
 #include "JSystem/JKernel/JKRArchive.h"
 #include "d/d_com_inf_game.h"
 #include "d/d_item_data.h"
@@ -279,6 +281,85 @@ constexpr std::pair<uint8_t, const char*> kEnglishNames[] = {
     {dItemNo_NONE_e, "None"},
 };
 
+// The randomizer's items in ids the game leaves unused (mods/randomizer/src/item_ids.h); the game
+// files have no names for them.
+constexpr std::pair<uint8_t, const char*> kRandoNames[] = {
+    {0x13, "Foolish Item"},
+    {0x14, "Ordon Portal"},
+    {0x15, "South Faron Portal"},
+    {0x39, "Upper Zora's River Portal"},
+    {0x3A, "Castle Town Portal"},
+    {0x3B, "Gerudo Desert Portal"},
+    {0x3C, "North Faron Portal"},
+    {0x4D, "Kakariko Gorge Portal"},
+    {0x4E, "Kakariko Village Portal"},
+    {0x52, "Death Mountain Portal"},
+    {0x57, "Zora's Domain Portal"},
+    {0x85, "Forest Temple Small Key"},
+    {0x86, "Goron Mines Small Key"},
+    {0x87, "Lakebed Temple Small Key"},
+    {0x88, "Arbiter's Grounds Small Key"},
+    {0x89, "Snowpeak Ruins Small Key"},
+    {0x8A, "Temple of Time Small Key"},
+    {0x8B, "City in the Sky Small Key"},
+    {0x8C, "Palace of Twilight Small Key"},
+    {0x8D, "Hyrule Castle Small Key"},
+    {0x8E, "Bulblin Camp Key"},
+    {0x8F, "Lake Hylia Portal"},
+    {0x92, "Forest Temple Big Key"},
+    {0x93, "Lakebed Temple Big Key"},
+    {0x94, "Arbiter's Grounds Big Key"},
+    {0x95, "Temple of Time Big Key"},
+    {0x96, "City in the Sky Big Key"},
+    {0x97, "Palace of Twilight Big Key"},
+    {0x98, "Hyrule Castle Big Key"},
+    {0x99, "Forest Temple Compass"},
+    {0x9A, "Goron Mines Compass"},
+    {0x9B, "Lakebed Temple Compass"},
+    {0xA8, "Arbiter's Grounds Compass"},
+    {0xA9, "Snowpeak Ruins Compass"},
+    {0xAA, "Temple of Time Compass"},
+    {0xAB, "City in the Sky Compass"},
+    {0xAC, "Palace of Twilight Compass"},
+    {0xAD, "Hyrule Castle Compass"},
+    {0xAE, "Mirror Chamber Portal"},
+    {0xAF, "Snowpeak Portal"},
+    {0xB6, "Forest Temple Dungeon Map"},
+    {0xB7, "Goron Mines Dungeon Map"},
+    {0xB8, "Lakebed Temple Dungeon Map"},
+    {0xB9, "Arbiter's Grounds Dungeon Map"},
+    {0xBA, "Snowpeak Ruins Dungeon Map"},
+    {0xBB, "Temple of Time Dungeon Map"},
+    {0xBC, "City in the Sky Dungeon Map"},
+    {0xBD, "Palace of Twilight Dungeon Map"},
+    {0xBE, "Hyrule Castle Dungeon Map"},
+    {0xBF, "Sacred Grove Portal"},
+    {0xE1, "Ending Blow"},
+    {0xE2, "Shield Attack"},
+    {0xE3, "Back Slice"},
+    {0xE4, "Helm Splitter"},
+    {0xE5, "Mortal Draw"},
+    {0xE6, "Jump Strike"},
+    {0xE7, "Great Spin"},
+    {0xE8, "Eldin Bridge Portal"},
+    {0xEE, "North Faron Gate Key"},
+    {0xFE, "Coro Gate Key"},
+};
+
+const std::string* randoName(uint8_t itemNo) {
+    static const std::array<std::string, 256> sTable = [] {
+        std::array<std::string, 256> table;
+        for (const auto& [no, name] : kRandoNames) {
+            table[no] = name;
+        }
+        return table;
+    }();
+    if (sTable[itemNo].empty() || game_identity::current().kind != "randomizer") {
+        return nullptr;
+    }
+    return &sTable[itemNo];
+}
+
 struct NameEntry {
     bool known = false;
     bool fromGame = false;
@@ -503,6 +584,9 @@ const NameEntry& lookup(uint8_t itemNo, int saveTbl) {
 }  // namespace
 
 const std::string& itemDisplayName(uint8_t itemNo, int saveTbl) {
+    if (const std::string* name = randoName(itemNo)) {
+        return *name;
+    }
     return lookup(itemNo, saveTbl).text;
 }
 

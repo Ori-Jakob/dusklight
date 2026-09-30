@@ -14,6 +14,7 @@
 #include <mods/svc/item.h>
 
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <initializer_list>
 
@@ -26,6 +27,47 @@ constexpr const char* kRemoteGrant = "twili_together:remote";
 
 ItemGiveHandle s_observer = 0;
 
+// Randomizer items in ids vanilla leaves unused (mods/randomizer/src/item_ids.h).
+constexpr uint8_t kRandoKeyFirst = 0x85;  // Forest Temple .. Bulblin Camp small keys
+constexpr uint8_t kRandoKeyLast = 0x8E;
+// The stage table each of those keys counts in.
+constexpr uint8_t kRandoKeyTable[] = {0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x0A};
+
+bool isRandoDungeonKey(uint8_t itemNo) {
+    return itemNo >= kRandoKeyFirst && itemNo <= kRandoKeyLast;
+}
+
+// Dungeon-specific boss keys, compasses and maps.
+bool isRandoDungeonItem(uint8_t itemNo) {
+    return (itemNo >= 0x92 && itemNo <= 0x9B) || (itemNo >= 0xA8 && itemNo <= 0xAD) ||
+           (itemNo >= 0xB6 && itemNo <= 0xBE);
+}
+
+// Vanilla live dungeon items that the randomizer turns into gate keys and dungeon boss keys.
+bool isRandoRepurposedKey(uint8_t itemNo) {
+    switch (itemNo) {
+    case dItemNo_SMALL_KEY2_e:
+    case dItemNo_KEY_OF_FILONE_e:
+    case dItemNo_LV2_BOSS_KEY_e:
+    case dItemNo_LV5_BOSS_KEY_e:
+        return true;
+    default:
+        return false;
+    }
+}
+
+// A bottle that comes filled; a teammate gets it empty, what is inside stays with the finder.
+bool isFilledNewBottle(uint8_t itemNo) {
+    return itemNo == dItemNo_HALF_MILK_BOTTLE_e || itemNo == dItemNo_DROP_BOTTLE_e ||
+           itemNo == dItemNo_OIL_BOTTLE3_e;
+}
+
+// Item changes that GIVE_ITEM carries, so UPDATE_DUNGEON_ITEMS must not send them again.
+bool givesDungeonItems(uint8_t itemNo) {
+    return isRandoDungeonKey(itemNo) || isRandoDungeonItem(itemNo) ||
+           (isRandoRepurposedKey(itemNo) && randoGame());
+}
+
 bool isRepeatableItem(uint8_t itemNo) {
     switch (itemNo) {
     case dItemNo_KAKERA_HEART_e:
@@ -33,9 +75,13 @@ bool isRepeatableItem(uint8_t itemNo) {
     case dItemNo_EMPTY_BOTTLE_e:
     case dItemNo_BOMB_BAG_LV1_e:
     case dItemNo_BOMB_IN_BAG_e:
+    case dItemNo_POU_SPIRIT_e:
         return true;
+    // Each Sky Character is another one of these; the randomizer counts them.
+    case dItemNo_AIR_LETTER_e:
+        return randoGame();
     default:
-        return false;
+        return isRandoDungeonKey(itemNo) || isFilledNewBottle(itemNo);
     }
 }
 
@@ -164,6 +210,14 @@ struct ActiveGrant {
 ActiveGrant s_grant;
 int s_itemGetDepth = 0;
 
+// The live key count and dungeon bits before each open execItemGet, by depth.
+struct LiveDungeonItems {
+    bool absorb = false;
+    u8 keyNum = 0;
+    u8 items = 0;
+};
+std::array<LiveDungeonItems, 4> s_liveBefore{};
+
 constexpr int kWoodStickSwitch = 28;
 
 bool liveSwitch28() {
@@ -258,24 +312,26 @@ void handleGiveItem(const nlohmann::json& packet) {
         return;
     }
     const uint8_t item = static_cast<uint8_t>(itemNo);
+    // The toast names what the teammate found; a filled bottle arrives empty.
+    const uint8_t grant = isFilledNewBottle(item) ? dItemNo_EMPTY_BOTTLE_e : item;
     const uint32_t senderId = packet.value("clientId", 0u);
     const auto source =
         packet.value("fromQueue", false) ? item_toasts::Source::Replay : item_toasts::Source::Live;
     const bool pending =
-        std::find(st.pendingGrants.begin(), st.pendingGrants.end(), item) != st.pendingGrants.end();
-    if (!isRepeatableItem(item) && (pending || receiverHasItem(item))) {
+        std::find(st.pendingGrants.begin(), st.pendingGrants.end(), grant) != st.pendingGrants.end();
+    if (!isRepeatableItem(grant) && (pending || receiverHasItem(grant))) {
         TwiliLog.info(
             "[sync] skipped item 0x{:02X} from client {}: already have it", itemNo, senderId);
         item_toasts::noteItem(item_toasts::senderOf(session, packet), item, 1, -1, source, false);
         return;
     }
     if (svc_item == nullptr ||
-        svc_item->give_item(mod_ctx, kRemoteGrant, item, ITEM_GIVE_SILENT) != MOD_OK)
+        svc_item->give_item(mod_ctx, kRemoteGrant, grant, ITEM_GIVE_SILENT) != MOD_OK)
     {
         TwiliLog.warn("[sync] cannot grant item 0x{:02X}: ItemService unavailable", itemNo);
         return;
     }
-    st.pendingGrants.push_back(item);
+    st.pendingGrants.push_back(grant);
     st.stats.grantsQueued++;
     TwiliLog.info("[sync] received item 0x{:02X} from client {}", itemNo, senderId);
     item_toasts::noteItem(item_toasts::senderOf(session, packet), item, 1, -1, source, true);
@@ -289,9 +345,16 @@ bool isSyncedItemNo(int itemNo) {
     if (itemNo < 0 || itemNo > 0xFF) {
         return false;
     }
-    // Hearts, rupees, magic, ammo, fairies.
+    // The randomizer's Ordon and South Faron portals (unused ids in vanilla).
+    if (itemNo == dItemNo_NOENTRY_20_e || itemNo == dItemNo_NOENTRY_21_e) {
+        return true;
+    }
+    // Hearts, rupees, magic, ammo, fairies, and the randomizer's trap (SHARE_PICKUP carries those).
     if (itemNo <= dItemNo_TRIPLE_HEART_e) {
         return false;
+    }
+    if (isFilledNewBottle(static_cast<uint8_t>(itemNo))) {
+        return true;
     }
     // Bottle contents and refills (the empty bottle itself is progression).
     if (itemNo > dItemNo_EMPTY_BOTTLE_e && itemNo <= dItemNo_LV3_SOUP_e) {
@@ -300,14 +363,13 @@ bool isSyncedItemNo(int itemNo) {
     if (itemNo >= dItemNo_CHUCHU_YELLOW2_e && itemNo <= dItemNo_LIGHT_DROP_e) {
         return false;
     }
+    if (isRandoRepurposedKey(static_cast<uint8_t>(itemNo))) {
+        return randoGame();
+    }
     switch (itemNo) {
     // Dungeon items travel as UPDATE_DUNGEON_ITEMS.
     case dItemNo_SMALL_KEY_e:
-    case dItemNo_SMALL_KEY2_e:
-    case dItemNo_KEY_OF_FILONE_e:
     case dItemNo_BOSS_KEY_e:
-    case dItemNo_LV2_BOSS_KEY_e:
-    case dItemNo_LV5_BOSS_KEY_e:
     case dItemNo_MAP_e:
     case dItemNo_COMPUS_e:
     // Ooccoo and the note left in her slot: situational, per player.
@@ -356,6 +418,10 @@ void removeItemObserver() {
 void beforeItemGet(uint8_t itemNo) {
     State& st = state();
     s_itemGetDepth++;
+    if (s_itemGetDepth <= static_cast<int>(s_liveBefore.size())) {
+        const dSv_memBit_c& bit = dComIfGs_getSaveInfo()->getMemory().getBit();
+        s_liveBefore[s_itemGetDepth - 1] = {givesDungeonItems(itemNo), bit.mKeyNum, bit.mDungeonItem};
+    }
     // ItemService dispatches after mod_update; the window ends at the frame's actor pass.
     if (s_grant.active || !st.grantWindow || st.pendingGrants.empty() ||
         st.pendingGrants.front() != itemNo)
@@ -373,6 +439,16 @@ void beforeItemGet(uint8_t itemNo) {
 }
 
 void afterItemGet(uint8_t itemNo) {
+    if (s_itemGetDepth > 0 && s_itemGetDepth <= static_cast<int>(s_liveBefore.size())) {
+        const LiveDungeonItems& before = s_liveBefore[s_itemGetDepth - 1];
+        if (before.absorb) {
+            shiftDungeonItemBaseline(before.keyNum, before.items);
+            if (isRandoDungeonKey(itemNo)) {
+                const int tbl = kRandoKeyTable[itemNo - kRandoKeyFirst];
+                state().keyCountAdoptable &= ~(1u << tbl);
+            }
+        }
+    }
     if (s_grant.active && s_grant.depth == s_itemGetDepth && s_grant.item == itemNo) {
         undoStageEffects(s_grant);
         restoreProgress(s_grant.kept);

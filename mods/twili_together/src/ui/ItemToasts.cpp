@@ -4,6 +4,7 @@
 #include "core/LocalPlayer.hpp"
 #include "core/Log.hpp"
 #include "core/Session.hpp"
+#include "sync/WorldSync.hpp"
 #include "ui/ColorMath.hpp"
 #include "ui/ItemNames.hpp"
 #include "ui/Toasts.hpp"
@@ -109,39 +110,6 @@ bool isDungeonItem(uint8_t itemNo) {
         return true;
     default:
         return false;
-    }
-}
-
-// Progression items: no consumables, bottle contents, dungeon-only or situational items.
-bool isProgressionItem(uint8_t itemNo) {
-    if (itemNo <= dItemNo_TRIPLE_HEART_e) {
-        return false;
-    }
-    if (itemNo > dItemNo_EMPTY_BOTTLE_e && itemNo <= dItemNo_LV3_SOUP_e) {
-        return false;
-    }
-    if (itemNo >= dItemNo_CHUCHU_YELLOW2_e && itemNo <= dItemNo_LIGHT_DROP_e) {
-        return false;
-    }
-    switch (itemNo) {
-    case dItemNo_SMALL_KEY_e:
-    case dItemNo_SMALL_KEY2_e:
-    case dItemNo_KEY_OF_FILONE_e:
-    case dItemNo_BOSS_KEY_e:
-    case dItemNo_LV2_BOSS_KEY_e:
-    case dItemNo_LV5_BOSS_KEY_e:
-    case dItemNo_MAP_e:
-    case dItemNo_COMPUS_e:
-    case dItemNo_DUNGEON_EXIT_e:
-    case dItemNo_DUNGEON_EXIT_2_e:
-    case dItemNo_DUNGEON_BACK_e:
-    case dItemNo_LV7_DUNGEON_EXIT_e:
-    case dItemNo_TKS_LETTER_e:
-    case dItemNo_LINKS_SAVINGS_e:
-    case dItemNo_NONE_e:
-        return false;
-    default:
-        return true;
     }
 }
 
@@ -553,7 +521,7 @@ Sender senderOf(const Session& session, const nlohmann::json& packet) {
 }
 
 bool isToastableItem(uint8_t itemNo) {
-    return isProgressionItem(itemNo) || isDungeonItem(itemNo);
+    return sync::isSyncedItemNo(itemNo) || isDungeonItem(itemNo);
 }
 
 void noteItem(const Sender& who, uint8_t itemNo, int count, int saveTbl, Source src, bool applied) {
