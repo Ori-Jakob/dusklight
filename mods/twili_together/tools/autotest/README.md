@@ -198,6 +198,16 @@ Written for freestanding items and item names, **not run yet** (the machine was 
 `freestanding-sync`, `freestanding-overlap`, `freestanding-busy`, `freestanding-away`,
 `item-name-audit` and `item-name-audit-rando` (`scenarios/freestanding.js`).
 
+Items held up: chests, item gets, trades (`StepsGetItem.cpp`):
+
+| op | fields | does |
+| --- | --- | --- |
+| `expectLocalGetItem` | `item` (shown), `real` (given), `shows` (1), `ticks` (0), `timeoutSec` (30) | what our capture sent: the latest item and the totals |
+| `expectRemoteGetItem` | `item`, `near` (`[x, y, z]` from the dummy, in its facing frame) with `tol` (30), `minScale`, `emitters`, `maxFailures` (0); `drawn: false` (held up there, not drawn here); `none` (nothing wanted, built or loading); `frames` (0), `timeoutSec` (30) | until the first peer's dummy shows it so, then for `frames` more ticks |
+
+Written for items held up on a puppet, **not run yet** (the machine was in use): `getitem-chest`,
+`getitem-heart-piece`, `getitem-hidden` and `getitem-rando` (`scenarios/getitem.js`).
+
 Fidelity (`StepsFidelity.cpp`):
 
 | op | fields | does |
