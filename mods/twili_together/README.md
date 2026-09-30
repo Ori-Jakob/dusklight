@@ -89,6 +89,7 @@ Personal settings, on the Connection tab:
 | Item Pickups | on | a toast with the item's icon when a teammate picks something up; items synced while you were away are summarized |
 | Your Own Pickups | off | toasts for your own pickups too |
 | Story Prompts | on | ask whether to follow when a teammate's story event moves them |
+| Show Player Health | on | a heart bar on other players' name tags: their health in quarter hearts, a segment per heart container |
 | Players Widget | on | the players list on screen (below) |
 | Players Widget Opacity | 80% | how solid its background and border are, 0% to 100% |
 | Players Widget Size | 100% | zooms the whole widget, 50% to 200% |
@@ -149,8 +150,9 @@ double, a hit never more than one heart. Magic Armor pays in rupees as usual.
 When your hit lands, the game pauses for a moment (sword and wolf attacks, not on horseback), the
 other player makes the impact sound, and a small number rises where you hit: the hearts taken,
 "Hit" for none, "Blocked" when their shield took it. Hold L to Z-target the players you can
-fight. A hit that takes someone down to the one-heart floor shows "A beat B" to the whole room;
-with Lethal PvP, one that takes their last heart shows "A knocked out B".
+fight: Link takes his battle stance as he does against an enemy. A hit that takes someone down
+to the one-heart floor shows "A beat B" to the whole room; with Lethal PvP, one that takes their
+last heart shows "A knocked out B".
 
 ## The Players tab
 
