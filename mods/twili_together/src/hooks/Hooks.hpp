@@ -22,6 +22,7 @@ enum class Group : uint8_t {
     EnemyCount,
     Story,
     Map,
+    Chests,
     Autotest,
     Count,
 };

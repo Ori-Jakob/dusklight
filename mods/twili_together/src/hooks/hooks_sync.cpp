@@ -38,7 +38,7 @@ DEFINE_HOOK(&fpcM_Management, ProcManagement);
 DEFINE_HOOK(&daTbox_c::actionOpenWait, TboxActionOpenWait);
 DEFINE_HOOK(&daTbox_c::actionWait, TboxActionWait);
 DEFINE_HOOK(&daTbox2_c::actionOpenWait, Tbox2ActionOpenWait);
-DEFINE_HOOK(&daTbox2_c::actionWait, Tbox2ActionWait);
+DEFINE_HOOK(&daTbox2_c::action, Tbox2Action);
 DEFINE_HOOK(&daAlink_c::makeFairy, AlinkMakeFairy);
 DEFINE_HOOK(&daItem_c::itemGetNextExecute, ItemGetNextExecute);
 DEFINE_HOOK(&daObjLife_c::initActionOrderGetDemo, LifeOrderGetDemo);
@@ -337,7 +337,8 @@ HookAction onTbox2OpenWaitPre(ModContext*, void* args, void*, void*) {
     return HOOK_CONTINUE;
 }
 
-void onTbox2WaitPost(ModContext*, void* args, void*, void*) {
+// actionWait is an empty function, too short to hook: its caller runs every tick instead.
+void onTbox2ActionPost(ModContext*, void* args, void*, void*) {
     sync::animateOpenedTbox2(mods::arg<daTbox2_c*>(args, 0));
 }
 
@@ -400,18 +401,29 @@ ModResult installSync(std::string& error) {
         addPost<SaveMemoryToCard>(onMemoryToCardPost, kDefault, "memory_to_card", error),
         addObserver<ItemExecItemGet>(onExecItemGetPre, onExecItemGetPost, "execItemGet", error),
         addPre<ProcManagement>(onProcManagementPre, kObserve, "fpcM_Management", error),
-        addPre<TboxActionOpenWait>(
-            onTboxOpenWaitPre, kDefault, "daTbox_c::actionOpenWait", error),
-        addPost<TboxActionWait>(onTboxWaitPost, kDefault, "daTbox_c::actionWait", error),
-        addPre<Tbox2ActionOpenWait>(
-            onTbox2OpenWaitPre, kDefault, "daTbox2_c::actionOpenWait", error),
-        addPost<Tbox2ActionWait>(onTbox2WaitPost, kDefault, "daTbox2_c::actionWait", error),
         addObserver<AlinkMakeFairy>(
             onMakeFairyPre, onMakeFairyPost, "daAlink_c::makeFairy", error),
         addPre<ItemGetNextExecute>(
             onItemGetNextPre, kObserve, "daItem_c::itemGetNextExecute", error),
         addPre<LifeOrderGetDemo>(
             onLifeOrderGetDemoPre, kObserve, "daObjLife_c::initActionOrderGetDemo", error),
+    };
+    for (const ModResult r : results) {
+        if (r != MOD_OK) {
+            return r;
+        }
+    }
+    return MOD_OK;
+}
+
+ModResult installChests(std::string& error) {
+    const ModResult results[] = {
+        addPre<TboxActionOpenWait>(
+            onTboxOpenWaitPre, kDefault, "daTbox_c::actionOpenWait", error),
+        addPost<TboxActionWait>(onTboxWaitPost, kDefault, "daTbox_c::actionWait", error),
+        addPre<Tbox2ActionOpenWait>(
+            onTbox2OpenWaitPre, kDefault, "daTbox2_c::actionOpenWait", error),
+        addPost<Tbox2Action>(onTbox2ActionPost, kDefault, "daTbox2_c::action", error),
     };
     for (const ModResult r : results) {
         if (r != MOD_OK) {

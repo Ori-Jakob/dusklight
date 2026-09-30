@@ -105,6 +105,9 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     hooks::install(hooks::Group::EnemyCount, enemyCountError);
     std::string storyError;
     hooks::install(hooks::Group::Story, storyError);
+    // Optional: without it a teammate's chest only shows open after a room reload.
+    std::string chestsError;
+    hooks::install(hooks::Group::Chests, chestsError);
     // Optional: without it PvP hits are not taken.
     std::string pvpError;
     hooks::install(hooks::Group::Pvp, pvpError);
