@@ -277,6 +277,31 @@ struct RemoteItemFx {
     RemoteFishing fr;
 };
 
+// PLAYER_UPDATE "gi"[0] bits 16-23
+enum GetItemFlag : uint8_t {
+    kGetItemShown = 1 << 0,      // the sender's daDitem_c is drawn: all fields are set
+    kGetItemEffectMtx = 1 << 1,  // its chkFlag(4): no differed DL, effect matrices
+    kGetItemNoLight = 1 << 2,    // arg flag 2 or 4: no light, no 0xA1B insect glow
+    kGetItemPending = 1 << 3,    // it exists, not shown yet: only the items are set
+    kGetItemWireMask = 0x0F,
+};
+
+// Farther than this from the sender, a held up item is junk.
+inline constexpr float kMaxGetItemOffset = 1000.0f;
+
+// The item model the sender holds up (daDitem_c: item gets, trades, items it cannot use here).
+struct RemoteGetItem {
+    uint8_t flags = 0;        // GetItemFlag
+    uint8_t displayItem = 0;  // getDisplayItemNo: the model
+    uint8_t realItem = 0;     // m_itemNo: the effects
+    int16_t yaw = 0;          // current.angle.y less the sender's shape_angle.y
+    float scale = 0.0f;       // the model's base scale
+    float timer = 0.0f;       // m_timer: the frame of its looping clips
+    float offset[3] = {};     // from the sender's current.pos, turned by -shape_angle.y
+    bool shown() const { return (flags & kGetItemShown) != 0; }
+    bool present() const { return (flags & (kGetItemShown | kGetItemPending)) != 0; }
+};
+
 // PLAYER_UPDATE "xe"
 enum ItemFxEventType : uint8_t {
     kItemFxEvNone = 0,
@@ -476,6 +501,7 @@ struct LinkPuppetState {
     // The sender streams its items ("xv" in its keyframes)
     bool sendsItemFx = false;
     RemoteHorsePose horse;  // its Epona, posed by the dummy on its puppet (DummyHorse.cpp)
+    RemoteGetItem getItem;
 };
 
 // The latest received pose of `client` (LinkPuppetState.cpp).
@@ -539,6 +565,8 @@ struct WirePose {
     int32_t hsz[8]{};
     // Life and max life in quarter hearts
     int32_t hp[2]{};
+    // The item held up (RemoteGetItem, GetItem.hpp)
+    int32_t gi[7]{};
 };
 
 struct RemotePoseSample {

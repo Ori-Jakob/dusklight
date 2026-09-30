@@ -55,6 +55,7 @@ set(TWILI_SOURCES
     src/enemy/EnemyScaling.cpp
     src/enemy/EnemySync.cpp
     src/fx/Fishing.cpp
+    src/fx/GetItem.cpp
     src/fx/ItemFx.cpp
     src/fx/PlayerRecolor.cpp
     src/fx/RemoteTransformFx.cpp

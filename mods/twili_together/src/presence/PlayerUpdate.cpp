@@ -5,6 +5,7 @@
 #include "core/Session.hpp"
 #include "core/Visibility.hpp"
 #include "fx/Fishing.hpp"
+#include "fx/GetItem.hpp"
 #include "fx/ItemFx.hpp"
 #include "fx/RemoteTransformFx.hpp"
 #include "fx/StatusFx.hpp"
@@ -623,6 +624,9 @@ void Session::sendPlayerUpdate(float posX, float posY, float posZ,
     itemfx::encodeHeldExtra(itemFx.hx, cur.hx);
     fishing::captureLocal(daAlink_getAlinkActorClass(), itemFx.fr);
     fishing::encode(itemFx.fr, cur.fr);
+    RemoteGetItem getItem;
+    getitem::captureLocal(daAlink_getAlinkActorClass(), tx.seq, getItem);
+    getitem::encode(getItem, cur.gi);
     RemoteHorsePose horsePose;
     horse::captureLocal(horsePose);
     horse::encode(horsePose, cur);
@@ -749,6 +753,10 @@ static void sendPose(Session& session, PoseSender& tx, const WirePose& cur, uint
     }
     if (!keyframe || anyNonZero(cur.hp)) {
         putField(packet, "hp", cur.hp, o.hp, keyframe, changed);
+    }
+    // And for a player holding nothing up.
+    if (!keyframe || anyNonZero(cur.gi)) {
+        putField(packet, "gi", cur.gi, o.gi, keyframe, changed);
     }
     if (keyframe) {
         packet["xv"] = 1;
@@ -1014,6 +1022,7 @@ void Session::handlePlayerUpdate(const nlohmann::json& packet) {
     takeItemGroup("or", w.hsr);
     takeItemGroup("oz", w.hsz);
     takeItemGroup("hp", w.hp);
+    takeItemGroup("gi", w.gi);
     if (keyframe) {
         c.sendsItemFx = packet.find("xv") != packet.end();
     }
@@ -1100,6 +1109,7 @@ void Session::handlePlayerUpdate(const nlohmann::json& packet) {
     c.itemFx.hx = itemfx::decodeHeldExtra(w.hx);
     c.itemFx.fr = fishing::decode(w.fr);
     c.horse = horse::decode(w);
+    c.getItem = getitem::decode(w.gi);
     c.hasPlayerUpdate = true;
 
     RemotePoseSample sample;

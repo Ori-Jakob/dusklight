@@ -93,6 +93,7 @@ struct Client {
     bool sendsItemFx = false;
     ItemFxEventQueue itemFxEvents;
     RemoteHorsePose horse;
+    RemoteGetItem getItem;
 
     // Deltas apply on top of `wire`.
     WirePose wire;

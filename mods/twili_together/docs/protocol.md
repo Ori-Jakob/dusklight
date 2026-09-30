@@ -161,6 +161,7 @@ play them back a little behind the newest one, so network jitter does not show. 
 | `x0`..`x7`, `xe`, `hk`, `bc`, `ls`, `hx`, `fr` | items in the world (arrows, bombs, boomerang, ...), one-shot events, clawshot, ball and chain, level sounds, bottle, fishing rod |
 | `ox`, `op`, `os`, `oa`, `of`, `ow`, `ok`, `or`, `oz` | the player's Epona, and Zelda behind its rider |
 | `hp` | `[life, maxLife]` in quarter hearts, for the name tag's health bar; optional (a keyframe without it means unknown) |
+| `gi` | the item held up (item get, trade, item that cannot be used there): `[shownItem \| givenItem << 8 \| flags << 16, yaw, scale x1024, timer, x, y, z x8]`, yaw and place relative to the player's facing and position; flag 8 alone means it exists but is not shown yet (receivers load its model); optional (absent in a keyframe means none) |
 
 Presence is best effort: when the send queue is full, deltas are dropped and the next keyframe
 repairs the stream.

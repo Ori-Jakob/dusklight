@@ -213,6 +213,18 @@ void blendPose(const LinkPuppetState& a, const LinkPuppetState& b, float t, Link
         fo.bend = lerp(fa.bend, fb.bend, t);
     }
     blendHorse(a.horse, b.horse, t, out.horse);
+    // The held up item turns and grows while it is the same one
+    const RemoteGetItem& ga = a.getItem;
+    const RemoteGetItem& gb = b.getItem;
+    if (ga.shown() && gb.shown() && ga.displayItem == gb.displayItem && gb.timer >= ga.timer) {
+        RemoteGetItem& go = out.getItem;
+        go.yaw = lerpAngle(ga.yaw, gb.yaw, t);
+        go.scale = lerp(ga.scale, gb.scale, t);
+        go.timer = lerp(ga.timer, gb.timer, t);
+        for (int k = 0; k < 3; k++) {
+            go.offset[k] = lerp(ga.offset[k], gb.offset[k], t);
+        }
+    }
     out.frameAlpha = t;
 }
 
@@ -798,6 +810,45 @@ bool checkHorseBlend(std::string& why) {
     return true;
 }
 
+// The held up item blends while both samples show the same one, and not into another
+bool checkGetItemBlend(std::string& why) {
+    RemotePoseBuffer buf;
+    RemotePoseSample a = poseSample(1, 0.0f);
+    RemotePoseSample b = poseSample(2, 0.0f);
+    RemotePoseSample c = poseSample(3, 0.0f);
+    for (RemotePoseSample* s : {&a, &b, &c}) {
+        s->state.getItem.flags = kGetItemShown;
+        s->state.getItem.displayItem = 0x21;
+    }
+    c.state.getItem.displayItem = 0x22;
+    a.state.getItem.yaw = 32000;
+    b.state.getItem.yaw = -32000;
+    a.state.getItem.scale = 0.35f;
+    b.state.getItem.scale = 0.7f;
+    a.state.getItem.timer = 10.0f;
+    b.state.getItem.timer = 11.0f;
+    c.state.getItem.timer = 12.0f;
+    b.state.getItem.offset[1] = 100.0f;
+    buf.push(a, 0.0);
+    buf.push(b, tickSec(1));
+    buf.push(c, tickSec(2));
+    LinkPuppetState out;
+    const RemotePoseSample* shown = nullptr;
+    buf.sampleAt(1.5, out, &shown);
+    const RemoteGetItem g = out.getItem;
+    buf.sampleAt(2.5, out, &shown);
+    if (std::abs(static_cast<int>(g.yaw)) <= 32000 || std::fabs(g.scale - 0.525f) > 0.001f ||
+        std::fabs(g.timer - 10.5f) > 0.001f || std::fabs(g.offset[1] - 50.0f) > 0.01f ||
+        out.getItem.timer != 11.0f || out.getItem.displayItem != 0x21)
+    {
+        return failCheck(why, "get item blend: yaw %d (want the short way), scale %.3f (want "
+                         "0.525), timer %.2f (want 10.5), y %.1f (want 50), toward another item "
+                         "timer %.1f item 0x%X (want 11, 0x21)", g.yaw, g.scale, g.timer,
+                         g.offset[1], out.getItem.timer, out.getItem.displayItem);
+    }
+    return true;
+}
+
 }  // namespace
 
 bool runRemotePoseSelfTest(std::string& why) {
@@ -805,7 +856,8 @@ bool runRemotePoseSelfTest(std::string& why) {
            checkGapHold(why) && checkExtrapolation(why) && checkSteadyDelay(why) &&
            checkSenderPause(why) && checkReceiverPause(why) && checkRing(why) &&
            checkFrameBlend(why) && checkMidnaBlend(why) && checkWolfFxBlend(why) &&
-           checkItemFxBlend(why) && checkHookBallBlend(why) && checkHorseBlend(why);
+           checkItemFxBlend(why) && checkHookBallBlend(why) && checkHorseBlend(why) &&
+           checkGetItemBlend(why);
 }
 
 }  // namespace twili
