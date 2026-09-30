@@ -441,6 +441,26 @@ struct RemoteHorsePose {
     bool present() const { return (flags & kHorsePresent) != 0; }
 };
 
+// PLAYER_UPDATE "yo"[0] bits
+enum GroundFlag : uint8_t {
+    kGroundFeet = 1 << 0,        // footBgCheck's feet on the ground (not airborne, sunk, climbing)
+    kGroundIdle = 1 << 1,        // MODE_IDLE: the body drops to the lower foot, the feet tilt
+    kGroundRootYClear = 1 << 2,  // the root joint's height is rootBaseY (checkRootTransYClearMode)
+    kGroundWireMask = 0x07,
+};
+
+// Larger body offsets are junk (setStepsOffset stays within 50, a demo's scale within 100).
+inline constexpr float kMaxGroundOffset = 300.0f;
+inline constexpr float kMaxRootBaseY = 500.0f;
+
+// How high the sender's body sits over its position (setMatrix) and what its feet do.
+struct RemoteGround {
+    uint8_t flags = 0;         // GroundFlag
+    float stepOffset = 0.0f;   // field_0x2b98: setStepsOffset's easing over steps, the swim bob
+    float extraOffset = 0.0f;  // field_0x2b9c, field_0x2ba0 (stairs) and the board's 13
+    float rootBaseY = 0.0f;    // field_0x33b0 while kGroundRootYClear
+};
+
 struct LinkPuppetState {
     float posX = 0.0f, posY = 0.0f, posZ = 0.0f;
     int16_t angleX = 0, angleY = 0, angleZ = 0;
@@ -502,6 +522,7 @@ struct LinkPuppetState {
     bool sendsItemFx = false;
     RemoteHorsePose horse;  // its Epona, posed by the dummy on its puppet (DummyHorse.cpp)
     RemoteGetItem getItem;
+    RemoteGround ground;
 };
 
 // The latest received pose of `client` (LinkPuppetState.cpp).
@@ -567,6 +588,8 @@ struct WirePose {
     int32_t hp[2]{};
     // The item held up (RemoteGetItem, GetItem.hpp)
     int32_t gi[7]{};
+    // The body's height and feet (RemoteGround): flags, step offset, extra offset, root base Y
+    int32_t yo[4]{};
 };
 
 struct RemotePoseSample {

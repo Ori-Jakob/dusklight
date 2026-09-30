@@ -392,6 +392,31 @@ void Session::captureLocalTransformFx(RemoteTransformFx& out) {
     captureTransformFx(s_poseTx, out);
 }
 
+// setMatrix's offsets over current.pos and footBgCheck's own tests, as this tick's calc used them
+static void captureGround(RemoteGround& out) {
+    out = RemoteGround{};
+    daAlink_c* link = daAlink_getAlinkActorClass();
+    if (link == nullptr) {
+        return;
+    }
+    if (link->mLinkAcch.ChkGroundHit() && !link->checkMagneBootsOn() &&
+        !(link->mSinkShapeOffset < 0.0f) && !link->checkModeFlg(0x78C52) &&
+        link->mProcID != daAlink_c::PROC_TOOL_DEMO && link->mProcID != daAlink_c::PROC_GANON_FINISH)
+    {
+        out.flags |= kGroundFeet;
+    }
+    if (link->checkModeFlg(daAlink_c::MODE_IDLE)) {
+        out.flags |= kGroundIdle;
+    }
+    if (link->checkRootTransYClearMode()) {
+        out.flags |= kGroundRootYClear;
+        out.rootBaseY = link->field_0x33b0;
+    }
+    out.stepOffset = link->field_0x2b98;
+    out.extraOffset =
+        link->field_0x2b9c + link->field_0x2ba0 + (link->checkBoardRide() ? 13.0f : 0.0f);
+}
+
 // setPlayerUpdateTestPatch
 static nlohmann::json s_testPatch;
 static int s_testPatchPackets = 0;
@@ -407,6 +432,13 @@ static int32_t quantize(float value, float scale) {
     }
     return static_cast<int32_t>(std::clamp<long long>(
         std::llround(static_cast<double>(value) * scale), -2000000000LL, 2000000000LL));
+}
+
+static void encodeGround(const RemoteGround& g, int32_t (&out)[4]) {
+    out[0] = g.flags;
+    out[1] = quantize(g.stepOffset, kPosScale);
+    out[2] = quantize(g.extraOffset, kPosScale);
+    out[3] = (g.flags & kGroundRootYClear) ? quantize(g.rootBaseY, kPosScale) : 0;
 }
 
 template <size_t N>
@@ -632,6 +664,9 @@ void Session::sendPlayerUpdate(float posX, float posY, float posZ,
     horse::encode(horsePose, cur);
     cur.hp[0] = dComIfGs_getLife();
     cur.hp[1] = dComIfGs_getMaxLifeGauge();
+    RemoteGround ground;
+    captureGround(ground);
+    encodeGround(ground, cur.yo);
 
     uint8_t flags = 0;
     if (attentionLock) flags |= kPresenceAttentionLock;
@@ -758,6 +793,10 @@ static void sendPose(Session& session, PoseSender& tx, const WirePose& cur, uint
     if (!keyframe || anyNonZero(cur.gi)) {
         putField(packet, "gi", cur.gi, o.gi, keyframe, changed);
     }
+    // And for a player in the air with nothing under its body
+    if (!keyframe || anyNonZero(cur.yo)) {
+        putField(packet, "yo", cur.yo, o.yo, keyframe, changed);
+    }
     if (keyframe) {
         packet["xv"] = 1;
     }
@@ -817,6 +856,17 @@ static void takeField(const nlohmann::json& packet, const char* key, int32_t& ou
     if (it != packet.end() && it->is_number_integer()) {
         out = static_cast<int32_t>(it->get<int64_t>());
     }
+}
+
+static RemoteGround decodeGround(const int32_t (&in)[4]) {
+    RemoteGround g;
+    g.flags = static_cast<uint8_t>(in[0] & kGroundWireMask);
+    g.stepOffset = std::clamp(in[1] / kPosScale, -kMaxGroundOffset, kMaxGroundOffset);
+    g.extraOffset = std::clamp(in[2] / kPosScale, -kMaxGroundOffset, kMaxGroundOffset);
+    if (g.flags & kGroundRootYClear) {
+        g.rootBaseY = std::clamp(in[3] / kPosScale, -kMaxRootBaseY, kMaxRootBaseY);
+    }
+    return g;
 }
 
 // Ids are only range-checked here
@@ -1023,6 +1073,7 @@ void Session::handlePlayerUpdate(const nlohmann::json& packet) {
     takeItemGroup("oz", w.hsz);
     takeItemGroup("hp", w.hp);
     takeItemGroup("gi", w.gi);
+    takeItemGroup("yo", w.yo);
     if (keyframe) {
         c.sendsItemFx = packet.find("xv") != packet.end();
     }
@@ -1110,6 +1161,7 @@ void Session::handlePlayerUpdate(const nlohmann::json& packet) {
     c.itemFx.fr = fishing::decode(w.fr);
     c.horse = horse::decode(w);
     c.getItem = getitem::decode(w.gi);
+    c.ground = decodeGround(w.yo);
     c.hasPlayerUpdate = true;
 
     RemotePoseSample sample;

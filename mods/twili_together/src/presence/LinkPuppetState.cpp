@@ -72,6 +72,7 @@ LinkPuppetState makeLinkPuppetState(const Client& client) {
     state.sendsItemFx = client.sendsItemFx;
     state.horse = client.horse;
     state.getItem = client.getItem;
+    state.ground = client.ground;
     return state;
 }
 

@@ -162,6 +162,7 @@ play them back a little behind the newest one, so network jitter does not show. 
 | `ox`, `op`, `os`, `oa`, `of`, `ow`, `ok`, `or`, `oz` | the player's Epona, and Zelda behind its rider |
 | `hp` | `[life, maxLife]` in quarter hearts, for the name tag's health bar; optional (a keyframe without it means unknown) |
 | `gi` | the item held up (item get, trade, item that cannot be used there): `[shownItem \| givenItem << 8 \| flags << 16, yaw, scale x1024, timer, x, y, z x8]`, yaw and place relative to the player's facing and position; flag 8 alone means it exists but is not shown yet (receivers load its model); optional (absent in a keyframe means none) |
+| `yo` | the body's height and feet: `[flags, stepOffset, extraOffset, rootBaseY]`, offsets x8. Flags: 1 feet on the ground, 2 idle (the body may drop to the lower foot), 4 the root joint's height is `rootBaseY` (jumps, ladders, climbing). `stepOffset` is the body's easing over steps (and the swim bob), `extraOffset` the rest of its lift over the position (stairs, a board). Receivers adjust the legs to their own ground; optional (absent in a keyframe means all zero, and the legs stay as animated) |
 
 Presence is best effort: when the send queue is full, deltas are dropped and the next keyframe
 repairs the stream.

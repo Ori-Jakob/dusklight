@@ -225,6 +225,11 @@ void blendPose(const LinkPuppetState& a, const LinkPuppetState& b, float t, Link
             go.offset[k] = lerp(ga.offset[k], gb.offset[k], t);
         }
     }
+    out.ground.stepOffset = lerp(a.ground.stepOffset, b.ground.stepOffset, t);
+    out.ground.extraOffset = lerp(a.ground.extraOffset, b.ground.extraOffset, t);
+    if (a.ground.flags & b.ground.flags & kGroundRootYClear) {
+        out.ground.rootBaseY = lerp(a.ground.rootBaseY, b.ground.rootBaseY, t);
+    }
     out.frameAlpha = t;
 }
 
@@ -849,6 +854,25 @@ bool checkGetItemBlend(std::string& why) {
     return true;
 }
 
+// The body's offsets over its position blend like the position
+bool checkGroundBlend(std::string& why) {
+    RemotePoseBuffer steps;
+    RemotePoseSample a = poseSample(1, 0.0f);
+    RemotePoseSample b = poseSample(2, 0.0f);
+    a.state.ground.stepOffset = 4.0f;
+    b.state.ground.stepOffset = 8.0f;
+    steps.push(a, 0.0);
+    steps.push(b, tickSec(1));
+    LinkPuppetState out;
+    const RemotePoseSample* shown = nullptr;
+    steps.sampleAt(1.25, out, &shown);
+    if (std::fabs(out.ground.stepOffset - 5.0f) > 0.01f) {
+        return failCheck(why, "ground blend: step offset %.2f at t=0.25 (want 5)",
+                         out.ground.stepOffset);
+    }
+    return true;
+}
+
 }  // namespace
 
 bool runRemotePoseSelfTest(std::string& why) {
@@ -857,7 +881,7 @@ bool runRemotePoseSelfTest(std::string& why) {
            checkSenderPause(why) && checkReceiverPause(why) && checkRing(why) &&
            checkFrameBlend(why) && checkMidnaBlend(why) && checkWolfFxBlend(why) &&
            checkItemFxBlend(why) && checkHookBallBlend(why) && checkHorseBlend(why) &&
-           checkGetItemBlend(why);
+           checkGetItemBlend(why) && checkGroundBlend(why);
 }
 
 }  // namespace twili
