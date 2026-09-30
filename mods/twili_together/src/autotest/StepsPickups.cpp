@@ -10,7 +10,9 @@
 #include "SSystem/SComponent/c_malloc.h"
 #include "SSystem/SComponent/c_math.h"
 #include "d/actor/d_a_obj_item.h"
+#include "d/actor/d_a_player.h"
 #include "d/actor/d_a_tbox.h"
+#include "d/d_bg_s_gnd_chk.h"
 #include "d/d_com_inf_game.h"
 #include "d/d_stage.h"
 #include "f_op/f_op_actor_mng.h"
@@ -75,11 +77,30 @@ std::optional<bool> spawnChest(StepContext& ctx) {
     const int shape = ctx.step.value("shape", 0) & 0xF;
     const int item = ctx.step.value("item", 0x04) & 0xFF;
     const float dist = ctx.step.value("dist", 110.0f);
-    const s16 facing = player->shape_angle.y;
     prm->base.parameters = (0xFFu << 24) | (static_cast<u32>(shape) << 20) | (0xFFu << 12) |
                            (static_cast<u32>(tbox) << 6);
-    prm->base.position = cXyz(player->current.pos.x + dist * cM_ssin(facing),
-        player->current.pos.y, player->current.pos.z + dist * cM_scos(facing));
+    // Most level ground nearest ahead: sunk in a slope a chest hides, raised it is out of reach.
+    const cXyz at = player->current.pos;
+    s16 facing = player->shape_angle.y;
+    cXyz pos(at.x + dist * cM_ssin(facing), at.y, at.z + dist * cM_scos(facing));
+    f32 bestDy = 1e9f;
+    for (int i = 0; i < 16 && bestDy > 5.0f; i++) {
+        const int turn = (i + 1) / 2 * (i % 2 != 0 ? 0x1000 : -0x1000);
+        const s16 yaw = static_cast<s16>(player->shape_angle.y + turn);
+        dBgS_ObjGndChk gnd;
+        const cXyz probe(at.x + dist * cM_ssin(yaw), at.y + 100.0f, at.z + dist * cM_scos(yaw));
+        gnd.SetPos(&probe);
+        const f32 groundY = dComIfG_Bgsp().GroundCross(&gnd);
+        if (groundY != -G_CM3D_F_INF && std::fabs(groundY - at.y) < bestDy) {
+            bestDy = std::fabs(groundY - at.y);
+            pos.set(probe.x, groundY, probe.z);
+            facing = yaw;
+        }
+    }
+    if (facing != player->shape_angle.y) {
+        daPy_getPlayerActorClass()->setPlayerPosAndAngle(&at, facing, TRUE);
+    }
+    prm->base.position = pos;
     prm->base.angle = csXyz(0, static_cast<s16>(facing + 0x8000), static_cast<s16>(item << 8 | 0xFF));
     prm->base.setID = 0xFFFF;
     prm->room_no = static_cast<s8>(roomNo);
@@ -94,7 +115,8 @@ std::optional<bool> spawnChest(StepContext& ctx) {
         return false;
     }
     sChests[ctx.step.value("tag", std::string("chest"))] = id;
-    TwiliLog.info("[autotest] chest {} (shape {}, item 0x{:02X}) requested", tbox, shape, item);
+    TwiliLog.info("[autotest] chest {} (shape {}, item 0x{:02X}) requested, ground {:+.0f}", tbox,
+        shape, item, pos.y - at.y);
     return true;
 }
 
