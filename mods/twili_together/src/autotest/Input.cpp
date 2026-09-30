@@ -7,6 +7,8 @@
 
 #include "autotest/Input.hpp"
 
+#include <cstdint>
+
 namespace twili::autotest::input {
 
 #if defined(_WIN32)
@@ -76,6 +78,63 @@ LPARAM keyParam(const KeyInfo& info, bool up, bool repeat) {
     return param;
 }
 
+// SDL3 mouse events (SDL_events.h) for SDL_PushEvent: posted mouse messages never reach SDL.
+constexpr uint32_t kSdlMouseMotion = 0x400;
+constexpr uint32_t kSdlMouseButtonDown = 0x401;
+constexpr uint32_t kSdlMouseButtonUp = 0x402;
+
+struct SdlMouseMotion {
+    uint32_t type, reserved;
+    uint64_t timestamp;
+    uint32_t windowID, which, state;
+    float x, y, xrel, yrel;
+};
+
+struct SdlMouseButton {
+    uint32_t type, reserved;
+    uint64_t timestamp;
+    uint32_t windowID, which;
+    uint8_t button;
+    bool down;
+    uint8_t clicks, padding;
+    float x, y;
+};
+
+union SdlEvent {
+    SdlMouseMotion motion;
+    SdlMouseButton button;
+    uint8_t padding[128];
+};
+
+template <typename Fn>
+Fn sdlProc(const char* name) {
+    const HMODULE sdl = GetModuleHandleA("SDL3.dll");
+    return sdl != nullptr ? reinterpret_cast<Fn>(GetProcAddress(sdl, name)) : nullptr;
+}
+
+uint32_t sdlWindowId() {
+    using GetWindowsFn = void** (*)(int*);
+    using GetWindowIdFn = uint32_t (*)(void*);
+    using FreeFn = void (*)(void*);
+    static const auto getWindows = sdlProc<GetWindowsFn>("SDL_GetWindows");
+    static const auto getWindowId = sdlProc<GetWindowIdFn>("SDL_GetWindowID");
+    static const auto sdlFree = sdlProc<FreeFn>("SDL_free");
+    if (getWindows == nullptr || getWindowId == nullptr || sdlFree == nullptr) {
+        return 0;
+    }
+    int count = 0;
+    void** windows = getWindows(&count);
+    const uint32_t id = windows != nullptr && count > 0 ? getWindowId(windows[0]) : 0;
+    sdlFree(windows);
+    return id;
+}
+
+bool pushSdlEvent(SdlEvent& event) {
+    using PushEventFn = bool (*)(SdlEvent*);
+    static const auto push = sdlProc<PushEventFn>("SDL_PushEvent");
+    return push != nullptr && push(&event);
+}
+
 }  // namespace
 
 bool keyDown(Key key, bool repeat) {
@@ -88,6 +147,20 @@ bool keyUp(Key key) {
     const HWND hwnd = gameWindow();
     const KeyInfo info = keyInfo(key);
     return hwnd != nullptr && PostMessageA(hwnd, WM_KEYUP, info.vk, keyParam(info, true, false));
+}
+
+bool mouseMove(int x, int y, bool leftDown) {
+    SdlEvent event{};
+    event.motion = {kSdlMouseMotion, 0, 0, sdlWindowId(), 0, leftDown ? 1u : 0u,
+        static_cast<float>(x), static_cast<float>(y), 0.0f, 0.0f};
+    return pushSdlEvent(event);
+}
+
+bool mouseButton(int x, int y, bool down) {
+    SdlEvent event{};
+    event.button = {down ? kSdlMouseButtonDown : kSdlMouseButtonUp, 0, 0, sdlWindowId(), 0, 1, down,
+        1, 0, static_cast<float>(x), static_cast<float>(y)};
+    return pushSdlEvent(event);
 }
 
 bool resizeWindow(int width, int height) {
@@ -113,6 +186,14 @@ bool keyUp(Key) {
 }
 
 bool resizeWindow(int, int) {
+    return false;
+}
+
+bool mouseMove(int, int, bool) {
+    return false;
+}
+
+bool mouseButton(int, int, bool) {
     return false;
 }
 

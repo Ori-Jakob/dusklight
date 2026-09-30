@@ -420,6 +420,20 @@ Name tags (`StepsNameTags.cpp`):
 | `expectNameTag` | `name`, `shown`, `gate`, `line2`, `rgb`, `holdTicks`, `timeoutSec` | the peer's tag in the last presented frame (or none, for `gate`); `rgb` is its frame colour |
 | `viewPeer` | `name`, `yaw`, `beyond` | moves our player past the peer's dummy, seen from our camera, so the peer shows `yaw` degrees off centre |
 
+Players widget and the Players tab rows (`StepsPlayersWidget.cpp`). Mouse steps push SDL events
+at window coordinates (an 800x450 window at UI scale 1), so a real pointer over the test window
+disturbs them:
+
+| op | fields | does |
+| --- | --- | --- |
+| `expectPlayersWidget` | `shown`, `gate` (`off`, `notConnected`, `noSave`, `empty`, `cutscene`, `menu`), `header`, `count`, `rows` (`name`; `label`, the name as shown; `area`, `tooltip` substrings; `teleport`: `ready`, `blocked`, `none`), `absent` (names), `x`, `y`, `minX`, `minY` (per mille), `opacity`, `scale` (percent), `holdTicks`, `timeoutSec` | the widget as the last tick built it |
+| `expectPlayersTab` | `count`, `rows` (`name`, `teleport`, `tooltip`, `actions`), `absent`, `holdTicks`, `timeoutSec` | the Players tab's rows; the tab must be shown (`showWindow` tab 2) |
+| `clickPlayersWidget` | `target`, `at` (`[x, y]`), `expect`, `reason`, `timeoutSec` | presses the target's teleport button (the host's click callback, or with `at` a real click there) and waits for the teleport's result |
+| `movePlayersWidget` | `x`, `y` (0 to 1) | moves the widget there as a drag would |
+| `mouseDrag` / `mouseMove` | `from`, `to`, `frames` / `x`, `y` | a left-button drag / a pointer move |
+| `measurePlayersWidget` | `grab` (a point on the header with the widget in the top left corner), `by` (`[dx, dy]`), `area` (the overlay's free space, `[776, 426]`), `as`, `of`, `ratio` (`[min, max]`) | drags the widget out of the corner by `by` (menu open) and works out its size in dp from where the host left it; remembers it `as` a name, or checks both sides against the size measured `of` a name, then puts the widget back |
+| `playersWidgetOption` | `name` (`players_widget`, `players_widget_opacity`, `players_widget_scale`), `value` | |
+
 ## Adding a scenario
 
 Core scenarios are in `scenarios.js`; feature scenarios in `scenarios/<feature>.js`, each

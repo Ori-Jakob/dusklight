@@ -131,6 +131,7 @@ if (TWILI_ENABLE_AUTOTEST)
         src/autotest/StepsMotion.cpp
         src/autotest/StepsNameTags.cpp
         src/autotest/StepsPerf.cpp
+        src/autotest/StepsPlayersWidget.cpp
         src/autotest/StepsPvp.cpp
         src/autotest/StepsRecolor.cpp
         src/autotest/StepsStatusFx.cpp
