@@ -344,6 +344,11 @@ const RoomBool kSyncOptions[] = {
         "<p>On: wooden shields sync like other gear, so a shield that burns up comes back while a "
         "teammate still has one.</p><p>Off: the Ordon Shield and Wooden Shield are personal. A "
         "burnt shield stays burnt and each player gets their own.</p>"},
+    {Var::SharePickups, &RoomState::sharePickups, "Share Pickups",
+        "<p>Rupees, hearts, fairies, arrows, seeds and bombs a teammate picks up are added for you "
+        "too, up to your wallet, hearts, quiver and bags. Everyone keeps their own copy of each "
+        "pickup in the world; purchases are not shared. Needs Sync World State.</p>",
+        Var::SyncWorldState},
     {Var::SyncEnemyDeaths, &RoomState::syncNPCs, "Sync Enemy Deaths",
         "<p>When a teammate in your area defeats a regular enemy, it disappears for you too. "
         "Bosses and mini-bosses are excluded, and drops go to whoever defeated it.</p>"},

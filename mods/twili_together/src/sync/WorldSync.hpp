@@ -61,6 +61,9 @@ bool remoteOpenTbox(void* tbox);
 void animateOpenedTbox(void* tbox);
 bool remoteOpenTbox2(void* tbox2);
 void animateOpenedTbox2(void* tbox2);
+// daAlink_c::makeFairy pre/post: its heal is a bottle's, not a pickup.
+void enterBottleFairy();
+void leaveBottleFairy();
 
 // GIVE_ITEM's filter: progression items, no consumables or dungeon items.
 bool isSyncedItemNo(int itemNo);
@@ -79,6 +82,18 @@ struct Stats {
     uint32_t layoutWarnings = 0;
     uint32_t grantsQueued = 0;
     uint32_t grantsApplied = 0;
+    // SHARE_PICKUP: pickups sent, and gains added or skipped here (no container, full, down).
+    uint32_t pickupsSent = 0;
+    uint32_t pickupsApplied = 0;
+    uint32_t pickupsSkipped = 0;
+    int32_t rupeesAdded = 0;
+    int32_t lifeAdded = 0;
+    int32_t arrowsAdded = 0;
+    int32_t seedsAdded = 0;
+    int32_t bombsAdded = 0;
+    uint32_t trapsSent = 0;
+    uint32_t trapsReceived = 0;
+    uint32_t trapsApplied = 0;
 };
 const Stats& stats();
 // True once the incompatible-layout toast was shown for this teammate name.

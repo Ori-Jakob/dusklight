@@ -6,6 +6,7 @@
 #include "sync/RemoteApplyGuard.hpp"
 #include "sync/WorldSync.hpp"
 
+#include "d/actor/d_a_alink.h"
 #include "d/actor/d_a_tbox.h"
 #include "d/actor/d_a_tbox2.h"
 #include "d/d_com_inf_game.h"
@@ -36,6 +37,7 @@ DEFINE_HOOK(&daTbox_c::actionOpenWait, TboxActionOpenWait);
 DEFINE_HOOK(&daTbox_c::actionWait, TboxActionWait);
 DEFINE_HOOK(&daTbox2_c::actionOpenWait, Tbox2ActionOpenWait);
 DEFINE_HOOK(&daTbox2_c::actionWait, Tbox2ActionWait);
+DEFINE_HOOK(&daAlink_c::makeFairy, AlinkMakeFairy);
 
 namespace {
 
@@ -335,6 +337,16 @@ void onTbox2WaitPost(ModContext*, void* args, void*, void*) {
     sync::animateOpenedTbox2(mods::arg<daTbox2_c*>(args, 0));
 }
 
+// A fairy let out of a bottle heals through execItemGet: not a pickup.
+HookAction onMakeFairyPre(ModContext*, void*, void*, void*) {
+    sync::enterBottleFairy();
+    return HOOK_CONTINUE;
+}
+
+void onMakeFairyPost(ModContext*, void*, void*, void*) {
+    sync::leaveBottleFairy();
+}
+
 template <class Entry>
 ModResult addObserver(HookPreFn pre, HookPostFn post, const char* what, std::string& error) {
     ModResult result = addPre<Entry>(pre, kObserve, what, error);
@@ -374,6 +386,8 @@ ModResult installSync(std::string& error) {
         addPre<Tbox2ActionOpenWait>(
             onTbox2OpenWaitPre, kDefault, "daTbox2_c::actionOpenWait", error),
         addPost<Tbox2ActionWait>(onTbox2WaitPost, kDefault, "daTbox2_c::actionWait", error),
+        addObserver<AlinkMakeFairy>(
+            onMakeFairyPre, onMakeFairyPost, "daAlink_c::makeFairy", error),
     };
     for (const ModResult r : results) {
         if (r != MOD_OK) {

@@ -46,6 +46,8 @@ const TEAM_PACKET_TYPES = new Set([
     "REQUEST_WORLD_STATE",
     "LIGHT_DROP",
 ]);
+// World packets for the team as it is now: relayed like the others, never queued or cached.
+const TEAM_LIVE_PACKET_TYPES = new Set(["SHARE_PICKUP"]);
 const PRESENCE_PACKET_TYPES = new Set(["PLAYER_UPDATE", "PLAYER_SFX"]);
 // Teammates in the sender's stage and layer only; never cached or queued.
 const TEAM_PRESENCE_PACKET_TYPES = new Set(["ENEMY_DEFEATED", "ENEMY_DAMAGE", "STORY_EVENT"]);
@@ -109,6 +111,8 @@ function packetSummary(packet) {
             return `${packet.type} item=0x${hex(packet.itemNo, 2)}`;
         case "LIGHT_DROP":
             return `${packet.type} area=${text(packet.area)} saveTbl=${text(packet.tbl)} tbox=${text(packet.tbox)}`;
+        case "SHARE_PICKUP":
+            return `${packet.type} items=${Array.isArray(packet.items) ? packet.items.map((i) => hex(i, 2)).join(",") : "?"}`;
         case "UPDATE_DUNGEON_ITEMS":
             return `${packet.type} saveTbl=${text(packet.saveTblNo)} keyDelta=${text(packet.keyDelta)} bits=0x${hex(packet.dungeonItemBits)}`;
         case "UPDATE_WORLD_STATE":
@@ -192,6 +196,7 @@ function defaultRoomState() {
         teleportAcrossTeams: false,
         syncWorldState: true,
         shareWoodenShield: true,
+        sharePickups: true,
         syncNPCs: false,
         syncEnemyDamage: true,
         cutsceneSync: true,
@@ -1105,7 +1110,7 @@ function handlePacket(client, packet) {
     }
 
     const teamTraffic = TEAM_PRESENCE_PACKET_TYPES.has(packet.type) || TEAM_STORY_PACKET_TYPES.has(packet.type) ||
-        TEAM_PACKET_TYPES.has(packet.type);
+        TEAM_PACKET_TYPES.has(packet.type) || TEAM_LIVE_PACKET_TYPES.has(packet.type);
     if (teamTraffic && !syncOk(room, client)) {
         dropUnsynced(room, client, packet.type);
         return;
@@ -1134,6 +1139,16 @@ function handlePacket(client, packet) {
             }
             room.teamStoryMoves.set(storyKey(room, client), ring);
         }
+        return;
+    }
+
+    if (TEAM_LIVE_PACKET_TYPES.has(packet.type)) {
+        relayed.teamId = client.teamId;
+        relayed.senderSessionKey = client.sessionKey;
+        relayed.senderName = client.name;
+        relayed.senderColor = displayColorOf(room, client);
+        relayed.addToQueue = false;
+        broadcastWorld(room, client, relayed);
         return;
     }
 

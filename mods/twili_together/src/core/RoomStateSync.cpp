@@ -27,6 +27,7 @@ RoomState Session::roomStateFromSettings() const {
     state.teleportAcrossTeams = config::getBool(Var::TeleportAcrossTeams);
     state.syncWorldState = config::getBool(Var::SyncWorldState);
     state.shareWoodenShield = config::getBool(Var::ShareWoodenShield);
+    state.sharePickups = config::getBool(Var::SharePickups);
     state.syncNPCs = config::getBool(Var::SyncEnemyDeaths);
     state.syncEnemyDamage = config::getBool(Var::SyncEnemyDamage);
     state.cutsceneSync = config::getBool(Var::CutsceneSync);

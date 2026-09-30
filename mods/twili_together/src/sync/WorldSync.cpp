@@ -6,6 +6,7 @@
 #include "core/Log.hpp"
 #include "core/SaveGate.hpp"
 #include "core/Session.hpp"
+#include "game/GameIdentity.hpp"
 #include "sync/RemoteApplyGuard.hpp"
 #include "ui/Toasts.hpp"
 
@@ -152,6 +153,10 @@ void stampWorldPacket(nlohmann::json& packet, bool addToQueue) {
     packet["addToQueue"] = addToQueue;
 }
 
+bool randoGame() {
+    return game_identity::current().kind == "randomizer";
+}
+
 }  // namespace detail
 
 using namespace detail;
@@ -212,6 +217,8 @@ bool handlePacket(const std::string& type, const nlohmann::json& packet) {
         handleUpdateDungeonItems(packet);
     } else if (type == "LIGHT_DROP") {
         handleLightDrop(packet);
+    } else if (type == "SHARE_PICKUP") {
+        handleSharePickup(packet);
     } else if (type == "REQUEST_WORLD_STATE") {
         handleRequestWorldState(packet);
     } else if (type == "UPDATE_WORLD_STATE") {
@@ -244,6 +251,7 @@ void tick() {
         }
     }
     tickDungeonItemTracking();
+    flushPickups();
 }
 
 void endOfUpdate() {

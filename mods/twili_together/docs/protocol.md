@@ -80,6 +80,7 @@ keys and wrong types are ignored, numbers are clamped. The state:
 | --- | --- | --- |
 | `syncWorldState` | true | teams share flags, items and save progress |
 | `shareWoodenShield` | true | wooden shields sync like other items |
+| `sharePickups` | true | with `syncWorldState`: teammates' consumable pickups are added for everyone (`SHARE_PICKUP`) |
 | `syncNPCs` | false | enemy deaths sync within a stage |
 | `syncEnemyDamage` | true | with `syncNPCs`: teammates' hits on an enemy weaken our copy too |
 | `cutsceneSync` | true | story cutscenes pull in teammates in the same room |
@@ -172,6 +173,7 @@ repairs the stream.
 | `GIVE_ITEM` | `itemNo` | the receiver grants it through the game's item service, so a randomizer applies its own logic |
 | `UPDATE_DUNGEON_ITEMS` | `saveTblNo`, `keyDelta`, `dungeonItemBits` | small keys, map, compass, boss key |
 | `LIGHT_DROP` | `area`, `tbl`, `tbox` | a tear of light picked up. Unless that tear's TBOX bit is already set, the receiver sets it, adds one to the area's count (at most 16) and removes the tear from its screen; the bit keeps replays from counting twice |
+| `SHARE_PICKUP` | `items` (item numbers, at most 64) | consumables the sender just collected (rupees, hearts, fairies, arrows, seeds, bombs; no purchases, no bottled fairy, no tear) and, in a randomizer game, its trap item `0x13`. The receiver adds the same gain within its own limits (wallet, hearts, quiver or slingshot owned, bomb bags of that kind or empty ones; no heal while knocked out) with `sharePickups` on, and passes a trap to its own randomizer. Never queued or cached; receivers ignore replays |
 | `UPDATE_WORLD_STATE` | `fmt` (`dsv1`), `save`, `dan`, `danStageNo`, `saveTblNo`, `seenEpoch`, `seenSeq`, optional `targetClientId` | the whole save as base64; merged, never simply copied. `seenEpoch`/`seenSeq`: the last queued packet this save has applied |
 | `REQUEST_WORLD_STATE` | `catchUp` | asks the team for its state |
 

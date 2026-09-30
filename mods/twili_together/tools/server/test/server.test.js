@@ -727,6 +727,45 @@ test("a world state from another queue epoch keeps every queued packet of the ot
     assert.equal((await b.waitType("SET_FLAG", (p) => p.fromQueue === true)).flagNo, 3);
 }));
 
+test("SHARE_PICKUP reaches synced teammates live, stamped, and is never queued", () => withServer(async (mk) => {
+    const a = mk();
+    const mate = mk();
+    const other = mk();
+    await a.join({ teamId: "t", name: "Dad", sessionKey: "ka" });
+    await mate.join({ teamId: "t" });
+    await other.join({ teamId: "u" });
+    a.send({ type: "SHARE_PICKUP", items: [1, 4, 0x13], addToQueue: true, queueSeq: 7, queueEpoch: "x" });
+    const got = await mate.waitType("SHARE_PICKUP");
+    assert.deepEqual(got.items, [1, 4, 0x13]);
+    assert.equal(got.clientId, a.id);
+    assert.equal(got.teamId, "t");
+    assert.equal(got.senderName, "Dad");
+    assert.equal(got.addToQueue, false);
+    assert.equal(got.queueSeq, undefined);
+    await other.expectNone((p) => p.type === "SHARE_PICKUP", "SHARE_PICKUP to another team");
+
+    await settle();
+    const late = mk();
+    await late.join({ teamId: "t" });
+    late.send({ type: "REQUEST_WORLD_STATE", catchUp: true });
+    await late.expectNone((p) => p.type === "SHARE_PICKUP", "a replayed pickup");
+}));
+
+test("SHARE_PICKUP needs world sync on both ends", () => withServer(async (mk) => {
+    const RANDO = { inGame: true, kind: "randomizer", key: "rando/f1/abc", display: { name: "Seed", mode: "" } };
+    const a = mk();
+    const b = mk();
+    const c = mk();
+    await a.join({ teamId: "t" });
+    await b.join({ teamId: "t" });
+    await c.join({ teamId: "t", game: RANDO });
+    a.send({ type: "SHARE_PICKUP", items: [2] });
+    await b.waitType("SHARE_PICKUP");
+    await c.expectNone((p) => p.type === "SHARE_PICKUP", "SHARE_PICKUP to a teammate on another game");
+    c.send({ type: "SHARE_PICKUP", items: [2] });
+    await a.expectNone((p) => p.type === "SHARE_PICKUP", "SHARE_PICKUP from a teammate on another game");
+}));
+
 test("REQUEST_WORLD_STATE is forwarded to caught-up teammates, who answer the requester only", () => withServer(async (mk) => {
     const a = mk();
     const b = mk();
@@ -1053,6 +1092,18 @@ test("room state values are type-checked", () => withServer(async (mk) => {
     assert.equal(got.state.syncEnemyDamage, true, "on by default, and a number is no boolean");
     assert.equal(got.state.syncWorldState, true, "invalid value keeps the previous setting");
     assert.equal(got.state.enemyHealthMultiplier, 500, "multiplier is clamped to the UI range");
+}));
+
+test("room state carries sharePickups, on by default and type-checked", () => withServer(async (mk) => {
+    const a = mk();
+    const b = mk();
+    await a.join();
+    const state = await b.join();
+    assert.equal(state.roomState.sharePickups, true);
+    a.send({ type: "UPDATE_ROOM_STATE", state: { sharePickups: "no" } });
+    assert.equal((await b.waitType("UPDATE_ROOM_STATE")).state.sharePickups, true);
+    a.send({ type: "UPDATE_ROOM_STATE", state: { sharePickups: false } });
+    assert.equal((await b.waitType("UPDATE_ROOM_STATE")).state.sharePickups, false);
 }));
 
 test("room state carries the enemy count multiplier, clamped to 100-300", () => withServer(async (mk) => {

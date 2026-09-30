@@ -41,6 +41,7 @@ enum class Var : uint8_t {
     PlayersWidgetOpacity,
     // Percent, the widget's zoom.
     PlayersWidgetScale,
+    SharePickups,
 #if TWILI_ENABLE_AUTOTEST
     AutotestScript,
 #endif

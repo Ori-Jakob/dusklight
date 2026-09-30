@@ -25,6 +25,7 @@ struct RoomOption {
 constexpr RoomOption kRoomOptions[] = {
     {"syncWorldState", Var::SyncWorldState, &RoomState::syncWorldState},
     {"shareWoodenShield", Var::ShareWoodenShield, &RoomState::shareWoodenShield},
+    {"sharePickups", Var::SharePickups, &RoomState::sharePickups},
     {"teleportMode", Var::TeleportMode, &RoomState::teleportMode},
     {"hidePlayersInCutscene", Var::HidePlayersInCutscene, &RoomState::hidePlayersInCutscene},
     {"syncNPCs", Var::SyncEnemyDeaths, &RoomState::syncNPCs},

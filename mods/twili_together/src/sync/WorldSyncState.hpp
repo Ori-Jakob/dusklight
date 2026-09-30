@@ -87,6 +87,18 @@ void handleLightDrop(const nlohmann::json& packet);
 void onRemoteTbox(int saveTblNo, int tboxNo, bool live);
 void clearOpeningChests();
 
+// The randomizer's trap item (dItemNo_Randomizer_FOOLISH_ITEM_e, an unused id in vanilla).
+inline constexpr uint8_t kFoolishItem = 0x13;
+// Our game is a randomizer game (item ids then mean the randomizer's items).
+bool randoGame();
+
+// Pickups.cpp: a consumable or trap we got from the game, sent as SHARE_PICKUP at the tick.
+void notePickup(uint8_t itemNo, const char* checkName);
+void flushPickups();
+void handleSharePickup(const nlohmann::json& packet);
+// The give observer's view of our own trap grant.
+bool isTrapGrant(const char* checkName);
+
 // GiveItem.cpp
 void sendGiveItem(uint8_t itemNo);
 void handleGiveItem(const nlohmann::json& packet);

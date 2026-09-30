@@ -206,8 +206,16 @@ void onItemGiven(ModContext*, const ItemGiveInfo* info, void*) {
         TwiliLog.info("[sync] applied item 0x{:02X} from a teammate", info->item);
         return;
     }
+    if (isTrapGrant(info->check_name)) {
+        st.stats.trapsApplied++;
+        TwiliLog.info("[sync] a teammate's trap went off here");
+        return;
+    }
     if (RemoteApplyGuard::active()) {
         return;
+    }
+    if (info->origin == ITEM_GIVE_ORIGIN_GAME) {
+        notePickup(info->item, info->check_name);
     }
     sendGiveItem(info->item);
 }
