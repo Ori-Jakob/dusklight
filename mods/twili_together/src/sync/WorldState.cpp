@@ -315,6 +315,10 @@ void sendUpdateWorldState(uint32_t targetClientId) {
     if (targetClientId != 0) {
         packet["targetClientId"] = targetClientId;
     }
+    // The relay keeps queued packets past this one: this state has not seen them.
+    const State& st = state();
+    packet["seenEpoch"] = st.queueEpoch;
+    packet["seenSeq"] = st.queueApplied.empty() ? 0 : *st.queueApplied.rbegin();
     stampWorldPacket(packet, false);
     send(std::move(packet));
 }

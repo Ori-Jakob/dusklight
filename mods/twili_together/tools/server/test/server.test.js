@@ -680,6 +680,53 @@ test("world state is cached for joiners and supersedes the queue", () => withSer
     await b.expectNone((p) => p.type === "SET_FLAG", "stale queued flag");
 }));
 
+test("a world state keeps the queued packets it has not seen, but not its sender's own", () => withServer(async (mk) => {
+    const a = mk();
+    const c = mk();
+    await a.join({ teamId: "t", sessionKey: "ka" });
+    await c.join({ teamId: "t", sessionKey: "kc" });
+    a.send({ type: "SET_FLAG", flagNo: 1, addToQueue: true });
+    const f1 = await c.waitType("SET_FLAG", (p) => p.flagNo === 1);
+    c.send({ type: "SET_FLAG", flagNo: 5, addToQueue: true });
+    // c's state predates flag 1 (a race with its save): flag 1 stays queued, c's own flag 5 goes.
+    c.send({ type: "UPDATE_WORLD_STATE", save: "C1", seenEpoch: f1.queueEpoch, seenSeq: f1.queueSeq - 1 });
+    await settle();
+    const b = mk();
+    await b.join({ teamId: "t", sessionKey: "kb" });
+    b.send({ type: "REQUEST_WORLD_STATE", catchUp: true });
+    const ws = await b.waitType("UPDATE_WORLD_STATE");
+    assert.equal(ws.save, "C1");
+    const kept = await b.waitType("SET_FLAG", (p) => p.fromQueue === true);
+    assert.equal(kept.flagNo, 1);
+    assert.equal(kept.queueSeq, f1.queueSeq);
+    await b.expectNone((p) => p.type === "SET_FLAG", "c's own flag replayed after its state");
+
+    // A state that has seen flag 1 empties the queue; so does one without seenSeq.
+    c.send({ type: "UPDATE_WORLD_STATE", save: "C2", seenEpoch: f1.queueEpoch, seenSeq: f1.queueSeq });
+    await settle();
+    const d = mk();
+    await d.join({ teamId: "t", sessionKey: "kd" });
+    d.send({ type: "REQUEST_WORLD_STATE", catchUp: true });
+    assert.equal((await d.waitType("UPDATE_WORLD_STATE")).save, "C2");
+    await d.expectNone((p) => p.type === "SET_FLAG", "a flag the state had seen");
+}));
+
+test("a world state from another queue epoch keeps every queued packet of the others", () => withServer(async (mk) => {
+    const a = mk();
+    const c = mk();
+    await a.join({ teamId: "t", sessionKey: "ka" });
+    await c.join({ teamId: "t", sessionKey: "kc" });
+    a.send({ type: "SET_FLAG", flagNo: 3, addToQueue: true });
+    await c.waitType("SET_FLAG", (p) => p.flagNo === 3);
+    c.send({ type: "UPDATE_WORLD_STATE", save: "C", seenEpoch: "", seenSeq: 0 });
+    await settle();
+    const b = mk();
+    await b.join({ teamId: "t", sessionKey: "kb" });
+    b.send({ type: "REQUEST_WORLD_STATE", catchUp: true });
+    await b.waitType("UPDATE_WORLD_STATE");
+    assert.equal((await b.waitType("SET_FLAG", (p) => p.fromQueue === true)).flagNo, 3);
+}));
+
 test("REQUEST_WORLD_STATE is forwarded to caught-up teammates, who answer the requester only", () => withServer(async (mk) => {
     const a = mk();
     const b = mk();

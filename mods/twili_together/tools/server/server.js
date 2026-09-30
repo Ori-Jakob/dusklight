@@ -441,6 +441,19 @@ function applyRoomState(state, incoming) {
     }
 }
 
+function queueEpochOf(room, client) {
+    return `${room.queueEpoch}:${client.layout}:${client.teamId}:${teamGameKey(room, client)}`;
+}
+
+// Queued packets a new world state has not seen (its sender's seenSeq in this queue's epoch) stay
+// queued; the sender's own are in the state. A state without seenSeq stands for the whole queue.
+function unseenQueue(room, client, packet) {
+    if (typeof packet.seenEpoch !== "string" || !Number.isInteger(packet.seenSeq)) return [];
+    const seen = packet.seenEpoch === queueEpochOf(room, client) ? packet.seenSeq : 0;
+    return (room.teamQueues.get(worldKey(room, client)) ?? []).filter((p) =>
+        p.queueSeq > seen && p.clientId !== client.clientId && !sameSession(client, p.senderSessionKey));
+}
+
 function queueTeamPacket(room, key, packet) {
     let queue = room.teamQueues.get(key);
     if (!queue) {
@@ -1143,9 +1156,9 @@ function handlePacket(client, packet) {
                 return;
             }
             broadcastWorld(room, client, relayed);
-            // Fresh full state supersedes everything queued for this team, game and layout.
+            // Fresh full state supersedes what it has seen of the queue for this team, game and layout.
+            room.teamQueues.set(worldKey(room, client), unseenQueue(room, client, packet));
             room.teamStates.set(worldKey(room, client), relayed);
-            room.teamQueues.set(worldKey(room, client), []);
             return;
         }
 
@@ -1174,7 +1187,7 @@ function handlePacket(client, packet) {
             // Numbered so a reconnecting client can skip replayed packets it already applied.
             const seq = (room.teamQueueSeqs.get(worldKey(room, client)) ?? 0) + 1;
             room.teamQueueSeqs.set(worldKey(room, client), seq);
-            relayed.queueEpoch = `${room.queueEpoch}:${client.layout}:${client.teamId}:${teamGameKey(room, client)}`;
+            relayed.queueEpoch = queueEpochOf(room, client);
             relayed.queueSeq = seq;
         }
         broadcastWorld(room, client, relayed);

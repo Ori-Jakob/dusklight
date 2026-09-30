@@ -172,7 +172,7 @@ repairs the stream.
 | `GIVE_ITEM` | `itemNo` | the receiver grants it through the game's item service, so a randomizer applies its own logic |
 | `UPDATE_DUNGEON_ITEMS` | `saveTblNo`, `keyDelta`, `dungeonItemBits` | small keys, map, compass, boss key |
 | `LIGHT_DROP` | `area`, `tbl`, `tbox` | a tear of light picked up. Unless that tear's TBOX bit is already set, the receiver sets it, adds one to the area's count (at most 16) and removes the tear from its screen; the bit keeps replays from counting twice |
-| `UPDATE_WORLD_STATE` | `fmt` (`dsv1`), `save`, `dan`, `danStageNo`, `saveTblNo`, optional `targetClientId` | the whole save as base64; merged, never simply copied |
+| `UPDATE_WORLD_STATE` | `fmt` (`dsv1`), `save`, `dan`, `danStageNo`, `saveTblNo`, `seenEpoch`, `seenSeq`, optional `targetClientId` | the whole save as base64; merged, never simply copied. `seenEpoch`/`seenSeq`: the last queued packet this save has applied |
 | `REQUEST_WORLD_STATE` | `catchUp` | asks the team for its state |
 
 Each of these carries `teamId`, `layout`, `protocolVersion` and `addToQueue`. The relay adds
@@ -184,7 +184,9 @@ Catch-up: the relay keeps, per team, team game and layout, the last untargeted
 `REQUEST_WORLD_STATE`. Teammates who are online and caught up answer with a targeted
 `UPDATE_WORLD_STATE`; the cache answers only when none can. With `catchUp: true` the relay also
 replays the queue and the team's last 16 story moves, oldest first. A fresh untargeted world state
-replaces the cache and empties the queue.
+replaces the cache and drops from the queue what it holds: its sender's own packets and the
+others' up to `seenSeq`. The others' later packets stay queued (all of them when `seenEpoch` is not
+this queue's epoch); a state without `seenSeq` empties the queue.
 
 ### Kills and story (teammates only)
 
