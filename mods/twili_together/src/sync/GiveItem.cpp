@@ -268,9 +268,8 @@ void onItemGiven(ModContext*, const ItemGiveInfo* info, void*) {
     if (RemoteApplyGuard::active()) {
         return;
     }
-    if (info->origin == ITEM_GIVE_ORIGIN_GAME) {
-        notePickup(info->item, info->check_name);
-    }
+    // Checks the game hands out through the item queue (Poe souls, rewards) count as pickups too.
+    notePickup(info->item, info->check_name);
     sendGiveItem(info->item);
 }
 
