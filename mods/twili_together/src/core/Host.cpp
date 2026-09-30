@@ -3,6 +3,8 @@
 #include "JSystem/J3DGraphAnimator/J3DModel.h"
 #include "d/actor/d_a_alink.h"
 
+#include <mods/svc/gfx.h>
+
 #include <cstdio>
 #include <fmt/format.h>
 #include <tuple>
@@ -23,8 +25,10 @@ std::string versionProblem() {
     int minor = 0;
     int patch = 0;
     const bool parsed = std::sscanf(found, "%d.%d.%d", &major, &minor, &patch) == 3;
-    // Untagged builds report 0.0.0.0: the required InterpService import decides for them.
-    if (parsed && (std::tie(major, minor, patch) >= std::make_tuple(2, 0, 3) ||
+    // Untagged builds report 0.0.0.0. GfxService 1.4 came with 2.0.3, so an older build lacks it
+    // whatever version it reports (an old fork build had another InterpService layout).
+    if (svc_gfx != nullptr &&
+        parsed && (std::tie(major, minor, patch) >= std::make_tuple(2, 0, 3) ||
                       (major == 0 && minor == 0 && patch == 0)))
     {
         return {};
