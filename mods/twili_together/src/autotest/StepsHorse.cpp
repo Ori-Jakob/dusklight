@@ -1,5 +1,6 @@
 // Steps for Epona sync; reference in the runner README.
 
+#include "autotest/AutoTest.hpp"
 #include "autotest/AutoTestSteps.hpp"
 
 #include "actors/DummyHorse.hpp"
@@ -21,6 +22,7 @@
 #include "f_op/f_op_actor_mng.h"
 #include "f_pc/f_pc_layer.h"
 
+#include <dolphin/pad.h>
 #include <mods/svc/camera.h>
 
 #include <fmt/format.h>
@@ -155,11 +157,15 @@ bool rideHorse(StepContext& ctx) {
         return false;
     }
     const std::string side = ctx.step.value("side", std::string("left"));
+    if (mode == "beside") {
+        // Where the mount starts, so the teleport there is not part of the mount
+        standBeside(link, h, 110.0f, side);
+        return true;
+    }
+    const bool press = ride && mode == "mount";
     if (!ctx.begun) {
-        if (ride && mode == "mount") {
+        if (press) {
             standBeside(link, h, 110.0f, side);
-            link->field_0x27f4 = h;
-            link->procHorseRideInit();
         } else if (ride) {
             h->setHorsePosAndAngle(&link->current.pos, link->shape_angle.y);
             h->initHorseMtx();
@@ -171,6 +177,22 @@ bool rideHorse(StepContext& ctx) {
         TwiliLog.info("[autotest] rideHorse {} {}: proc 0x{:X}", ride ? "on" : "off", mode,
             static_cast<int>(link->mProcID));
     }
+    // An A press on the prompt: procHorseRideInit must run inside execute, before posMove
+    if (press && !link->checkHorseRide() && link->mProcID != daAlink_c::PROC_HORSE_RIDE &&
+        !padBusy() && dComIfGp_getDoStatus() == BUTTON_STATUS_GET_ON && link->field_0x27f4 == h)
+    {
+        pulsePad(0.0f, 0.0f, PAD_BUTTON_A, 2);
+    }
+    if (ctx.step.value("trace", false) && link->mpLinkModel != nullptr && h->m_model != nullptr) {
+        const cXyz rel = jointPos(link->mpLinkModel, 0) - jointPos(h->m_model, 21);
+        const s16 yaw = h->shape_angle.y;
+        TwiliLog.info("[autotest] ride t{} proc 0x{:X} frame {:.1f} root 0x{:X} rel ({:.1f} {:.1f} "
+                      "{:.1f}) pos ({:.0f} {:.0f} {:.0f})",
+            ctx.ticks, static_cast<int>(link->mProcID), link->mUnderFrameCtrl[0].getFrame(),
+            link->field_0x2f99, rel.x * cM_scos(yaw) - rel.z * cM_ssin(yaw), rel.y,
+            rel.x * cM_ssin(yaw) + rel.z * cM_scos(yaw), link->current.pos.x, link->current.pos.y,
+            link->current.pos.z);
+    }
     const bool riding = link->checkHorseRide() != 0;
     const bool moving = link->mProcID == daAlink_c::PROC_HORSE_RIDE ||
                         link->mProcID == daAlink_c::PROC_HORSE_GETOFF;
@@ -181,8 +203,8 @@ bool rideHorse(StepContext& ctx) {
         return true;
     }
     if (ctx.seconds > ctx.timeout(20.0)) {
-        ctx.fail(fmt::format("rideHorse: riding {} proc 0x{:X} after {:.0f}s", riding,
-            static_cast<int>(link->mProcID), ctx.seconds));
+        ctx.fail(fmt::format("rideHorse: riding {} proc 0x{:X} do status {} after {:.0f}s", riding,
+            static_cast<int>(link->mProcID), dComIfGp_getDoStatus(), ctx.seconds));
     }
     return false;
 }
@@ -770,8 +792,13 @@ bool measureRiderClimb(StepContext& ctx) {
         const s16 yaw = horse->shape_angle.y;
         const float x = rel.x * cM_scos(yaw) - rel.z * cM_ssin(yaw);
         const float z = rel.x * cM_ssin(yaw) + rel.z * cM_scos(yaw);
-        if (sClimb.haveHips) {
-            sClimb.maxStep = std::max(sClimb.maxStep, hips.abs(sClimb.lastHips));
+        const float step = sClimb.haveHips ? hips.abs(sClimb.lastHips) : 0.0f;
+        sClimb.maxStep = std::max(sClimb.maxStep, step);
+        if (ctx.step.value("trace", false)) {
+            TwiliLog.info("[autotest] climb t{} rider {} root 0x{:X} step {:.1f} rel ({:.1f} {:.1f} "
+                          "{:.1f}) pos ({:.0f} {:.0f} {:.0f})",
+                ctx.ticks, c.horse.rider.active, c.horse.rider.rootMode, step, x, rel.y, z,
+                dummy->current.pos.x, dummy->current.pos.y, dummy->current.pos.z);
         }
         sClimb.haveHips = true;
         sClimb.lastHips = hips;

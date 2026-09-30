@@ -119,8 +119,8 @@ module.exports = [
     },
     {
         name: "horse-mount-smooth",
-        description: "B mounts its Epona from the left, the right and behind and gets off to each side: A's dummy of B rises onto the puppet with its hips never inside her body, no jump of more than 45 units in a tick, and no sinking or snap once in the saddle",
-        timeoutSec: 480,
+        description: "B mounts its Epona from the left and the right with A on the ride prompt and gets off to that side: A's dummy of B rises onto the puppet with its hips never inside her body, no jump beyond B's own largest (the mount's start, the landing), and no sinking or snap once in the saddle",
+        timeoutSec: 420,
         cvars: COMMON_CVARS,
         instances: [
             {
@@ -132,11 +132,12 @@ module.exports = [
                     { op: "clearEnemies" },
                     { op: "waitSignal", name: "spawned", from: "B", timeoutSec: 60 },
                     { op: "expectRemoteHorse", ridden: false, frames: 10 },
-                    ...["left", "right", "back"].flatMap((side) => [
+                    // B's own hips move up to 37 in a tick on the mount and 49 on the landing
+                    ...["left", "right"].flatMap((side) => [
                         ...barrier(`arm-${side}`, "B"),
-                        { op: "measureRiderClimb", phase: "mount", frames: 120 },
+                        { op: "measureRiderClimb", phase: "mount", frames: 120, maxStep: 50 },
                         ...barrier(`mounted-${side}`, "B"),
-                        { op: "measureRiderClimb", phase: "dismount", frames: 90 },
+                        { op: "measureRiderClimb", phase: "dismount", frames: 90, maxStep: 60 },
                         ...barrier(`off-${side}`, "B"),
                     ]),
                     { op: "quit" },
@@ -152,7 +153,10 @@ module.exports = [
                     { op: "walk", frames: 40, stickY: 1 },
                     { op: "spawnHorse", dist: 300, side: 120 },
                     { op: "signal", name: "spawned" },
-                    ...["left", "right", "back"].flatMap((side) => [
+                    ...["left", "right"].flatMap((side) => [
+                        // The teleport to the mount's start is no part of the climb A measures
+                        { op: "rideHorse", mode: "beside", side },
+                        { op: "wait", frames: 20 },
                         ...barrier(`arm-${side}`, "A"),
                         { op: "wait", frames: 10 },
                         { op: "rideHorse", mode: "mount", side },
@@ -160,7 +164,7 @@ module.exports = [
                         { op: "wait", frames: 30 },
                         ...barrier(`mounted-${side}`, "A"),
                         { op: "wait", frames: 10 },
-                        { op: "rideHorse", ride: false, side: side === "right" ? "right" : "left" },
+                        { op: "rideHorse", ride: false, side },
                         { op: "expectLocalHorse", ridden: false },
                         { op: "wait", frames: 30 },
                         ...barrier(`off-${side}`, "A"),

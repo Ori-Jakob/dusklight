@@ -326,7 +326,7 @@ Epona (`StepsHorse.cpp`):
 | op | fields | does |
 | --- | --- | --- |
 | `spawnHorse` | `dist` (250), `side`, `timeoutSec` | our Epona shown in front of our Link (created when the stage has none) |
-| `rideHorse` | `ride` (true), `mode` (`force`, `mount`), `side` (`left`, `right`, `back` for the mount; `left`, `right` to get off), `timeoutSec` | on (forced or the real mount) or off our horse |
+| `rideHorse` | `ride` (true), `mode` (`force`, `mount`, `beside`), `side` (`left`, `right`), `trace`, `timeoutSec` | on (forced, or the real mount: beside her, A on the GET_ON prompt) or off our horse; `beside` only stands there |
 | `expectLocalHorse` | `present` (true), `ridden`, `timeoutSec` | our horse as shown and ridden |
 | `setHorseHidden` | `hidden` (true) | our horse's call wait on or off |
 | `expectRemoteHorse` | `count`, `name`, `ridden`, `parked`, `maxDist`, `maxSeatDist`, `zelda`, `maxZeldaDist` (150), `card`, `tagLine2`, `onScreen`, `tint`, `vanilla`, `hueGain`, `frames`, `timeoutSec` | peers' puppets as the fields say, held for `frames` ticks |
@@ -337,10 +337,11 @@ Epona (`StepsHorse.cpp`):
 | `expectNotRiding` | `frames` (30) | our Link rides nothing |
 | `clearEnemies` | `radius` (8000) | deletes the enemies near our Link |
 | `horseCamera` | `target` (`remote`, `own`, `both`, `dummy`), `back`, `up`, `side`, `height`, `hold` / `release` | the camera behind our Link looking at the horse (or the peer's dummy); `hold` keeps it (CameraService operator) |
-| `measureRiderClimb` | `phase` (`mount`, `dismount`), `frames` (120), `maxStep` (45), `seatTol` (60), `maxDip` (40), `maxSeatDist` (60) | the hips of the first peer's dummy against its horse puppet for `frames` ticks: never inside her body, no jump over `maxStep` in a tick; for a mount they reach the saddle and do not sink more than `maxDip` after |
+| `measureRiderClimb` | `phase` (`mount`, `dismount`), `frames` (120), `maxStep` (45), `seatTol` (60), `maxDip` (40), `maxSeatDist` (60), `trace` | the hips of the first peer's dummy against its horse puppet for `frames` ticks: never inside her body, no jump over `maxStep` in a tick; for a mount they reach the saddle and do not sink more than `maxDip` after |
 
-Written for smooth mounts and dismounts on a horse puppet, **not run yet** (the machine was in use):
-`horse-mount-smooth` (`scenarios/horse.js`).
+`horse-mount-smooth` (`scenarios/horse.js`) mounts with an A press: `procHorseRideInit` called from a
+step runs after `execute`, so the mount's first root reset never happens and B's own Link sinks into
+the horse and snaps up at the end. From behind, her body pushes Link out of the prompt's reach.
 
 Teleport (`StepsTeleport.cpp`):
 
