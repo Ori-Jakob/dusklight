@@ -86,6 +86,7 @@ void checkSaveGeneration() {
     st.dungeonBaselineValid = false;
     st.pendingGrants.clear();
     st.exchangePending = true;
+    resetFreestanding();
 }
 
 bool acceptsWorldPacket(const nlohmann::json& packet, const char* what) {
@@ -200,6 +201,7 @@ void onStageSaveTableLoaded() {
 void onStageSaveTableUnloaded() {
     s_state.dungeonBaselineValid = false;
     clearOpeningChests();
+    clearFreestandingStage();
 }
 
 bool handlePacket(const std::string& type, const nlohmann::json& packet) {
@@ -252,6 +254,7 @@ void tick() {
     }
     tickDungeonItemTracking();
     flushPickups();
+    tickFreestanding();
 }
 
 void endOfUpdate() {
@@ -274,6 +277,7 @@ void resetSession() {
 
 void shutdown() {
     removeItemObserver();
+    resetFreestanding();
     s_state = State{};
     RemoteApplyGuard::reset();
 }

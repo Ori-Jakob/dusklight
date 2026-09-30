@@ -96,6 +96,7 @@ set(TWILI_SOURCES
     src/sync/Chests.cpp
     src/sync/DungeonItems.cpp
     src/sync/Flags.cpp
+    src/sync/Freestanding.cpp
     src/sync/GiveItem.cpp
     src/sync/LightDrops.cpp
     src/sync/Pickups.cpp

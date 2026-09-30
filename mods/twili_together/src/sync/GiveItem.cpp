@@ -11,6 +11,7 @@
 #include "d/d_item.h"
 #include "d/d_item_data.h"
 
+#include <mods/items.h>
 #include <mods/svc/item.h>
 
 #include <algorithm>
@@ -270,12 +271,21 @@ void onItemGiven(ModContext*, const ItemGiveInfo* info, void*) {
     }
     // Checks the game hands out through the item queue (Poe souls, rewards) count as pickups too.
     notePickup(info->item, info->check_name);
-    sendGiveItem(info->item);
+    noteOwnCheck(info->check_name);
+    sendGiveItem(info->item, info->check_name);
+}
+
+// Checks that stand for one item lying in the world; a receiver drops a second copy.
+bool isPlacedCheck(const char* check) {
+    return check != nullptr &&
+           (std::strncmp(check, ITEM_CHECK_FREESTANDING_PREFIX,
+                sizeof(ITEM_CHECK_FREESTANDING_PREFIX) - 1) == 0 ||
+               std::strncmp(check, ITEM_CHECK_BOSS_PREFIX, sizeof(ITEM_CHECK_BOSS_PREFIX) - 1) == 0);
 }
 
 }  // namespace
 
-void sendGiveItem(uint8_t itemNo) {
+void sendGiveItem(uint8_t itemNo, const char* check) {
     if (!Session::active() || !isSaveLoaded()) {
         return;
     }
@@ -293,6 +303,10 @@ void sendGiveItem(uint8_t itemNo) {
         {"type", "GIVE_ITEM"},
         {"itemNo", static_cast<unsigned>(itemNo)},
     };
+    if (isPlacedCheck(check)) {
+        packet["check"] = check;
+        packet["saveTblNo"] = currentSaveTblNo();
+    }
     stampWorldPacket(packet, true);
     send(std::move(packet));
 }
@@ -316,6 +330,15 @@ void handleGiveItem(const nlohmann::json& packet) {
     const uint32_t senderId = packet.value("clientId", 0u);
     const auto source =
         packet.value("fromQueue", false) ? item_toasts::Source::Replay : item_toasts::Source::Live;
+    const auto check = packet.find("check");
+    if (check != packet.end() && check->is_string() &&
+        !acceptTeamCheck(check->get<std::string>(), packet.value("saveTblNo", -1)))
+    {
+        TwiliLog.info("[sync] skipped item 0x{:02X} from client {}: {} already reached us", itemNo,
+            senderId, check->get<std::string>());
+        item_toasts::noteItem(item_toasts::senderOf(session, packet), item, 1, -1, source, false);
+        return;
+    }
     const bool pending =
         std::find(st.pendingGrants.begin(), st.pendingGrants.end(), grant) != st.pendingGrants.end();
     if (!isRepeatableItem(grant) && (pending || receiverHasItem(grant))) {

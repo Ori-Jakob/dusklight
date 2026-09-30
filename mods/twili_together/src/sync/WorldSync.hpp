@@ -64,6 +64,9 @@ void animateOpenedTbox2(void* tbox2);
 // daAlink_c::makeFairy pre/post: its heal is a bottle's, not a pickup.
 void enterBottleFairy();
 void leaveBottleFairy();
+// daItem_c::itemGetNextExecute / daObjLife_c::initActionOrderGetDemo pre: true if a teammate
+// already took this item (it is removed, nothing given; skip the original).
+bool blockTakenPickup(void* item);
 
 // GIVE_ITEM's filter: progression items, no consumables or dungeon items.
 bool isSyncedItemNo(int itemNo);
@@ -94,6 +97,10 @@ struct Stats {
     uint32_t trapsSent = 0;
     uint32_t trapsReceived = 0;
     uint32_t trapsApplied = 0;
+    // Freestanding items a teammate took: removed here, pickups stopped, GIVE_ITEMs dropped.
+    uint32_t freestandingRemoved = 0;
+    uint32_t freestandingBlocked = 0;
+    uint32_t grantsDeduped = 0;
 };
 const Stats& stats();
 // True once the incompatible-layout toast was shown for this teammate name.

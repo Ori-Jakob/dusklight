@@ -366,6 +366,10 @@ void handleUpdateWorldState(const nlohmann::json& packet) {
 
     dSv_save_c& local = info->getSavedata();
     const MergeBaseline before = mergeBaseline(local);
+    uint32_t itemBitsBefore[dSv_save_c::STAGE_MAX];
+    for (int s = 0; s < dSv_save_c::STAGE_MAX; s++) {
+        itemBitsBefore[s] = static_cast<u32>(local.mSave[s].getBit().mItem[0]);
+    }
     mergePlayer(local.getPlayer(), remote.getPlayer(), session.roomState().shareWoodenShield);
     for (int s = 0; s < dSv_save_c::STAGE_MAX; s++) {
         mergeMemBit(local.mSave[s].getBit(), remote.mSave[s].getBit(),
@@ -395,6 +399,15 @@ void handleUpdateWorldState(const nlohmann::json& packet) {
             }
         }
     }
+    for (int s = 0; s < dSv_save_c::STAGE_MAX; s++) {
+        const uint32_t gained =
+            static_cast<u32>(local.mSave[s].getBit().mItem[0]) & ~itemBitsBefore[s];
+        for (int no = 0; gained != 0 && no < 32; no++) {
+            if ((gained >> no) & 1u) {
+                onRemoteItemBit(s, dSv_info_c::MEMORY_ITEM + no, -1);
+            }
+        }
+    }
 
     // Dungeon bits are not saved and only mean something inside that dungeon.
     dSv_danBit_c remoteDan;
@@ -406,7 +419,13 @@ void handleUpdateWorldState(const nlohmann::json& packet) {
             dan.mSwitch[i] |= remoteDan.mSwitch[i];
         }
         for (int i = 0; i < 4; i++) {
+            const u32 gained = remoteDan.mItem[i] & ~dan.mItem[i];
             dan.mItem[i] |= remoteDan.mItem[i];
+            for (int no = 0; gained != 0 && no < 32; no++) {
+                if ((gained >> no) & 1u) {
+                    onRemoteItemBit(dan.mStageNo, i * 32 + no, -1);
+                }
+            }
         }
     }
 

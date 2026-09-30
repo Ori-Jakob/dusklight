@@ -64,7 +64,8 @@ bool zoneIsLoaded(const std::string& stageName, int roomNo) {
     return dComIfGp_roomControl_getZoneNo(roomNo) >= 0;
 }
 
-// The live copy while that stage is loaded here, else its slot in the save.
+}  // namespace
+
 dSv_memBit_c* memBitForSaveTbl(int saveTblNo) {
     if (!validSaveTbl(saveTblNo)) {
         return nullptr;
@@ -83,6 +84,8 @@ dSv_danBit_c* danBitForSaveTbl(int saveTblNo) {
     }
     return &dan;
 }
+
+namespace {
 
 void sendFlag(const char* type, const char* category, int flagNo, int roomNo, int saveTblNo,
     bool persistent) {
@@ -153,24 +156,32 @@ void handleSetFlag(const nlohmann::json& packet) {
             break;
         }
     } else if (category == "ITEM") {
+        const bool had = itemBitSet(saveTblNo, flagNo, roomNo);
+        bool applied = false;
         switch (itemScope(flagNo)) {
         case Scope::Dan:
             if (dSv_danBit_c* dan = danBitForSaveTbl(saveTblNo)) {
                 dan->onItem(flagNo);
+                applied = true;
             }
             break;
         case Scope::Memory:
             if (dSv_memBit_c* bit = memBitForSaveTbl(saveTblNo)) {
                 bit->onItem(flagNo - kDanItemEnd);
+                applied = true;
             }
             break;
         case Scope::Zone:
             if (zoneIsLoaded(stageName, roomNo)) {
                 info->onItem(flagNo, roomNo);
+                applied = true;
             }
             break;
         default:
             break;
+        }
+        if (applied && !had) {
+            onRemoteItemBit(saveTblNo, flagNo, roomNo);
         }
     } else if (category == "TBOX") {
         if (flagNo >= 0 && flagNo < TBOX_MAX) {

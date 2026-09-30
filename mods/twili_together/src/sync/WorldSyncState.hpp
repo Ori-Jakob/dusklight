@@ -67,6 +67,9 @@ void send(nlohmann::json packet);
 void checkSaveGeneration();
 
 // Flags.cpp
+// The live copy while that stage is loaded here, else its save slot; the dungeon bits of ours.
+dSv_memBit_c* memBitForSaveTbl(int saveTblNo);
+dSv_danBit_c* danBitForSaveTbl(int saveTblNo);
 void handleSetFlag(const nlohmann::json& packet);
 void handleUnsetFlag(const nlohmann::json& packet);
 void handleSetEventBit(const nlohmann::json& packet);
@@ -87,6 +90,17 @@ void handleLightDrop(const nlohmann::json& packet);
 void onRemoteTbox(int saveTblNo, int tboxNo, bool live);
 void clearOpeningChests();
 
+// Freestanding.cpp: item bits in dSv_info_c numbering (room only for zone bits).
+bool itemBitSet(int saveTblNo, int bit, int roomNo);
+// A teammate set this item bit here (it was not set): its item vanishes if it lies here.
+void onRemoteItemBit(int saveTblNo, int bit, int roomNo);
+// A teammate's GIVE_ITEM for `check`: false if that check already reached us.
+bool acceptTeamCheck(const std::string& check, int saveTblNo);
+void noteOwnCheck(const char* check);
+void tickFreestanding();
+void clearFreestandingStage();
+void resetFreestanding();
+
 // The randomizer's trap item (dItemNo_Randomizer_FOOLISH_ITEM_e, an unused id in vanilla).
 inline constexpr uint8_t kFoolishItem = 0x13;
 // Our game is a randomizer game (item ids then mean the randomizer's items).
@@ -100,7 +114,8 @@ void handleSharePickup(const nlohmann::json& packet);
 bool isTrapGrant(const char* checkName);
 
 // GiveItem.cpp
-void sendGiveItem(uint8_t itemNo);
+// `check`: the give's check name, sent along for freestanding and boss checks.
+void sendGiveItem(uint8_t itemNo, const char* check);
 void handleGiveItem(const nlohmann::json& packet);
 
 // DungeonItems.cpp

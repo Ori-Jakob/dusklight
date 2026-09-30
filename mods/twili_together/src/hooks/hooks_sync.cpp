@@ -7,6 +7,8 @@
 #include "sync/WorldSync.hpp"
 
 #include "d/actor/d_a_alink.h"
+#include "d/actor/d_a_obj_item.h"
+#include "d/actor/d_a_obj_life_container.h"
 #include "d/actor/d_a_tbox.h"
 #include "d/actor/d_a_tbox2.h"
 #include "d/d_com_inf_game.h"
@@ -38,6 +40,8 @@ DEFINE_HOOK(&daTbox_c::actionWait, TboxActionWait);
 DEFINE_HOOK(&daTbox2_c::actionOpenWait, Tbox2ActionOpenWait);
 DEFINE_HOOK(&daTbox2_c::actionWait, Tbox2ActionWait);
 DEFINE_HOOK(&daAlink_c::makeFairy, AlinkMakeFairy);
+DEFINE_HOOK(&daItem_c::itemGetNextExecute, ItemGetNextExecute);
+DEFINE_HOOK(&daObjLife_c::initActionOrderGetDemo, LifeOrderGetDemo);
 
 namespace {
 
@@ -347,6 +351,22 @@ void onMakeFairyPost(ModContext*, void*, void*, void*) {
     sync::leaveBottleFairy();
 }
 
+// Ahead of the randomizer's replacement of itemGetNextExecute, which skips later pre-hooks.
+HookAction onItemGetNextPre(ModContext*, void* args, void*, void*) {
+    if (Session::active() && sync::blockTakenPickup(mods::arg<daItem_c*>(args, 0))) {
+        return HOOK_SKIP_ORIGINAL;
+    }
+    return HOOK_CONTINUE;
+}
+
+HookAction onLifeOrderGetDemoPre(ModContext*, void* args, void* retval, void*) {
+    if (Session::active() && sync::blockTakenPickup(mods::arg<daObjLife_c*>(args, 0))) {
+        *static_cast<int*>(retval) = 1;
+        return HOOK_SKIP_ORIGINAL;
+    }
+    return HOOK_CONTINUE;
+}
+
 template <class Entry>
 ModResult addObserver(HookPreFn pre, HookPostFn post, const char* what, std::string& error) {
     ModResult result = addPre<Entry>(pre, kObserve, what, error);
@@ -388,6 +408,10 @@ ModResult installSync(std::string& error) {
         addPost<Tbox2ActionWait>(onTbox2WaitPost, kDefault, "daTbox2_c::actionWait", error),
         addObserver<AlinkMakeFairy>(
             onMakeFairyPre, onMakeFairyPost, "daAlink_c::makeFairy", error),
+        addPre<ItemGetNextExecute>(
+            onItemGetNextPre, kObserve, "daItem_c::itemGetNextExecute", error),
+        addPre<LifeOrderGetDemo>(
+            onLifeOrderGetDemoPre, kObserve, "daObjLife_c::initActionOrderGetDemo", error),
     };
     for (const ModResult r : results) {
         if (r != MOD_OK) {
