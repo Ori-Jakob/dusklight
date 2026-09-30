@@ -31,6 +31,7 @@
 #include <cfloat>
 #include <deque>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -669,34 +670,65 @@ bool horseCamera(StepContext& ctx) {
     return true;
 }
 
-bool clearEnemies(StepContext& ctx) {
+// clearEnemies `keep`: enemies that come within the radius later are deleted too
+struct EnemySweep {
+    bool keep = false;
+    float radius = 0.0f;
+    std::set<fpc_ProcID> deleted;
+} sEnemySweep;
+
+// Deletes the enemies within `radius` of our Link (all of them for 0); returns how many.
+int deleteEnemies(float radius) {
     daAlink_c* link = daAlink_getAlinkActorClass();
     if (link == nullptr) {
-        ctx.fail("clearEnemies: no player");
-        return false;
+        return -1;
     }
     struct Search {
         cXyz center;
         float radiusSq;
-        std::vector<fpc_ProcID> found;
-    } search{link->current.pos, 0.0f, {}};
-    const float radius = ctx.step.value("radius", 8000.0f);
-    search.radiusSq = radius * radius;
+        std::vector<fopAc_ac_c*> found;
+    } search{link->current.pos, radius > 0.0f ? radius * radius : FLT_MAX, {}};
     fopAcIt_Executor(
         [](void* p, void* data) -> int {
             auto* ac = static_cast<fopAc_ac_c*>(p);
             auto* s = static_cast<Search*>(data);
             if (fopAcM_GetGroup(ac) == fopAc_ENEMY_e &&
-                ac->current.pos.abs2(s->center) <= s->radiusSq) {
-                s->found.push_back(fopAcM_GetID(ac));
+                ac->current.pos.abs2(s->center) <= s->radiusSq &&
+                !sEnemySweep.deleted.contains(fopAcM_GetID(ac)))
+            {
+                s->found.push_back(ac);
             }
             return 1;
         },
         &search);
-    for (fpc_ProcID id : search.found) {
-        fopAcM_delete(id);
+    for (fopAc_ac_c* ac : search.found) {
+        TwiliLog.info("[autotest] deleting enemy {} at {:.0f}", fopAcM_getProcNameString(ac),
+            ac->current.pos.abs(link->current.pos));
+        sEnemySweep.deleted.insert(fopAcM_GetID(ac));
+        fopAcM_delete(fopAcM_GetID(ac));
     }
-    TwiliLog.info("[autotest] cleared {} enemies within {:.0f}", search.found.size(), radius);
+    return static_cast<int>(search.found.size());
+}
+
+void sweepEnemies() {
+    if (sEnemySweep.keep) {
+        deleteEnemies(sEnemySweep.radius);
+    }
+}
+
+bool clearEnemies(StepContext& ctx) {
+    const float radius = ctx.step.value("radius", 8000.0f);
+    const int n = deleteEnemies(radius);
+    if (n < 0) {
+        ctx.fail("clearEnemies: no player");
+        return false;
+    }
+    if (ctx.step.contains("keep")) {
+        sEnemySweep.keep = ctx.step.value("keep", false);
+        sEnemySweep.radius = radius;
+    }
+    TwiliLog.info("[autotest] cleared {} enemies within {:.0f}{}", n, radius,
+        sEnemySweep.keep ? " (kept clear)" : "");
     return true;
 }
 
@@ -892,6 +924,7 @@ std::optional<bool> horseSteps(const std::string& op, StepContext& ctx) {
 }
 
 const bool sRegistered = registerSteps(&horseSteps);
+const bool sTickerRegistered = registerTicker(&sweepEnemies);
 
 }  // namespace
 }  // namespace twili::autotest

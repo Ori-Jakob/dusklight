@@ -1,6 +1,6 @@
 // PvP; damage in quarter hearts: an Ordon sword slash takes 2 (doubled on a wolf), at most 4.
 
-const { STAGES, COMMON_CVARS, barrier, meetIn, connect } = require("../lib");
+const { STAGES, COMMON_CVARS, barrier, meetIn, connect, waitStage } = require("../lib");
 
 const PAD_B = 0x200;
 const PAD_L = 0x40;
@@ -20,6 +20,8 @@ const holdL = (frames) => ({ op: "walk", frames, stickX: 0, stickY: 0, buttons: 
 const drawSword = swing;
 // More than the victim's 30 ticks of i-frames after a hit.
 const recover = { op: "wait", frames: 45 };
+// Field enemies deleted as the stage loads and kept away: a hit on either player breaks the charge.
+const clearField = (s) => [waitStage(s), { op: "clearEnemies", radius: 0, keep: true }];
 const spawnAs = (form, s) => [
     { op: "setForm", form },
     { op: "warp", ...s },
@@ -484,15 +486,16 @@ module.exports = [
                 name: "A",
                 start: STAGES.faronField,
                 steps: [
+                    ...clearField(STAGES.faronField),
                     ...connect,
                     ...meetIn(STAGES.faronField, "B"),
-                    { op: "clearEnemies" },
                     ...room("pvpMode", true),
                     { op: "spawnHorse" },
                     { op: "rideHorse", mode: "force" },
                     { op: "expectLocalHorse", ridden: true },
                     ...barrier("b-marked", "B"),
                     { op: "expectDummyHurtbox", registered: true, timeoutSec: 10 },
+                    { op: "clearEnemies", radius: 0 },
                     { op: "chargeDummy", dist: 450, charge: true, timeoutSec: 15 },
                     { op: "expectPvpStats", target: "B", applied: 1, damage: 3, hitStops: 0, timeoutSec: 10 },
                     { op: "expectHitMarker", target: "B", result: "applied", text: "-3/4" },
@@ -504,12 +507,13 @@ module.exports = [
                 name: "B",
                 start: STAGES.faronField,
                 steps: [
+                    ...clearField(STAGES.faronField),
                     ...connect,
                     ...meetIn(STAGES.faronField, "A"),
-                    { op: "clearEnemies" },
                     ...room("pvpMode", true),
                     { op: "setLife", value: 12 },
                     { op: "wait", frames: 10 },
+                    { op: "clearEnemies", radius: 0 },
                     { op: "markLife" },
                     ...barrier("b-marked", "A"),
                     { op: "expectLifeDelta", delta: -3, timeoutSec: 30 },

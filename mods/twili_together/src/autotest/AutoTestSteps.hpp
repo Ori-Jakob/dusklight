@@ -23,4 +23,8 @@ using StepHandler = std::optional<bool> (*)(const std::string& op, StepContext& 
 // For feature step files: static const bool sRegistered = registerSteps(&handler);
 bool registerSteps(StepHandler handler);
 
+// Runs every simulation tick of a script, before its step.
+using TickHandler = void (*)();
+bool registerTicker(TickHandler handler);
+
 }  // namespace twili::autotest

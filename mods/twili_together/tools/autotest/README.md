@@ -335,7 +335,7 @@ Epona (`StepsHorse.cpp`):
 | `expectNoRemoteHorse` | `timeoutSec` | no puppet shown, no horse card drawn |
 | `expectRidePrompt` | `target` (`own`, `remote`), `frames` (60), `dist` (110) | GET_ON on our horse / never on the puppet |
 | `expectNotRiding` | `frames` (30) | our Link rides nothing |
-| `clearEnemies` | `radius` (8000) | deletes the enemies near our Link |
+| `clearEnemies` | `radius` (8000, 0 for the whole stage), `keep` | deletes the enemies near our Link and logs each; `keep: true` also deletes any that come within the radius later in the script |
 | `horseCamera` | `target` (`remote`, `own`, `both`, `dummy`), `back`, `up`, `side`, `height`, `hold` / `release` | the camera behind our Link looking at the horse (or the peer's dummy); `hold` keeps it (CameraService operator) |
 | `measureRiderClimb` | `phase` (`mount`, `dismount`), `frames` (120), `maxStep` (45), `seatTol` (60), `maxDip` (40), `maxSeatDist` (60), `trace` | the hips of the first peer's dummy against its horse puppet for `frames` ticks: never inside her body, no jump over `maxStep` in a tick; for a mount they reach the saddle and do not sink more than `maxDip` after |
 

@@ -77,6 +77,11 @@ std::vector<StepHandler>& stepHandlers() {
     return handlers;
 }
 
+std::vector<TickHandler>& tickHandlers() {
+    static std::vector<TickHandler> handlers;
+    return handlers;
+}
+
 double stepTimeout(const json& step, double fallback = 90.0) {
     return step.value("timeoutSec", fallback);
 }
@@ -539,6 +544,11 @@ bool registerSteps(StepHandler handler) {
     return true;
 }
 
+bool registerTicker(TickHandler handler) {
+    tickHandlers().push_back(handler);
+    return true;
+}
+
 bool init() {
     auto& st = state();
     const std::string scriptPath = config::getString(config::Var::AutotestScript);
@@ -617,6 +627,10 @@ void tick() {
     if (st.stepIndex >= st.steps.size()) {
         finish(true, kExitPass, "script complete");
         return;
+    }
+
+    for (TickHandler handler : tickHandlers()) {
+        handler();
     }
 
     const nlohmann::json& step = st.steps[st.stepIndex];
