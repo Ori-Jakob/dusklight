@@ -72,6 +72,13 @@ struct DummyPlayerDebugInfo {
     bool lantern = false;           // lantern drawn, in hand or on the belt
     uint16_t heldItem = 0xFFFF;     // item whose model the hand holds
     bool ground = false;            // ground found under the dummy, so it casts a shadow
+    // Legs and body height (updateRemoteFeet)
+    bool feetContact = false;       // the legs reached for our ground this tick
+    uint8_t groundFlags = 0;        // RemoteGround flags of the pose shown
+    float bodyDrop = 0.0f;          // field_0x2b94: the body lowered to the lower foot
+    float legBendDeg = 0.0f;        // the largest leg turn footBgCheck's angles give
+    float bodyOffset = 0.0f;        // the remote's own lift over its position (setMatrix)
+    float baseY = 0.0f;             // height of the body matrix
     // The sender tick shown; advances about 1 per local tick when smooth.
     double shownSeq = 0.0;
     // Midna on the wolf's back (DummyMidna).
@@ -211,7 +218,7 @@ private:
     J3DAnmTransform* loadRemoteAnimationPack(bool upper, int idx, uint16_t anmId, float frame,
                                              float frameNext = 0.0f, float frameAlpha = 0.0f);
     bool setRemoteBasAnime(bool upper, int idx);
-    void modelCalcRemoteBody(bool attentionLock);
+    void modelCalcRemoteBody(bool attentionLock, const twili::RemoteGround& ground);
     f32 jointExtraTurnDeg(u16 jnt) const;
     void applyRemoteClothes(uint8_t clothesItem);
     void bindRemoteMagicArmorBrk(int status, bool fromStart = false);
@@ -225,6 +232,11 @@ private:
     void updateRemoteBootMatrices();
     void updateRemoteLantern(const twili::LinkPuppetState& state);
     void updateRemoteGround();
+    int remoteGroundCode();
+    void resetRemoteFeet();
+    void updateRemoteFeet(const twili::RemoteGround& ground, bool onHorse);
+    void updateRemoteLinkFeet(bool contact, bool idle);
+    void updateRemoteWolfFeet(bool contact, bool idle);
     void drawRemoteShadow();
     void applyRemoteItemPresentation(const twili::LinkPuppetState& state);
     void updateRemoteLoadedAmmo(const twili::LinkPuppetState& state);
@@ -343,6 +355,10 @@ private:
     bool mDummyFaceBckReady = false;  // mFaceBck holds the idle face pose (initializeShell)
     // Height of the ground under the dummy, -G_CM3D_F_INF when there is none here.
     f32 mDummyGroundY = -G_CM3D_F_INF;
+    // Last tick's joints are from before a jump in the pose: the legs start over.
+    bool mDummyFeetReset = true;
+    bool mDummyFeetContact = false;  // autotest
+    uint8_t mDummyGroundFlags = 0;   // autotest
     J3DModel* mpDummyLoadedAmmoModel = nullptr;
     twili::RemoteHorseRider mDummyRider;
     uint8_t mDummyColorR = 255;

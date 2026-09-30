@@ -36,6 +36,7 @@
 #include "res/Object/Kmdl.h"
 #include "res/Object/SWShd.h"
 #include "res/Object/Wmdl.h"
+#include "SSystem/SComponent/c_bg_w.h"
 #include "SSystem/SComponent/c_lib.h"
 #include "SSystem/SComponent/c_math.h"
 #include "Z2AudioLib/Z2Audience.h"
@@ -1961,7 +1962,7 @@ bool daDummyPlayer_c::setRemoteAnimations(const LinkPuppetState& state) {
     return true;
 }
 
-void daDummyPlayer_c::modelCalcRemoteBody(bool attentionLock) {
+void daDummyPlayer_c::modelCalcRemoteBody(bool attentionLock, const twili::RemoteGround& ground) {
     const u8 oldRootTransMode = field_0x2f99;
     const cXyz oldRootTransBase = field_0x3588;
     const f32 oldRootTransBaseY = field_0x33b0;
@@ -1994,6 +1995,11 @@ void daDummyPlayer_c::modelCalcRemoteBody(bool attentionLock) {
     } else {
         field_0x3588.x = attentionLock ? kDummyHalfAtnRootTransX : kDummyWaitRootTransX;
         field_0x3588.z = attentionLock ? kDummyHalfAtnRootTransZ : kDummyWaitRootTransZ;
+    }
+    // The remote's position already carries the clip's rise (jumps, ladders, climbing)
+    if (!mDummyRider.active && (ground.flags & twili::kGroundRootYClear)) {
+        field_0x2f99 |= 2;
+        field_0x33b0 = ground.rootBaseY;
     }
     modelCalc(mpLinkModel);
     if (bowTilt) {
@@ -3285,6 +3291,21 @@ void daDummyPlayer_c::getDebugInfo(twili::DummyPlayerDebugInfo& out) const {
     out.lantern = checkNoResetFlg2(FLG2_UNK_1) != 0;
     out.heldItem = mDummyHeldItem;
     out.ground = mDummyGroundY > -G_CM3D_F_INF;
+    out.feetContact = mDummyFeetContact;
+    out.groundFlags = mDummyGroundFlags;
+    out.bodyDrop = field_0x2b94;
+    out.bodyOffset = field_0x2b98 + field_0x2b9c;
+    for (const daAlink_footData_c* legs : {mFootData1, mFootData2}) {
+        // The human's second pair are its arms
+        if (legs == mFootData2 && !checkWolf()) {
+            continue;
+        }
+        for (int i = 0; i < 2; i++) {
+            const int bend = (std::max)(std::abs(legs[i].field_0x6), std::abs(legs[i].field_0x4));
+            out.legBendDeg = (std::max)(out.legBendDeg, bend * (360.0f / 65536.0f));
+        }
+    }
+    out.baseY = mpLinkModel ? mpLinkModel->getBaseTRMtx()[1][3] : current.pos.y;
     out.midnaReady = mDummyMidna.ready();
     out.midnaMode = mDummyMidna.mode();
     out.midnaShown = isBodyShown() && ((checkWolf() && out.midnaMode == twili::kMidnaDrawn) ||
@@ -3401,6 +3422,7 @@ void daDummyPlayer_c::resetRemoteContinuity() {
     mDummySwordBlurWasActive = false;
     m_swordBlur.field_0x14 = 0;
     mDummyMidna.resetContinuity();
+    mDummyFeetReset = true;
 }
 
 // The joints and height changeWolf and changeLink set for each body.
@@ -3942,15 +3964,20 @@ bool daDummyPlayer_c::applyRemoteState(const LinkPuppetState& state) {
     mSwordChangeWaitTimer = 0;
     mShieldChangeWaitTimer = 0;
     traceInitialApply(mDummyClientId, trace, "applyRemoteState setMatrix");
+    // The remote body's own lift over its position (setMatrix adds these; the seat places a rider)
+    field_0x2b98 = onHorse ? 0.0f : state.ground.stepOffset;
+    field_0x2b9c = onHorse ? 0.0f : state.ground.extraOffset;
+    field_0x2ba0 = 0.0f;
     setMatrix();
     mSinkShapeOffset = state.status.sinkOffset;
     if (mSinkShapeOffset != 0.0f) {
         setMatrixOffset(&mSinkShapeOffset, mSinkShapeOffset);
     }
+    updateRemoteFeet(state.ground, onHorse);
     field_0x2fb6 = state.upperBlendMode;
     field_0x3444 = clampRatio(state.upperBlendRatio);
     traceInitialApply(mDummyClientId, trace, "applyRemoteState modelCalc");
-    modelCalcRemoteBody(state.attentionLock);
+    modelCalcRemoteBody(state.attentionLock, state.ground);
     if (onHorse) {
         // setHorseStirrup's order
         horse::applyRider(mDummyClientId, *this, state.horse);
@@ -4311,6 +4338,222 @@ void daDummyPlayer_c::updateRemoteGround() {
     cXyz start = field_0x3834;
     mObjGndChk.SetPos(&start);
     mDummyGroundY = dComIfG_Bgsp().GroundCross(&mObjGndChk);
+}
+
+// mGroundCode of the ground under the body at the last tick (8: stairs, the feet stay level)
+int daDummyPlayer_c::remoteGroundCode() {
+    if (mDummyGroundY <= -G_CM3D_F_INF || !dComIfG_Bgsp().ChkPolySafe(mObjGndChk)) {
+        return -1;
+    }
+    return dComIfG_Bgsp().GetGroundCode(mObjGndChk);
+}
+
+void daDummyPlayer_c::resetRemoteFeet() {
+    for (daAlink_footData_c* feet : {mFootData1, mFootData2}) {
+        for (int i = 0; i < 2; i++) {
+            feet[i].field_0x0 = 0;
+            feet[i].field_0x1 = 5;
+            feet[i].field_0x2 = 0;
+            feet[i].field_0x4 = 0;
+            feet[i].field_0x6 = 0;
+        }
+    }
+    field_0x2b94 = 0.0f;
+    field_0x30d6 = 0;
+    mDummyFeetContact = false;
+}
+
+// footBgCheck / wolfFootBgCheck against our ground, from the remote's own contact and idle state.
+void daDummyPlayer_c::updateRemoteFeet(const twili::RemoteGround& ground, bool onHorse) {
+    mDummyGroundFlags = ground.flags;
+    mDummyFeetContact = false;
+    if (mDummyFeetReset) {
+        // Last tick's joints stand where the pose jumped from
+        mDummyFeetReset = false;
+        resetRemoteFeet();
+        return;
+    }
+    if (!field_0x2060->getOldFrameFlg()) {
+        return;
+    }
+    // A hidden body needs no ground checks: its legs ease back as in the air
+    const bool contact =
+        !onHorse && isBodyShown() && (ground.flags & twili::kGroundFeet) != 0;
+    const bool idle = (ground.flags & twili::kGroundIdle) != 0;
+    mDummyFeetContact = contact;
+    if (checkWolf()) {
+        updateRemoteWolfFeet(contact, idle);
+    } else {
+        updateRemoteLinkFeet(contact, idle);
+    }
+}
+
+void daDummyPlayer_c::updateRemoteLinkFeet(bool contact, bool idle) {
+    static const Vec kHeelOffset[2] = {{-3.0f, 13.0f, 0.0f}, {-3.0f, -13.0f, 0.0f}};
+    static const Vec kToeOffset[2] = {{10.0f, 5.0f, 0.0f}, {10.0f, -5.0f, 0.0f}};
+    static const u16 kHeelJoint[2] = {0x14, 0x19};
+    const f32 autoUp = mpHIO->mWallHang.m.auto_walk_height + 0.01f;  // l_autoUpHeight
+    const int groundCode = contact ? remoteGroundCode() : -1;
+    f32 groundY[2];
+    s16 groundAngle[2] = {};
+    for (int i = 0; i < 2; i++) {
+        daAlink_footData_c& foot = mFootData1[i];
+        cXyz heel;
+        cXyz toe;
+        mDoMtx_multVec(mpLinkModel->getAnmMtx(kHeelJoint[i]), &kHeelOffset[i], &heel);
+        mDoMtx_multVec(mpLinkModel->getAnmMtx(kHeelJoint[i] + 1), &kToeOffset[i], &toe);
+        cXyz pos = (heel + toe) * 0.5f;
+        groundY[i] = current.pos.y;
+        if (!contact) {
+            foot.field_0x0 = 0;
+            foot.field_0x1 = 5;
+            foot.field_0x8 = pos;
+            continue;
+        }
+        // A standing foot keeps its spot until it moves off it
+        if ((pos - foot.field_0x8).abs2XZ() < 100.0f && idle) {
+            if (foot.field_0x1 != 0) {
+                foot.field_0x1--;
+            } else {
+                pos = foot.field_0x8;
+            }
+        } else {
+            foot.field_0x1 = 5;
+        }
+        foot.field_0x8 = pos;
+        cXyz start(pos.x, current.pos.y + autoUp, pos.z);
+        mLinkGndChk.SetPos(&start);
+        const f32 y = dComIfG_Bgsp().GroundCross(&mLinkGndChk);
+        cM3dGPla plane;
+        foot.field_0x0 = 0;
+        if (y != -G_CM3D_F_INF && dComIfG_Bgsp().GetTriPla(mLinkGndChk, &plane) &&
+            cBgW_CheckBGround(plane.mNormal.y) && start.y - y < 2.0f * autoUp)
+        {
+            groundY[i] = y;
+            foot.field_0x0 = 1;
+            groundAngle[i] = getGroundAngle(&mLinkGndChk, shape_angle.y);
+        }
+    }
+
+    const int lower = !contact ? 2 : groundY[1] > groundY[0] ? 0 : 1;
+    f32 drop = 0.0f;
+    if (contact && idle && std::fabs(field_0x2b98) <= 1.0f) {
+        drop = groundY[lower] - current.pos.y;
+    }
+    setMatrixOffset(&field_0x2b94, drop);
+
+    const f32 baseY = mpLinkModel->getBaseTRMtx()[1][3];
+    for (int i = 0; i < 2; i++) {
+        daAlink_footData_c& foot = mFootData1[i];
+        s16 thigh = 0;
+        s16 knee = 0;
+        if (contact) {
+            const f32 rise = (std::min)(groundY[i] - baseY, autoUp);
+            if ((lower != i && !(rise > 0.0f) && !idle) ||
+                !setLegAngle(rise, &foot, &thigh, &knee, 1))
+            {
+                thigh = 0;
+                knee = 0;
+            }
+        }
+        // Across the half turn the thigh eases the short way
+        if (thigh * foot.field_0x6 < 0 && std::abs(thigh - foot.field_0x6) >= 0x8000) {
+            thigh = static_cast<s16>(thigh >= 0 ? thigh - 0x4000 : thigh + 0x4000);
+        }
+        cLib_addCalcAngleS(&foot.field_0x6, thigh, 2, 0x1800, 0x10);
+        cLib_addCalcAngleS(&foot.field_0x4, knee, 2, 0x1800, 0x10);
+        const s16 tilt =
+            (lower != 2 && foot.field_0x0 != 0 && idle && groundCode != 8) ? groundAngle[i] : 0;
+        cLib_addCalcAngleS(&foot.field_0x2, tilt, 2, 0x1800, 0x10);
+    }
+}
+
+void daDummyPlayer_c::updateRemoteWolfFeet(bool contact, bool idle) {
+    static const Vec kPawOffset = {6.0f, -5.0f, 0.0f};
+    static const u16 kPawJoint[2][2] = {{0x13, 0x18}, {0x1F, 0x24}};
+    const f32 autoUp = mpHIO->mWolf.mWlWallHang.m.mAutoWalkHeight + 0.01f;  // l_autoUpHeight
+    const int groundCode = contact ? remoteGroundCode() : -1;
+    // field_0x2ff0, the slope along the body, from last tick's ground under it
+    const s16 slope =
+        contact && mDummyGroundY > -G_CM3D_F_INF ? getGroundAngle(&mObjGndChk, shape_angle.y) : 0;
+    const f32 lift = 50.0f * std::fabs(cM_ssin(slope));
+    const f32 reach = 30.0f + lift;
+    // Into the body's pitched frame, where the paw heights compare
+    Mtx toBody;
+    mDoMtx_stack_c::XrotS(-shape_angle.x);
+    mDoMtx_stack_c::YrotM(-shape_angle.y);
+    mDoMtx_copy(mDoMtx_stack_c::get(), toBody);
+    f32 groundY[2][2];
+    s16 groundAngle[2][2] = {};
+    for (int i = 0; i < 2; i++) {
+        daAlink_footData_c* legs = i == 0 ? mFootData1 : mFootData2;
+        for (int j = 0; j < 2; j++) {
+            daAlink_footData_c& foot = legs[j];
+            cXyz pos;
+            mDoMtx_multVec(mpLinkModel->getAnmMtx(kPawJoint[i][j]), &kPawOffset, &pos);
+            groundY[i][j] = current.pos.y;
+            if (!contact) {
+                foot.field_0x0 = 0;
+                foot.field_0x1 = 0xF;
+                foot.field_0x8 = pos;
+                continue;
+            }
+            if ((pos - foot.field_0x8).abs2XZ() < 100.0f && idle && foot.field_0x0 != 0) {
+                if (foot.field_0x1 != 0) {
+                    foot.field_0x1--;
+                } else {
+                    pos = foot.field_0x8;
+                }
+            } else {
+                foot.field_0x1 = 0xF;
+            }
+            foot.field_0x8 = pos;
+            cXyz start(pos.x, current.pos.y + autoUp + 50.0f + lift, pos.z);
+            mLinkGndChk.SetPos(&start);
+            const f32 y = dComIfG_Bgsp().GroundCross(&mLinkGndChk);
+            const f32 above = pos.y - y;
+            foot.field_0x0 = 0;
+            if (y != -G_CM3D_F_INF && above < reach && above > -reach) {
+                foot.field_0x0 = 1;
+                groundAngle[i][j] = getGroundAngle(&mLinkGndChk, shape_angle.y);
+                cXyz rel(pos.x - current.pos.x, y - current.pos.y, pos.z - current.pos.z);
+                cXyz local;
+                mDoMtx_multVec(toBody, &rel, &local);
+                groundY[i][j] = local.y + current.pos.y;
+            }
+        }
+    }
+
+    // The wolf never lowers its body
+    setMatrixOffset(&field_0x2b94, 0.0f);
+
+    const f32 baseY = mpLinkModel->getBaseTRMtx()[1][3];
+    const bool sniffing = checkUnderMove0BckNoArcWolf(WANM_SMELL) != 0;
+    for (int i = 0; i < 2; i++) {
+        daAlink_footData_c* legs = i == 0 ? mFootData1 : mFootData2;
+        for (int j = 0; j < 2; j++) {
+            daAlink_footData_c& foot = legs[j];
+            s16 upper = 0;
+            s16 lower = 0;
+            if (contact && !(i == 0 && sniffing)) {
+                const f32 rise = (std::min)(groundY[i][j] - baseY, 35.0f);
+                if ((rise > 0.0f || idle) && !setLegAngle(rise, &foot, &upper, &lower, 1)) {
+                    upper = 0;
+                    lower = 0;
+                }
+            }
+            cLib_addCalcAngleS(&foot.field_0x6, upper, 2, 0x1800, 0x10);
+            cLib_addCalcAngleS(&foot.field_0x4, lower, 2, 0x1800, 0x10);
+            s16 tilt = static_cast<s16>(-shape_angle.x);
+            if (contact && foot.field_0x0 != 0 && groundCode != 8 && idle) {
+                tilt = static_cast<s16>(tilt + groundAngle[i][j]);
+            }
+            cLib_addCalcAngleS(&foot.field_0x2, tilt, 2, 0x1800, 0x10);
+        }
+    }
+    // The back bends against the slope's pitch while standing
+    const s16 bend = idle ? static_cast<s16>(-shape_angle.x) : 0;
+    cLib_addCalcAngleS(&field_0x30d6, bend, 3, 0x1000, 0x100);
 }
 
 void daDummyPlayer_c::drawRemoteShadow() {
