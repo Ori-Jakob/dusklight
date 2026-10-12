@@ -3,7 +3,7 @@
 #include "dusk/settings.h"
 #include "dusk/ui/ui.hpp"
 
-#include <aurora/lib/input.hpp>
+#include <aurora/lib/gamepad.hpp>
 
 namespace dusk {
 
@@ -88,7 +88,7 @@ void updateActionBindings() {
                     }
                 } else {
                     // If controller is active
-                    auto controller = aurora::input::get_controller_for_player(port);
+                    auto controller = aurora::gamepad::get_controller_for_player(port);
                     if (controller) {
                         if (SDL_GetGamepadButton(controller->m_controller, static_cast<SDL_GamepadButton>(button))) {
                             actionPressData[port][static_cast<int>(action)].pressedCurFrame = true;
