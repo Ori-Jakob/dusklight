@@ -1,5 +1,10 @@
 #include "commands.hpp"
 
+#include "dusk/dusk.h"
+#include "dusk/imgui/ImGuiConsole.hpp"
+#include "dusk/logging.h"
+#include "dusk/main.h"
+#include "dusk/settings.h"
 #include "game_clock.h"
 
 #include "c/c_damagereaction.h"
@@ -20,12 +25,21 @@
 #include "SSystem/SComponent/c_sxyz.h"
 #include "SSystem/SComponent/c_xyz.h"
 
+#include <aurora/trace.hpp>
+#include <borealis/io.hpp>
+#include <borealis/version.h>
+#include <fmt/chrono.h>
 #include <fmt/format.h>
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <ctime>
+#include <filesystem>
+#include <fstream>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <vector>
 
 namespace dusk {
@@ -36,17 +50,23 @@ static constexpr int kMaxHistory = 64;
 static std::vector<std::string> SplitArgs(std::string_view input) {
     std::vector<std::string> args;
     std::string cur;
+    bool quoted = false;
+    bool hadQuotes = false;
     for (char c : input) {
-        if (c == ' ' || c == '\t') {
-            if (!cur.empty()) {
+        if (c == '"') {
+            quoted = !quoted;
+            hadQuotes = true;
+        } else if (!quoted && (c == ' ' || c == '\t')) {
+            if (!cur.empty() || hadQuotes) {
                 args.push_back(std::move(cur));
                 cur.clear();
+                hadQuotes = false;
             }
         } else {
             cur += c;
         }
     }
-    if (!cur.empty()) {
+    if (!cur.empty() || hadQuotes) {
         args.push_back(std::move(cur));
     }
     return args;
@@ -232,9 +252,225 @@ static float smoothstep(float t) {
 
 static constexpr float kCamTargetDist = 100.0f;
 
+static constexpr long kMaxTraceFrames = 10000;
+static constexpr const char* kTraceExtension = ".gxtrace";
+static constexpr const char* kTraceUsage =
+    "Usage: render.trace [-f] <frames 1-10000> [file]  |  render.trace stop | status";
+
+static std::tm LocalTimeNow() {
+    const std::time_t now = std::time(nullptr);
+    std::tm local{};
+#if defined(_WIN32)
+    localtime_s(&local, &now);
+#else
+    localtime_r(&now, &local);
+#endif
+    return local;
+}
+
+static std::filesystem::path ResolveTracePath(std::string_view arg) {
+    std::filesystem::path path;
+    if (arg.empty()) {
+        const char* stage = dComIfGp_getStartStageName();
+        path = borealis::io::fs_path_from_utf8(fmt::format(FMT_STRING("{}_r{}_{:%Y%m%d-%H%M%S}"),
+            (stage != nullptr && stage[0] != '\0') ? stage : "trace",
+            (int)dComIfGp_getStartStageRoomNo(), LocalTimeNow()));
+    } else {
+        path = borealis::io::fs_path_from_utf8(arg);
+    }
+    if (path.is_relative()) {
+        path = ConfigPath / "traces" / path;
+    }
+    if (!path.has_extension()) {
+        path += kTraceExtension;
+    }
+    return path;
+}
+
+static void WriteTraceMetadata(const std::filesystem::path& tracePath, long frames) {
+    nlohmann::json meta;
+    meta["format"] = 1;
+    meta["trace"] = borealis::io::fs_path_to_string(tracePath.filename());
+    meta["framesRequested"] = frames;
+    meta["createdUtc"] =
+        fmt::format(FMT_STRING("{:%Y-%m-%dT%H:%M:%SZ}"), fmt::gmtime(std::time(nullptr)));
+    meta["build"] = BOREALIS_APP_DESCRIBE;
+    meta["backend"] = std::string(backend_name(auroraInfo.backend));
+
+    const char* stage = dComIfGp_getStartStageName();
+    meta["stage"] = {
+        {"name", stage != nullptr ? stage : ""},
+        {"room", (int)dComIfGp_getStartStageRoomNo()},
+        {"point", (int)dComIfGp_getStartStagePoint()},
+        {"layer", (int)dComIfGp_getStartStageLayer()},
+    };
+    if (auto* player = dComIfGp_getPlayer(0)) {
+        meta["player"] = {
+            {"pos", {player->current.pos.x, player->current.pos.y, player->current.pos.z}},
+            {"angleY", (int)player->shape_angle.y},
+        };
+    } else {
+        meta["player"] = nullptr;
+    }
+    if (dCamera_c* camera = dCam_getBody()) {
+        const cXyz eye = camera->iEye();
+        const cXyz center = camera->iCenter();
+        meta["camera"] = {
+            {"eye", {eye.x, eye.y, eye.z}},
+            {"center", {center.x, center.y, center.z}},
+        };
+    } else {
+        meta["camera"] = nullptr;
+    }
+    meta["timeOfDay"] = dComIfGs_getTime();
+
+    const auto& settings = getSettings();
+    meta["settings"] = {
+        {settings.game.enableFrameInterpolation.getName(),
+            (int)settings.game.enableFrameInterpolation.getValue()},
+        {settings.game.internalResolutionScale.getName(),
+            settings.game.internalResolutionScale.getValue()},
+        {settings.video.maxFrameRate.getName(), settings.video.maxFrameRate.getValue()},
+    };
+
+    auto metaPath = tracePath;
+    metaPath.replace_extension(".dusk.json");
+    std::ofstream out(metaPath, std::ios::binary | std::ios::trunc);
+    out << meta.dump(2) << '\n';
+    if (!out) {
+        DuskLog.warn("render.trace: failed to write {}", borealis::io::fs_path_to_string(metaPath));
+    }
+}
+
+static std::string ForeignTraceOwner(const CommandState&) {
+    return "started elsewhere";
+}
+
+static void TraceReply(const CommandState&, const CommandOutput& output, const std::string& line) {
+    DuskLog.info("{}", line);
+    output(line);
+}
+
+static void TraceError(const CommandState&, const CommandOutput& output, const std::string& line) {
+    DuskLog.warn("{}", line);
+    output(line);
+}
+
+static void RunRenderTrace(
+    const std::vector<std::string>& args, CommandState& state, const CommandOutput& output) {
+    size_t i = 1;
+    bool overwrite = false;
+    if (args.size() > i && args[i] == "-f") {
+        overwrite = true;
+        ++i;
+    }
+    const std::string sub = args.size() > i ? args[i] : "status";
+
+    if (sub == "status") {
+        if (!aurora::trace::is_capturing()) {
+            TraceReply(state, output, "No trace capture in progress");
+        } else if (state.tracePath.empty()) {
+            TraceReply(state, output,
+                fmt::format(
+                    FMT_STRING("Trace capture in progress ({})"), ForeignTraceOwner(state)));
+        } else {
+            TraceReply(state, output,
+                fmt::format(FMT_STRING("Trace capture in progress: {} ({} frames requested)"),
+                    state.tracePath, state.traceFrames));
+        }
+        return;
+    }
+
+    if (sub == "stop") {
+        if (!aurora::trace::is_capturing()) {
+            TraceReply(state, output, "No trace capture in progress");
+            return;
+        }
+        aurora::trace::stop_capture();
+        TraceReply(state, output,
+            fmt::format(FMT_STRING("Trace stopped early: {}"),
+                state.tracePath.empty() ?
+                    fmt::format(FMT_STRING("({})"), ForeignTraceOwner(state)) :
+                    state.tracePath));
+        state.tracePath.clear();
+        return;
+    }
+
+    const auto frames = ParseLong(sub);
+    if (!frames || *frames < 1 || *frames > kMaxTraceFrames || args.size() > i + 2) {
+        TraceError(state, output, kTraceUsage);
+        return;
+    }
+    if (aurora::trace::is_capturing()) {
+        TraceError(state, output,
+            fmt::format(
+                FMT_STRING(
+                    "Error: a trace capture is already running ({}); use 'render.trace stop'"),
+                state.tracePath.empty() ? ForeignTraceOwner(state) : state.tracePath));
+        return;
+    }
+
+    const auto path = ResolveTracePath(args.size() > i + 1 ? args[i + 1] : std::string{});
+    const std::string pathString = borealis::io::fs_path_to_string(path);
+    std::error_code ec;
+    std::filesystem::create_directories(path.parent_path(), ec);
+    if (ec) {
+        TraceError(state, output,
+            fmt::format(FMT_STRING("Error: cannot create '{}': {}"),
+                borealis::io::fs_path_to_string(path.parent_path()), ec.message()));
+        return;
+    }
+    if (!overwrite && std::filesystem::exists(path, ec)) {
+        TraceError(state, output,
+            fmt::format(
+                FMT_STRING("Error: '{}' already exists (use 'render.trace -f ...' to overwrite)"),
+                pathString));
+        return;
+    }
+
+    const aurora::trace::CaptureOptions options{
+        .path = path,
+        .frameCount = static_cast<uint32_t>(*frames),
+        .label = borealis::io::fs_path_to_string(path.stem()),
+    };
+    if (!aurora::trace::start_capture(options)) {
+        TraceError(state, output,
+            fmt::format(FMT_STRING("Error: aurora refused to start the capture for '{}': {}"),
+                pathString, aurora::trace::capture_status().error));
+        return;
+    }
+    WriteTraceMetadata(path, *frames);
+    state.tracePath = pathString;
+    state.traceFrames = static_cast<unsigned int>(*frames);
+    TraceReply(
+        state, output, fmt::format(FMT_STRING("Capturing {} frames to {}"), *frames, pathString));
+}
+
 }  // namespace
 
 bool isCameraDetached() { return s_cameraFly.active; }
+
+void pollCommands(CommandState& state, const CommandOutput& output) {
+    if (state.tracePath.empty() || aurora::trace::is_capturing()) {
+        return;
+    }
+    const auto status = aurora::trace::capture_status();
+    std::string line;
+    if (status.state == aurora::trace::CaptureState::Finished) {
+        line = fmt::format(
+            FMT_STRING("Trace complete: {} ({} frames)"), state.tracePath, status.framesCaptured);
+        DuskLog.info("{}", line);
+    } else {
+        line = fmt::format(FMT_STRING("Trace failed: {}: {}"), state.tracePath, status.error);
+        DuskLog.warn("{}", line);
+    }
+    output(line);
+    state.tracePath.clear();
+}
+
+bool isRenderTraceActive() {
+    return aurora::trace::is_capturing();
+}
 
 void processCameraCommands() {
     if (!s_cameraFly.active) { return; }
@@ -841,6 +1077,11 @@ void runCommand(std::string_view cmdLine, CommandState& state, const CommandOutp
         return;
     }
 
+    if (cmd == "render.trace") {
+        RunRenderTrace(args, state, output);
+        return;
+    }
+
     if (cmd == "help") {
         output("@<ref>  =  @<procId> | @found | @link");
         output("");
@@ -862,6 +1103,8 @@ void runCommand(std::string_view cmdLine, CommandState& state, const CommandOutp
         output("list [id|name]                              List actors in scene");
         output("pos                                         Print player position and stage");
         output("rate [hz]                                   Get or set sim rate (1-480, default 30)");
+        output("render.trace [-f] <frames> [file]           Capture N frames to a GX trace file");
+        output("render.trace stop | status                  Stop or query the trace capture");
         output("reset                                       Soft reset");
         output("rupees [amount]                             Get or set rupee count");
         output("spawn <id|name> [params] [x y z] [angle]    Spawn actor");

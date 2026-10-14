@@ -14,6 +14,8 @@ struct CommandState {
     unsigned int foundProcId = 0;
     std::string lastWarpStage;
     bool echoEnabled = true;
+    std::string tracePath;
+    unsigned int traceFrames = 0;
 };
 
 // Execute a single command line. Calls output() for every line of response.
@@ -25,5 +27,10 @@ void processCameraCommands();
 
 // Returns true when the dev camera is detached (suppresses the game's camera update).
 bool isCameraDetached();
+
+// Called every frame so a trace capture started from this state can report how it ended.
+void pollCommands(CommandState& state, const CommandOutput& output);
+
+bool isRenderTraceActive();
 
 }  // namespace dusk

@@ -84,6 +84,7 @@ bool CommandConsole::handle_nav_command(Rml::Event&, NavCommand) {
 }
 
 void CommandConsole::update() {
+    pollCommands(mState, [this](std::string text) { append_message(std::move(text)); });
     if (!getSettings().backend.enableAdvancedSettings || is_prelaunch_open()) {
         close_input();
         Document::hide(false);
