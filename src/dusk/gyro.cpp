@@ -1,4 +1,5 @@
 #include "dusk/gyro.h"
+#include "dusk/input_replay.hpp"
 #include "dusk/ui/ui.hpp"
 #include "d/actor/d_a_alink.h"
 
@@ -73,7 +74,9 @@ bool queryGyroAimContext() {
     return getSettings().game.enableGyroAim.getValue() && dCamera_c::isAimActive();
 }
 
-void read(float dt) {
+namespace {
+// Replays repeat the reset itself because it also clears the rollgoal accumulators.
+bool read_live(float dt) {
     const bool aim_active = queryGyroAimContext();
     const bool aim_just_started = aim_active && !s_was_aiming;
     const bool aim_just_ended = !aim_active && s_was_aiming;
@@ -82,7 +85,7 @@ void read(float dt) {
     if (!s_sensor_keep_alive && !aim_active) {
         disable_pad_sensors();
         reset_filter_state();
-        return;
+        return true;
     }
 
     if (aim_just_started || aim_just_ended) {
@@ -93,10 +96,10 @@ void read(float dt) {
 
     if (!s_sensor_enabled) {
         if (!PADHasSensor(PAD_CHAN0, PAD_SENSOR_GYRO)) {
-            return;
+            return false;
         }
         if (!PADSetSensorEnabled(PAD_CHAN0, PAD_SENSOR_GYRO, TRUE)) {
-            return;
+            return false;
         }
         s_sensor_enabled = true;
     }
@@ -110,7 +113,7 @@ void read(float dt) {
 
     f32 gyro[3];
     if (!PADGetSensorData(PAD_CHAN0, PAD_SENSOR_GYRO, gyro, 3)) {
-        return;
+        return false;
     }
 
     const float smooth_alpha = kGyroEmaAlphaMax + getSettings().game.gyroSmoothing * (kGyroEmaAlphaMin - kGyroEmaAlphaMax);
@@ -168,6 +171,29 @@ void read(float dt) {
     s_pitch_rad = getSettings().game.gyroInvertPitch ? -s_pitch_rad : s_pitch_rad;
     s_yaw_rad = getSettings().game.gyroInvertYaw ? -s_yaw_rad : s_yaw_rad;
     s_yaw_rad = getSettings().game.enableMirrorMode ? -s_yaw_rad : s_yaw_rad;
+    return false;
+}
+}  // namespace
+
+void read(float dt) {
+    if (const auto* in = input_replay::override_input()) {
+        disable_pad_sensors();
+        if (in->gyroReset) {
+            reset_filter_state();
+        }
+        s_yaw_rad = in->gyro[0];
+        s_pitch_rad = in->gyro[1];
+        s_roll_rad = in->gyro[2];
+        return;
+    }
+
+    const bool reset = read_live(dt);
+    if (auto* captured = input_replay::capture_input()) {
+        captured->gyroReset = reset;
+        captured->gyro[0] = s_yaw_rad;
+        captured->gyro[1] = s_pitch_rad;
+        captured->gyro[2] = s_roll_rad;
+    }
 }
 
 void getAimDeltas(float& out_yaw, float& out_pitch) {

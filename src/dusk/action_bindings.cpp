@@ -1,5 +1,6 @@
 #include "dusk/action_bindings.h"
 
+#include "dusk/input_replay.hpp"
 #include "dusk/settings.h"
 #include "dusk/ui/ui.hpp"
 
@@ -103,6 +104,15 @@ void updateActionBindings() {
             if (virtualAction.available && virtualAction.pressed && !ui::any_document_visible()) {
                 actionPressData[port][static_cast<int>(action)].pressedCurFrame = true;
             }
+        }
+
+        u32 mask = 0;
+        for (int i = 0; i < static_cast<int>(ActionBinds::COUNT); ++i) {
+            mask |= u32(actionPressData[port][i].pressedCurFrame) << i;
+        }
+        mask = input_replay::filter_action_mask(port, mask);
+        for (int i = 0; i < static_cast<int>(ActionBinds::COUNT); ++i) {
+            actionPressData[port][i].pressedCurFrame = (mask >> i) & 1;
         }
     }
 }

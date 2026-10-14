@@ -16,6 +16,7 @@ struct CommandState {
     bool echoEnabled = true;
     std::string tracePath;
     unsigned int traceFrames = 0;
+    bool replaySource = false;
 };
 
 // Execute a single command line. Calls output() for every line of response.

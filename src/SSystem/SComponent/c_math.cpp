@@ -176,6 +176,10 @@ static s32 r1;
 
 static s32 r2;
 
+#if TARGET_PC
+static u32 s_rndCalls;
+#endif
+
 void cM_initRnd(int s0, int s1, int s2) {
     r0 = s0;
     r1 = s1;
@@ -187,6 +191,9 @@ void cM_initRnd(int s0, int s1, int s2) {
  * @return a random value
  */
 f32 cM_rnd() {
+#if TARGET_PC
+    s_rndCalls++;
+#endif
     r0 = (r0 * 171) % 30269;
     r1 = (r1 * 172) % 30307;
     r2 = (r2 * 170) % 30323;
@@ -241,3 +248,21 @@ f32 cM_rndF2(f32 max) {
 f32 cM_rndFX2(f32 max) {
     return max * (cM_rnd2() - 0.5f) * 2.0f;
 }
+
+#if TARGET_PC
+void cM_getRndState(s32* out) {
+    out[0] = r0;
+    out[1] = r1;
+    out[2] = r2;
+}
+
+void cM_getRnd2State(s32* out) {
+    out[0] = r02;
+    out[1] = r12;
+    out[2] = r22;
+}
+
+u32 cM_getRndCallCount() {
+    return s_rndCalls;
+}
+#endif

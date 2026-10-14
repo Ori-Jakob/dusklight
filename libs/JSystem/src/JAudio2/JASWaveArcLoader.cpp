@@ -11,6 +11,10 @@
 
 #include "helpers/string.hpp"
 
+#if TARGET_PC
+#include "dusk/input_replay.hpp"
+#endif
+
 DUSK_GAME_DATA JASHeap* JASWaveArcLoader::sAramHeap;
 
 JASHeap* JASWaveArcLoader::getRootHeap() {
@@ -81,12 +85,18 @@ void JASWaveArc::loadToAramCallback(void* this_) {
     JASWaveArc* wavArc = tmp->mWavArc;
     if (JKRDvdAramRipper::loadToAram(tmp->mEntryNum, tmp->mBase, EXPAND_SWITCH_UNKNOWN0, 0, 0, NULL) == NULL) {
         JUT_WARN(129, "%s", "loadToAram Failed");
+#if TARGET_PC
+        dusk::input_replay::wave_load_finished();
+#endif
         return;
     }
     wavArc->_5a--;
     if (wavArc->loadSetup(tmp->_c)) {
         wavArc->onLoadDone();
     }
+#if TARGET_PC
+    dusk::input_replay::wave_load_finished();
+#endif
 }
 
 bool JASWaveArc::sendLoadCmd() {
@@ -101,8 +111,14 @@ bool JASWaveArc::sendLoadCmd() {
 
     _5a++;
 
+#if TARGET_PC
+    dusk::input_replay::wave_load_queued();
+#endif
     if (JASDvd::getThreadPointer()->sendCmdMsg(loadToAramCallback, &commandInfo, sizeof(commandInfo)) == 0) {
         JUT_WARN(193, "%s", "sendCmdMsg loadToAramCallback Failed");
+#if TARGET_PC
+        dusk::input_replay::wave_load_finished();
+#endif
         mHeap.free();
         return false;
     }

@@ -1,6 +1,7 @@
 #include "dusk/mouse.h"
 #include "d/actor/d_a_alink.h"
 #include "d/d_com_inf_game.h"
+#include "dusk/input_replay.hpp"
 #include "dusk/menu_pointer.h"
 #include "dusk/settings.h"
 #include "dusk/ui/ui.hpp"
@@ -159,9 +160,8 @@ void update_cursor_visibility(SDL_Window* window, bool captured) {
 
     set_cursor_visible(should_show_cursor(captured));
 }
-}  // namespace
 
-void read() {
+void read_live() {
     SDL_Window* window = aurora::window::get_sdl_window();
     const bool capture_active = sync_capture_state(window, should_capture_mouse(window));
     update_cursor_visibility(window, capture_active);
@@ -177,6 +177,28 @@ void read() {
     float my_rel = 0.0f;
     SDL_GetRelativeMouseState(&mx_rel, &my_rel);
     accumulate_deltas(mx_rel, my_rel, camera_active, aim_active);
+}
+}  // namespace
+
+void read() {
+    if (const auto* in = input_replay::override_input()) {
+        SDL_Window* window = aurora::window::get_sdl_window();
+        sync_capture_state(window, false);
+        update_cursor_visibility(window, false);
+        s_aim_yaw_rad = in->mouse[0];
+        s_aim_pitch_rad = in->mouse[1];
+        s_camera_yaw_rad = in->mouse[2];
+        s_camera_pitch_rad = in->mouse[3];
+        return;
+    }
+
+    read_live();
+    if (auto* captured = input_replay::capture_input()) {
+        captured->mouse[0] = s_aim_yaw_rad;
+        captured->mouse[1] = s_aim_pitch_rad;
+        captured->mouse[2] = s_camera_yaw_rad;
+        captured->mouse[3] = s_camera_pitch_rad;
+    }
 }
 
 void get_aim_deltas(float& out_yaw, float& out_pitch) {

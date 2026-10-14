@@ -6,6 +6,7 @@
 
 #if TARGET_PC
 #include "dusk/action_bindings.h"
+#include "dusk/input_replay.hpp"
 #endif
 
 DUSK_GAME_DATA u32 JUTGamePad::CRumble::sChannelMask[4] = {
@@ -90,6 +91,8 @@ DUSK_GAME_DATA u32 JUTGamePad::sRumbleSupported;
 u32 JUTGamePad::read() {
     sRumbleSupported = PADRead(mPadStatus);
 #if TARGET_PC
+    dusk::input_replay::filter_pad_status(
+        mPadStatus, C3ButtonReset::sResetSwitchPushing, sRumbleSupported);
    dusk::updateActionBindings();
 #endif
 

@@ -16,6 +16,10 @@
 #include "f_op/f_op_actor.h"
 #include "m_Do/m_Do_controller_pad.h"
 
+#if TARGET_PC
+#include "dusk/input_replay.hpp"
+#endif
+
 static void dummy1(mDoExt_btkAnm* btk, cXyz& pos) {
     GXColor color;
     OS_REPORT("d_lib.cpp");
@@ -327,12 +331,23 @@ DUSK_GAME_DATA OSTime dLib_time_c::m_stopTime;
 
 DUSK_GAME_DATA bool dLib_time_c::m_timeStopped;
 
+#if TARGET_PC
+// Minigame timers must follow sim ticks or recorded input would replay against different times.
+static OSTime dLib_osTime() {
+    OSTime time;
+    if (dusk::input_replay::virtual_os_time(time)) {
+        return time;
+    }
+    return OSGetTime();
+}
+#endif
+
 OSTime dLib_time_c::getTime() {
     if (!m_timeStopped) {
-        return OSGetTime() - m_diffTime;
+        return DUSK_IF_ELSE(dLib_osTime(), OSGetTime()) - m_diffTime;
     }
 
-    OSTime time = OSGetTime();
+    OSTime time = DUSK_IF_ELSE(dLib_osTime(), OSGetTime());
     m_diffTime += (time - m_stopTime);
     m_stopTime = time;
     return time - m_diffTime;
@@ -340,14 +355,14 @@ OSTime dLib_time_c::getTime() {
 
 void dLib_time_c::stopTime() {
     if (!m_timeStopped) {
-        m_stopTime = OSGetTime();
+        m_stopTime = DUSK_IF_ELSE(dLib_osTime(), OSGetTime());
         m_timeStopped = true;
     }
 }
 
 void dLib_time_c::startTime() {
     if (m_timeStopped) {
-        m_diffTime += OSGetTime() - m_stopTime;
+        m_diffTime += DUSK_IF_ELSE(dLib_osTime(), OSGetTime()) - m_stopTime;
         m_timeStopped = false;
     }
 }

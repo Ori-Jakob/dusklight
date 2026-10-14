@@ -1464,6 +1464,8 @@ set(DUSK_FILES
         src/dusk/imgui/ImGuiStateShare.cpp
         src/dusk/imgui/ImGuiStateShare.hpp
         src/dusk/imgui/ImGuiStubLog.cpp
+        src/dusk/input_replay.cpp
+        src/dusk/input_replay.hpp
         src/dusk/interp/camera.cpp
         src/dusk/interp/frame_interpolation.cpp
         src/dusk/interp/line.cpp

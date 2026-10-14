@@ -2,6 +2,7 @@
 
 #include "dusk/dusk.h"
 #include "dusk/imgui/ImGuiConsole.hpp"
+#include "dusk/input_replay.hpp"
 #include "dusk/logging.h"
 #include "dusk/main.h"
 #include "dusk/settings.h"
@@ -323,6 +324,9 @@ static void WriteTraceMetadata(const std::filesystem::path& tracePath, long fram
         meta["camera"] = nullptr;
     }
     meta["timeOfDay"] = dComIfGs_getTime();
+    if (const auto replay = input_replay::position(); replay.mode != input_replay::Mode::Idle) {
+        meta["inputReplay"] = {{"file", replay.file}, {"tick", replay.tick}};
+    }
 
     const auto& settings = getSettings();
     meta["settings"] = {
@@ -342,17 +346,28 @@ static void WriteTraceMetadata(const std::filesystem::path& tracePath, long fram
     }
 }
 
-static std::string ForeignTraceOwner(const CommandState&) {
-    return "started elsewhere";
+static std::string ForeignTraceOwner(const CommandState& state) {
+    if (state.replaySource) {
+        return "started from the console";
+    }
+    return input_replay::mode() == input_replay::Mode::Idle ? "started elsewhere" :
+                                                              "started by input replay";
 }
 
-static void TraceReply(const CommandState&, const CommandOutput& output, const std::string& line) {
-    DuskLog.info("{}", line);
+// Replayed commands already reach the log through the replay's own output.
+static void TraceReply(
+    const CommandState& state, const CommandOutput& output, const std::string& line) {
+    if (!state.replaySource) {
+        DuskLog.info("{}", line);
+    }
     output(line);
 }
 
-static void TraceError(const CommandState&, const CommandOutput& output, const std::string& line) {
-    DuskLog.warn("{}", line);
+static void TraceError(
+    const CommandState& state, const CommandOutput& output, const std::string& line) {
+    if (!state.replaySource) {
+        DuskLog.warn("{}", line);
+    }
     output(line);
 }
 
@@ -459,10 +474,14 @@ void pollCommands(CommandState& state, const CommandOutput& output) {
     if (status.state == aurora::trace::CaptureState::Finished) {
         line = fmt::format(
             FMT_STRING("Trace complete: {} ({} frames)"), state.tracePath, status.framesCaptured);
-        DuskLog.info("{}", line);
+        if (!state.replaySource) {
+            DuskLog.info("{}", line);
+        }
     } else {
         line = fmt::format(FMT_STRING("Trace failed: {}: {}"), state.tracePath, status.error);
-        DuskLog.warn("{}", line);
+        if (!state.replaySource) {
+            DuskLog.warn("{}", line);
+        }
     }
     output(line);
     state.tracePath.clear();
@@ -520,6 +539,9 @@ void runCommand(std::string_view cmdLine, CommandState& state, const CommandOutp
         return;
     }
     const auto& cmd = args[0];
+    if (!input_replay::accept_console_command(cmd, cmdLine, state.replaySource, output)) {
+        return;
+    }
 
     auto requirePlayer = [&]() -> daAlink_c* {
         auto* p = (daAlink_c*)dComIfGp_getPlayer(0);
@@ -1077,6 +1099,21 @@ void runCommand(std::string_view cmdLine, CommandState& state, const CommandOutp
         return;
     }
 
+    if (cmd == "input.status") {
+        input_replay::print_status(output);
+        return;
+    }
+
+    if (cmd == "input.stop") {
+        input_replay::stop(output);
+        return;
+    }
+
+    if (cmd == "input.hash") {
+        input_replay::print_hash(output);
+        return;
+    }
+
     if (cmd == "render.trace") {
         RunRenderTrace(args, state, output);
         return;
@@ -1097,6 +1134,7 @@ void runCommand(std::string_view cmdLine, CommandState& state, const CommandOutp
         output("find <id|name> [n=1]                        Store nth actor as @found");
         output("freeze [@<ref>]                             Freeze globally, or freeze actor");
         output("heal [amount]                               Heal to max, or by relative amount");
+        output("input.status | input.stop | input.hash      Input replay status, stop, state hash");
         output("kill                                        Set Link health to 0");
         output("kill @<ref>                                 Delete proc");
         output("killall <id|name>                           Delete all actors of a type");

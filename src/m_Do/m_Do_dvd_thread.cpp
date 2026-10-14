@@ -16,6 +16,10 @@
 #include "m_Do/m_Do_ext.h"
 #include "os_report.h"
 
+#if TARGET_PC
+#include "dusk/input_replay.hpp"
+#endif
+
 s32 mDoDvdThd::main(void* param_0) {
     JKRThread(OSGetCurrentThread(), 0);
 #if TARGET_PC
@@ -136,6 +140,9 @@ mDoDvdThd_command_c* mDoDvdThd_param_c::getFirstCommand() {
 }
 
 void mDoDvdThd_param_c::addition(mDoDvdThd_command_c* pCommand) {
+#if TARGET_PC
+    dusk::input_replay::dvd_command_queued();
+#endif
     OSLockMutex(&mMutext);
     cLs_Addition(&mNodeList, pCommand);
     OSUnlockMutex(&mMutext);
@@ -155,12 +162,18 @@ static void cb(void* param_0) {
     if (result != 1) {
         OSReport_Error("mDoDvdThd_param_c::mainLoop() コマンドの実行が失敗しました。\n");
     }
+#if TARGET_PC
+    dusk::input_replay::dvd_command_finished();
+#endif
 }
 
 void mDoDvdThd_param_c::mainLoop() {
     mDoDvdThd_command_c* command;
     while (this->waitForKick() != 0) {
         while ((command = this->getFirstCommand())) {
+#if TARGET_PC
+            dusk::input_replay::dvd_gate_wait();
+#endif
             this->cut(command);
             if (mDoDvdThd::SyncWidthSound) {
                 #if TARGET_PC

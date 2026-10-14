@@ -25,6 +25,7 @@
 
 #ifdef TARGET_PC
 #include "dusk/game_mode.hpp"
+#include "dusk/input_replay.hpp"
 #include "dusk/language.hpp"
 #include "dusk/logging.h"
 #include "dusk/main.h"
@@ -798,6 +799,7 @@ void dScnLogo_c::nextSceneChange() {
                 } while (status == 0);
 
                 const uint32_t saveSlot = dusk::SaveRequested - 1;
+                status = dusk::input_replay::filter_loaded_save(buf, saveSlot, status);
                 if (status == 1) {
                     dComIfGs_setCardToMemory(buf, saveSlot);
                 } else {

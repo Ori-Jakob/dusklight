@@ -26,4 +26,14 @@ void clear() noexcept {
     s_pitch_dp = 0.0f;
 }
 
+void get_pending(float& yaw_dp, float& pitch_dp) noexcept {
+    yaw_dp = s_yaw_dp;
+    pitch_dp = s_pitch_dp;
+}
+
+void set_pending(float yaw_dp, float pitch_dp) noexcept {
+    s_yaw_dp = yaw_dp;
+    s_pitch_dp = pitch_dp;
+}
+
 }  // namespace dusk::touch_camera

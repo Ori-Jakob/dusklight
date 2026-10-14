@@ -25,6 +25,11 @@ void cM_initRnd2(int, int, int);
 float cM_rnd2();
 float cM_rndF2(float);
 float cM_rndFX2(float);
+#if TARGET_PC
+void cM_getRndState(s32* out);
+void cM_getRnd2State(s32* out);
+u32 cM_getRndCallCount();
+#endif
 
 inline f32 cM_scos(s16 x) {
     return JMASCos(x);

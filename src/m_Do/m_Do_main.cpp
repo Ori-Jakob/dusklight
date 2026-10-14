@@ -50,6 +50,7 @@
 #include "dusk/hq_minimap.hpp"
 #include "dusk/imgui/ImGuiConsole.hpp"
 #include "dusk/imgui/ImGuiEngine.hpp"
+#include "dusk/input_replay.hpp"
 #include "dusk/interp/frame_interpolation.h"
 #include "dusk/iso_validate.hpp"
 #include "dusk/logging.h"
@@ -226,6 +227,7 @@ void main01(void) {
     OSReport("Entering Main Loop (main01)...\n");
 
     dusk::game_clock::initialize();
+    dusk::input_replay::on_game_start();
 
     do {
         // 1. Update Window Events
@@ -270,6 +272,8 @@ void main01(void) {
 
         eventsDone:;
 
+        dusk::input_replay::before_frame();
+
         if (!aurora_begin_frame()) {
             DuskLog.debug("aurora_begin_frame returned false, skipping draw this frame");
             continue;
@@ -295,6 +299,7 @@ void main01(void) {
                         dusk::interp::begin_sim_tick();
                     }
                     dusk::game_clock::begin_sim_tick();
+                    dusk::input_replay::begin_tick();
                     mDoCPd_c::read();
                     dusk::mouse::read();
                     dusk::gyro::read(dusk::game_clock::kSimPeriod);
@@ -302,6 +307,7 @@ void main01(void) {
                     fapGm_Execute();
                     dusk::processCameraCommands();
                     mDoAud_Execute();
+                    dusk::input_replay::end_tick();
                     dusk::game_clock::commit_sim_tick();
                 }
             }
@@ -314,6 +320,7 @@ void main01(void) {
         } else {
             dusk::interp::begin_frame(0.0f);
             dusk::game_clock::begin_sim_tick();
+            dusk::input_replay::begin_tick();
 
             // Game Inputs
             mDoCPd_c::read();
@@ -327,6 +334,7 @@ void main01(void) {
             dusk::processCameraCommands();
 
             mDoAud_Execute();
+            dusk::input_replay::end_tick();
             dusk::game_clock::commit_sim_tick();
         }
 
@@ -363,6 +371,7 @@ void main01(void) {
     } while (dusk::IsRunning);
 
     exit:;
+    dusk::input_replay::shutdown();
     dusk::mods::ModLoader::instance().shutdown();
     dusk::ui::shutdown();
 }
@@ -566,7 +575,11 @@ int game_main(int argc, char* argv[]) {
             ("cvar", "Override configuration variables without modifying config", cxxopts::value<std::vector<std::string>>())
             ("develop", "Enable the game's developer mode and OSReport for debugging", cxxopts::value<bool>()->default_value("false")->implicit_value("true"))
             ("load-save", "Skip the opening and load a save from slot 1-3", cxxopts::value<uint8_t>()->default_value("0"))
-            ("stage", "Upon launching, load a stage, room, spawn point, and layer. When using --load-save, it uses the specified save on the loaded stage. Format (STAGE,ROOM,POINT,LAYER). Example: (STAGE) or (STAGE,0,0,-1)", cxxopts::value<std::string>());
+            ("stage", "Upon launching, load a stage, room, spawn point, and layer. When using --load-save, it uses the specified save on the loaded stage. Format (STAGE,ROOM,POINT,LAYER). Example: (STAGE) or (STAGE,0,0,-1)", cxxopts::value<std::string>())
+            ("record-input", "Record deterministic input to a file (needs --load-save or --stage)", cxxopts::value<std::string>())
+            ("replay-input", "Replay an input recording and verify the per-tick state hash", cxxopts::value<std::string>())
+            ("replay-exit", "Exit when the replay ends (exit code 3 on divergence, 4 on error)", cxxopts::value<bool>()->default_value("false")->implicit_value("true"))
+            ("input-hash-log", "Write a per-tick state CSV during a recording or replay", cxxopts::value<std::string>());
 
         arg_options.parse_positional({"dvd"});
         arg_options.positional_help("<dvd-image>");
@@ -641,8 +654,26 @@ int game_main(int argc, char* argv[]) {
 
     log_build_info();
 
+    {
+        dusk::input_replay::Options replayOptions;
+        if (parsed_arg_options.count("record-input")) {
+            replayOptions.recordPath = parsed_arg_options["record-input"].as<std::string>();
+        }
+        if (parsed_arg_options.count("replay-input")) {
+            replayOptions.replayPath = parsed_arg_options["replay-input"].as<std::string>();
+        }
+        if (parsed_arg_options.count("input-hash-log")) {
+            replayOptions.hashLogPath = parsed_arg_options["input-hash-log"].as<std::string>();
+        }
+        replayOptions.exitOnReplayEnd = parsed_arg_options["replay-exit"].as<bool>();
+        if (!dusk::input_replay::configure(replayOptions)) {
+            exit(dusk::input_replay::exit_code() != 0 ? dusk::input_replay::exit_code() : 1);
+        }
+    }
+
     dusk::config::load_from_user_preferences();
     ApplyCVarOverrides(parsed_arg_options["cvar"]);
+    dusk::input_replay::apply_setting_overrides();
     borealis::sentry::Options sentryOptions{
         .release = fmt::format("{}@{}", dusk::AppInfo.appName, BOREALIS_APP_DESCRIBE),
         .databaseDirectory = dusk::CachePath / "sentry",
@@ -985,7 +1016,7 @@ int game_main(int argc, char* argv[]) {
     dusk::config::shutdown();
     aurora_shutdown();
 
-    return 0;
+    return dusk::input_replay::exit_code();
 }
 
 
