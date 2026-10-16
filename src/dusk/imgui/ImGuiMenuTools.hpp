@@ -18,12 +18,15 @@ namespace dusk {
 		void ShowHeapOverlay();
 		void ShowStubLog();
         void ShowBloomWindow();
+        void ShowRenderDebugWindow();
         void ShowPlayerInfo();
         void ShowAudioDebug();
         void ShowSaveEditor();
         void ShowStateShare();
         void ShowInputViewer();
         void ShowActorSpawner();
+
+        void OpenRenderDebugWindow() { m_showRenderDebugWindow = true; }
 
     private:
 		bool m_showDebugOverlay = false;
@@ -39,6 +42,8 @@ namespace dusk {
 		bool m_showStubLog = false;
 
         bool m_showBloomWindow = false;
+
+        bool m_showRenderDebugWindow = false;
 
         bool m_showAudioDebug = false;
 

@@ -88,6 +88,11 @@ protected:
      */
     const ConfigImplBase* impl;
 
+    /**
+     * Whether a user value was loaded or set, so save() keeps it while an override hides it.
+     */
+    bool persisted;
+
     ConfigVarBase(const ConfigVarBase&) = delete;
     ConfigVarBase(std::string name, const ConfigImplBase* impl);
 
@@ -131,6 +136,11 @@ public:
     [[nodiscard]] constexpr ConfigVarLayer getLayer() const noexcept {
         return layer;
     }
+
+    /**
+     * Whether the CVar holds a user value at the Value layer, even while an override hides it.
+     */
+    [[nodiscard]] constexpr bool hasPersistedValue() const noexcept { return persisted; }
 
     /**
      * Mark this CVar as being registered with the central save/load logic.
@@ -259,6 +269,7 @@ public:
         checkRegistered();
         const auto previous = previous_for_notify();
         value = std::move(newValue);
+        persisted = true;
 
         if (replaceOverride) {
             overrideValue = {};
@@ -367,6 +378,7 @@ private:
     void load_value(T newValue) {
         checkRegistered();
         value = std::move(newValue);
+        persisted = true;
         if (layer != ConfigVarLayer::Override) {
             layer = ConfigVarLayer::Value;
         }

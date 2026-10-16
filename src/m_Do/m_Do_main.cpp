@@ -60,6 +60,7 @@
 #include "dusk/mouse.h"
 #include "dusk/os.h"
 #include "dusk/presentation.hpp"
+#include "dusk/render/render_bridge.hpp"
 #include "dusk/settings.h"
 #include "dusk/speedrun.h"
 #include "dusk/texture_replacements.hpp"
@@ -743,6 +744,7 @@ int game_main(int argc, char* argv[]) {
     }
 
     dusk::presentation::update_frame_rate_preference();
+    dusk::render::initialize();
 
 #if BOREALIS_HAS_DISCORD
     if (dusk::getSettings().game.enableDiscordPresence) {

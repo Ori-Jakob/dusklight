@@ -88,6 +88,92 @@ enum class AudioOutputMode : u8 {
     Surround8ch = 3,        // discrete 7.1
 };
 
+enum class GraphicsPreset : u8 {
+    Custom = 0,
+    Original = 1,
+    Low = 2,
+    Medium = 3,
+    High = 4,
+    Ultra = 5,
+};
+
+enum class GraphicsQuality : u8 {
+    Off = 0,
+    Low = 1,
+    Medium = 2,
+    High = 3,
+    Ultra = 4,
+};
+
+enum class GraphicsExposure : u8 {
+    MatchLegacy = 0,
+    Auto = 1,
+    Manual = 2,
+};
+
+enum class GraphicsTonemap : u8 {
+    PbrNeutral = 0,
+    AgX = 1,
+};
+
+enum class GraphicsGi : u8 {
+    Off = 0,
+    Voxel = 1,
+    Ddgi = 2,
+};
+
+enum class GraphicsRtMode : u8 {
+    Off = 0,
+    Shadows = 1,
+    ShadowsAo = 2,
+    ShadowsAoReflections = 3,
+    PathTraceReference = 4,
+};
+
+enum class GraphicsRtBackend : u8 {
+    Auto = 0,
+    Compute = 1,
+    Dxr = 2,
+};
+
+enum class GraphicsReflections : u8 {
+    Off = 0,
+    Ssr = 1,
+    SsrRt = 2,
+};
+
+enum class GraphicsGameShadows : u8 {
+    Auto = 0,
+    Keep = 1,
+    Remove = 2,
+};
+
+enum class GraphicsGodRays : u8 {
+    Off = 0,
+    Auto = 1,
+    ScreenSpace = 2,
+    Volumetric = 3,
+};
+
+enum class GraphicsTerrainDetail : u8 {
+    Off = 0,
+    Parallax = 1,
+    Tessellated = 2,
+};
+
+enum class GraphicsGrassShadows : u8 {
+    Off = 0,
+    Contact = 1,
+    Shell = 2,
+    Full = 3,
+};
+
+enum class GraphicsStaticWorld : u8 {
+    Off = 0,
+    Validate = 1,
+    On = 2,
+};
+
 namespace config {
 template <>
 struct ConfigEnumRange<BloomMode> {
@@ -159,6 +245,85 @@ template <>
 struct ConfigEnumRange<AudioOutputMode> {
     static constexpr auto min = AudioOutputMode::StereoSpeakers;
     static constexpr auto max = AudioOutputMode::Surround8ch;
+};
+
+// Custom is derived from the other keys and never stored, so a stored 0 loads as Original
+template <>
+struct ConfigEnumRange<GraphicsPreset> {
+    static constexpr auto min = GraphicsPreset::Original;
+    static constexpr auto max = GraphicsPreset::Ultra;
+};
+
+template <>
+struct ConfigEnumRange<GraphicsQuality> {
+    static constexpr auto min = GraphicsQuality::Off;
+    static constexpr auto max = GraphicsQuality::Ultra;
+};
+
+template <>
+struct ConfigEnumRange<GraphicsExposure> {
+    static constexpr auto min = GraphicsExposure::MatchLegacy;
+    static constexpr auto max = GraphicsExposure::Manual;
+};
+
+template <>
+struct ConfigEnumRange<GraphicsTonemap> {
+    static constexpr auto min = GraphicsTonemap::PbrNeutral;
+    static constexpr auto max = GraphicsTonemap::AgX;
+};
+
+template <>
+struct ConfigEnumRange<GraphicsGi> {
+    static constexpr auto min = GraphicsGi::Off;
+    static constexpr auto max = GraphicsGi::Ddgi;
+};
+
+template <>
+struct ConfigEnumRange<GraphicsRtMode> {
+    static constexpr auto min = GraphicsRtMode::Off;
+    static constexpr auto max = GraphicsRtMode::PathTraceReference;
+};
+
+template <>
+struct ConfigEnumRange<GraphicsRtBackend> {
+    static constexpr auto min = GraphicsRtBackend::Auto;
+    static constexpr auto max = GraphicsRtBackend::Dxr;
+};
+
+template <>
+struct ConfigEnumRange<GraphicsReflections> {
+    static constexpr auto min = GraphicsReflections::Off;
+    static constexpr auto max = GraphicsReflections::SsrRt;
+};
+
+template <>
+struct ConfigEnumRange<GraphicsGameShadows> {
+    static constexpr auto min = GraphicsGameShadows::Auto;
+    static constexpr auto max = GraphicsGameShadows::Remove;
+};
+
+template <>
+struct ConfigEnumRange<GraphicsGodRays> {
+    static constexpr auto min = GraphicsGodRays::Off;
+    static constexpr auto max = GraphicsGodRays::Volumetric;
+};
+
+template <>
+struct ConfigEnumRange<GraphicsTerrainDetail> {
+    static constexpr auto min = GraphicsTerrainDetail::Off;
+    static constexpr auto max = GraphicsTerrainDetail::Tessellated;
+};
+
+template <>
+struct ConfigEnumRange<GraphicsGrassShadows> {
+    static constexpr auto min = GraphicsGrassShadows::Off;
+    static constexpr auto max = GraphicsGrassShadows::Full;
+};
+
+template <>
+struct ConfigEnumRange<GraphicsStaticWorld> {
+    static constexpr auto min = GraphicsStaticWorld::Off;
+    static constexpr auto max = GraphicsStaticWorld::On;
 };
 
 template <>
@@ -335,6 +500,71 @@ struct UserSettings {
 
         ConfigVar<std::string> lastSelectedGameModeId;
     } game;
+
+    struct {
+        ConfigVar<GraphicsPreset> preset;
+        ConfigVar<bool> textureMaterials;
+        ConfigVar<bool> stochasticTiling;
+        ConfigVar<bool> legacyMatMaps;
+        ConfigVar<bool> pbr;
+        ConfigVar<float> legacyBlend;
+        ConfigVar<GraphicsExposure> exposure;
+        ConfigVar<float> exposureBias;
+        ConfigVar<GraphicsTonemap> tonemap;
+        ConfigVar<bool> taa;
+        ConfigVar<float> taaSharpness;
+        ConfigVar<GraphicsQuality> ao;
+        ConfigVar<bool> ssil;
+        ConfigVar<GraphicsQuality> shadowQuality;
+        ConfigVar<int> shadowPages;
+        ConfigVar<int> shadowPageBudget;
+        ConfigVar<GraphicsGameShadows> gameShadows;
+        ConfigVar<float> legacyShadowGain;
+        ConfigVar<bool> keepShadowCues;
+        ConfigVar<GraphicsGi> gi;
+        ConfigVar<GraphicsRtMode> rt;
+        ConfigVar<GraphicsRtBackend> rtBackend;
+        ConfigVar<GraphicsReflections> reflections;
+        ConfigVar<GraphicsQuality> fogVolumetric;
+        ConfigVar<GraphicsGodRays> godRays;
+        ConfigVar<float> fogScattering;
+        ConfigVar<float> shaftStrength;
+        ConfigVar<bool> fogLegacyMatch;
+        ConfigVar<bool> fogTranslucents;
+        ConfigVar<GraphicsQuality> clouds;
+        ConfigVar<float> cloudStyle;
+        ConfigVar<bool> cloudShadows;
+        ConfigVar<float> cloudShadowStrength;
+        ConfigVar<bool> keepCloudDome;
+        ConfigVar<float> cloudCoverage;
+        ConfigVar<float> cloudDensity;
+        ConfigVar<float> cloudAltitude;
+        ConfigVar<float> cloudWindSpeed;
+        ConfigVar<float> cloudSilverLining;
+        ConfigVar<float> cloudPowder;
+        ConfigVar<GraphicsQuality> grassQuality;
+        ConfigVar<bool> grassReplaceGame;
+        ConfigVar<bool> grassTerrain;
+        ConfigVar<int> grassDistanceM;
+        ConfigVar<float> grassDensity;
+        ConfigVar<float> grassDistantDensity;
+        ConfigVar<GraphicsGrassShadows> grassShadows;
+        ConfigVar<bool> grassLegacyShadows;
+        ConfigVar<bool> grassInteraction;
+        ConfigVar<float> grassWind;
+        ConfigVar<GraphicsTerrainDetail> terrainDetail;
+        ConfigVar<GraphicsQuality> terrainQuality;
+        ConfigVar<float> terrainStrength;
+        ConfigVar<int> terrainDistanceM;
+        ConfigVar<bool> terrainFlatten;
+        ConfigVar<bool> gpuFoliage;
+        ConfigVar<bool> gpuWeather;
+        ConfigVar<bool> gpuParticles;
+        ConfigVar<bool> gpuDeform;
+        ConfigVar<bool> meshReplacement;
+        ConfigVar<GraphicsStaticWorld> staticWorld;
+        ConfigVar<int> debugView;
+    } graphics;
 
     struct {
         ConfigVar<std::string> isoPath;

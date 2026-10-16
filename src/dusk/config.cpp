@@ -177,6 +177,13 @@ T sanitizeEnumValue(const ConfigVar<T>& cVar, T value) {
     return value;
 }
 
+// An override (launch argument or console) must not drop the user's saved value from the file
+bool HasSavedValue(const ConfigVarBase& cVar) {
+    const auto layer = cVar.getLayer();
+    return layer == ConfigVarLayer::Value || layer == ConfigVarLayer::Speedrun ||
+           (layer == ConfigVarLayer::Override && cVar.hasPersistedValue());
+}
+
 template <ConfigValue T>
 requires std::is_integral_v<T>&& std::is_signed_v<T> T parse_arg_value(
     const ConfigVar<T>&, const std::string_view stringValue) {
@@ -238,7 +245,8 @@ requires std::is_enum_v<T> T parse_arg_value(
 }  // namespace
 
 ConfigVarBase::ConfigVarBase(std::string name, const ConfigImplBase* impl)
-    : name(std::move(name)), registered(false), layer(ConfigVarLayer::Default), impl(impl) {}
+    : name(std::move(name)), registered(false), layer(ConfigVarLayer::Default), impl(impl),
+      persisted(false) {}
 
 const char* ConfigVarBase::getName() const noexcept {
     return name.c_str();
@@ -399,6 +407,19 @@ template class ConfigImpl<Resampler>;
 template class ConfigImpl<AlwaysGreatspinMode>;
 template class ConfigImpl<MagicArmorMode>;
 template class ConfigImpl<ui::ControlLayout>;
+template class ConfigImpl<GraphicsPreset>;
+template class ConfigImpl<GraphicsQuality>;
+template class ConfigImpl<GraphicsExposure>;
+template class ConfigImpl<GraphicsTonemap>;
+template class ConfigImpl<GraphicsGi>;
+template class ConfigImpl<GraphicsRtMode>;
+template class ConfigImpl<GraphicsRtBackend>;
+template class ConfigImpl<GraphicsReflections>;
+template class ConfigImpl<GraphicsGameShadows>;
+template class ConfigImpl<GraphicsGodRays>;
+template class ConfigImpl<GraphicsTerrainDetail>;
+template class ConfigImpl<GraphicsGrassShadows>;
+template class ConfigImpl<GraphicsStaticWorld>;
 
 void Register(ConfigVarBase& configVar) {
     const std::string_view name = configVar.getName();
@@ -438,8 +459,7 @@ void unregister(ConfigVarBase& configVar) {
         DuskConfigLog.fatal("Tried to unregister CVar '{}' that is not registered!", name);
     }
 
-    const auto layer = configVar.getLayer();
-    if (layer == ConfigVarLayer::Value || layer == ConfigVarLayer::Speedrun) {
+    if (HasSavedValue(configVar)) {
         UnregisteredConfigVars.insert_or_assign(
             std::string{name}, configVar.getImpl()->dumpToJson(configVar));
     }
@@ -547,8 +567,7 @@ void save() {
     json j;
 
     for (const auto& pair : RegisteredConfigVars) {
-        const auto layer = pair.second->getLayer();
-        if (layer == ConfigVarLayer::Value || layer == ConfigVarLayer::Speedrun) {
+        if (HasSavedValue(*pair.second)) {
             j[pair.first] = pair.second->getImpl()->dumpToJson(*pair.second);
         }
     }

@@ -381,6 +381,7 @@ namespace dusk {
             m_menuTools.ShowHeapOverlay();
             m_menuTools.ShowStubLog();
             m_menuTools.ShowBloomWindow();
+            m_menuTools.ShowRenderDebugWindow();
             m_menuTools.ShowPlayerInfo();
             m_menuTools.ShowAudioDebug();
             m_menuTools.ShowSaveEditor();
@@ -392,6 +393,10 @@ namespace dusk {
 
     void ImGuiConsole::PostDraw() {
         m_menuTools.afterDraw();
+    }
+
+    void ImGuiConsole::OpenRenderDebugWindow() {
+        m_menuTools.OpenRenderDebugWindow();
     }
 
     void ImGuiConsole::UpdateDragScroll() {

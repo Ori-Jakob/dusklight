@@ -1,10 +1,12 @@
 #include "commands.hpp"
 
+#include "dusk/config.hpp"
 #include "dusk/dusk.h"
 #include "dusk/imgui/ImGuiConsole.hpp"
 #include "dusk/input_replay.hpp"
 #include "dusk/logging.h"
 #include "dusk/main.h"
+#include "dusk/render/render_bridge.hpp"
 #include "dusk/settings.h"
 #include "game_clock.h"
 
@@ -26,6 +28,7 @@
 #include "SSystem/SComponent/c_sxyz.h"
 #include "SSystem/SComponent/c_xyz.h"
 
+#include <aurora/render.hpp>
 #include <aurora/trace.hpp>
 #include <borealis/io.hpp>
 #include <borealis/version.h>
@@ -336,6 +339,17 @@ static void WriteTraceMetadata(const std::filesystem::path& tracePath, long fram
             settings.game.internalResolutionScale.getValue()},
         {settings.video.maxFrameRate.getName(), settings.video.maxFrameRate.getValue()},
     };
+    nlohmann::json requested = nlohmann::json::object();
+    nlohmann::json effective = nlohmann::json::object();
+    for (const auto& field : render::describe_fields()) {
+        requested[std::string(field.key)] = field.requested;
+        effective[std::string(field.key)] = field.effective;
+    }
+    meta["graphics"] = {
+        {"preset", std::string(render::preset_name(settings.graphics.preset.getValue()))},
+        {"requested", std::move(requested)},
+        {"effective", std::move(effective)},
+    };
 
     auto metaPath = tracePath;
     metaPath.replace_extension(".dusk.json");
@@ -459,6 +473,165 @@ static void RunRenderTrace(
     state.traceFrames = static_cast<unsigned int>(*frames);
     TraceReply(
         state, output, fmt::format(FMT_STRING("Capturing {} frames to {}"), *frames, pathString));
+}
+
+static constexpr const char* kRenderSettingsUsage = "Usage: render.settings [all]";
+static constexpr const char* kRenderFeaturesUsage = "Usage: render.features";
+static constexpr const char* kRenderSetUsage = "Usage: render.set <graphics.key> <value>";
+static constexpr const char* kRenderSelfTestUsage = "Usage: render.selftest";
+static constexpr const char* kRenderGraphDumpUsage = "Usage: render.graph.dump [file]";
+static constexpr const char* kRenderGraphDumpFile = "render_graph.json";
+
+static const char* YesNo(bool value) {
+    return value ? "yes" : "no";
+}
+
+static void RunRenderSettings(
+    const std::vector<std::string>& args, CommandState& state, const CommandOutput& output) {
+    if (args.size() > 2 || (args.size() == 2 && args[1] != "all")) {
+        TraceError(state, output, kRenderSettingsUsage);
+        return;
+    }
+    const bool all = args.size() == 2;
+    const auto preset = getSettings().graphics.preset.getValue();
+    const uint32_t latency = render::last_latch_latency();
+    const bool inSync =
+        render::same_settings(aurora::render::effective_settings(), render::last_clamped());
+    TraceReply(state, output,
+        fmt::format(
+            FMT_STRING("preset {} (base {}), pushes {}, pending {}, latency {} frames, in sync {}"),
+            render::preset_name(preset), render::preset_name(preset), render::push_count(),
+            YesNo(render::is_pending()), latency == 0 ? std::string{"-"} : std::to_string(latency),
+            YesNo(inSync)));
+
+    size_t differing = 0;
+    for (const auto& field : render::describe_fields()) {
+        const bool differs = field.differs();
+        if (differs) {
+            ++differing;
+        }
+        if (all || differs) {
+            TraceReply(state, output,
+                fmt::format(FMT_STRING("{} requested={} clamped={} effective={}"), field.key,
+                    field.requested, field.clamped, field.effective));
+        }
+    }
+    TraceReply(state, output, fmt::format(FMT_STRING("{} fields differ"), differing));
+}
+
+static void RunRenderFeatures(
+    const std::vector<std::string>& args, CommandState& state, const CommandOutput& output) {
+    if (args.size() != 1) {
+        TraceError(state, output, kRenderFeaturesUsage);
+        return;
+    }
+    for (const auto feature : render::all_features()) {
+        const auto support = aurora::render::feature_support(feature);
+        TraceReply(state, output,
+            fmt::format(FMT_STRING("{} supported={} reason={} active={} ready={}"),
+                render::feature_name(feature), support.supported ? 1 : 0,
+                render::reason_name(support.reason),
+                aurora::render::feature_active(feature) ? 1 : 0,
+                aurora::render::feature_ready(feature) ? 1 : 0));
+    }
+}
+
+static void RunRenderSet(
+    const std::vector<std::string>& args, CommandState& state, const CommandOutput& output) {
+    if (args.size() != 3) {
+        TraceError(state, output, kRenderSetUsage);
+        return;
+    }
+    const std::string& key = args[1];
+    config::ConfigVarBase* var = key.starts_with("graphics.") ? config::GetConfigVar(key) : nullptr;
+    if (var == nullptr) {
+        TraceError(
+            state, output, fmt::format(FMT_STRING("Error: unknown graphics setting '{}'"), key));
+        return;
+    }
+    try {
+        var->getImpl()->loadFromArg(*var, args[2]);
+    } catch (const std::exception& e) {
+        TraceError(state, output, fmt::format(FMT_STRING("Error: {}"), e.what()));
+        return;
+    }
+    // The override layer loads silently, so the change callback that marks the bridge never runs
+    render::mark_dirty();
+
+    std::string requested;
+    for (const auto& field : render::describe_fields()) {
+        if (field.key == key) {
+            requested = field.requested;
+            break;
+        }
+    }
+    TraceReply(
+        state, output, fmt::format(FMT_STRING("{} = {} (override, not saved)"), key, requested));
+}
+
+static void RunRenderSelfTest(
+    const std::vector<std::string>& args, CommandState& state, const CommandOutput& output) {
+    if (args.size() != 1) {
+        TraceError(state, output, kRenderSelfTestUsage);
+        return;
+    }
+    render::SelfTestReport report;
+    render::bridge_self_test(report);
+    for (const auto& failure : report.failed) {
+        TraceError(state, output, "FAIL " + failure);
+    }
+    for (const auto& skip : report.skipped) {
+        TraceReply(state, output, "SKIP " + skip);
+    }
+    const std::string skipped = report.skipped.empty() ?
+                                    std::string{} :
+                                    fmt::format(FMT_STRING(", {} skipped"), report.skipped.size());
+    TraceReply(state, output,
+        fmt::format(FMT_STRING("render.selftest: {} passed{}, {} failed"), report.passed, skipped,
+            report.failed.size()));
+}
+
+static void RunRenderGraphDump(
+    const std::vector<std::string>& args, CommandState& state, const CommandOutput& output) {
+    if (args.size() > 2) {
+        TraceError(state, output, kRenderGraphDumpUsage);
+        return;
+    }
+    std::filesystem::path root = ConfigPath.lexically_normal();
+    if (!root.has_filename()) {
+        root = root.parent_path();
+    }
+    std::filesystem::path path =
+        (ConfigPath / borealis::io::fs_path_from_utf8(
+                          args.size() == 2 ? args[1] : std::string{kRenderGraphDumpFile}))
+            .lexically_normal()
+            .make_preferred();
+    const std::string pathString = borealis::io::fs_path_to_string(path);
+    // Replayed recordings run this unattended, so it may only write inside the config folder
+    const std::filesystem::path relative = path.lexically_relative(root);
+    if (relative.empty() || relative == "." || *relative.begin() == ".." || !path.has_filename()) {
+        TraceError(state, output,
+            fmt::format(FMT_STRING("Error: '{}' is not a file inside '{}'"), pathString,
+                borealis::io::fs_path_to_string(root)));
+        return;
+    }
+    std::error_code ec;
+    std::filesystem::create_directories(path.parent_path(), ec);
+    if (ec) {
+        TraceError(state, output,
+            fmt::format(FMT_STRING("Error: cannot create '{}': {}"),
+                borealis::io::fs_path_to_string(path.parent_path()), ec.message()));
+        return;
+    }
+
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    out << aurora::render::graph_dump_json(true);
+    out.close();
+    if (!out) {
+        TraceError(state, output, fmt::format(FMT_STRING("Error: cannot write '{}'"), pathString));
+        return;
+    }
+    TraceReply(state, output, fmt::format(FMT_STRING("Wrote {}"), pathString));
 }
 
 }  // namespace
@@ -1119,6 +1292,31 @@ void runCommand(std::string_view cmdLine, CommandState& state, const CommandOutp
         return;
     }
 
+    if (cmd == "render.settings") {
+        RunRenderSettings(args, state, output);
+        return;
+    }
+
+    if (cmd == "render.features") {
+        RunRenderFeatures(args, state, output);
+        return;
+    }
+
+    if (cmd == "render.set") {
+        RunRenderSet(args, state, output);
+        return;
+    }
+
+    if (cmd == "render.selftest") {
+        RunRenderSelfTest(args, state, output);
+        return;
+    }
+
+    if (cmd == "render.graph.dump") {
+        RunRenderGraphDump(args, state, output);
+        return;
+    }
+
     if (cmd == "help") {
         output("@<ref>  =  @<procId> | @found | @link");
         output("");
@@ -1141,6 +1339,13 @@ void runCommand(std::string_view cmdLine, CommandState& state, const CommandOutp
         output("list [id|name]                              List actors in scene");
         output("pos                                         Print player position and stage");
         output("rate [hz]                                   Get or set sim rate (1-480, default 30)");
+        output(
+            "render.graph.dump [file]                    Write the compiled render graph as JSON");
+        output("render.selftest                             Check the renderer bridge and Graphics "
+               "tab tables");
+        output("render.set <graphics.key> <value>           Override a graphics setting until "
+               "restart");
+        output("render.settings [all] | render.features     Renderer settings and feature support");
         output("render.trace [-f] <frames> [file]           Capture N frames to a GX trace file");
         output("render.trace stop | status                  Stop or query the trace capture");
         output("reset                                       Soft reset");

@@ -2,6 +2,7 @@
 
 #include "dusk/config.hpp"
 #include "dusk/game_mode.hpp"
+#include "dusk/render/render_bridge.hpp"
 #include "dusk/texture_replacements.hpp"
 #include "dusk/ui/ui.hpp"
 
@@ -10,6 +11,7 @@
 
 namespace dusk {
 
+// clang-format off
 UserSettings g_userSettings = {
     .video = {
         .enableFullscreen {"video.enableFullscreen", false},
@@ -175,6 +177,71 @@ UserSettings g_userSettings = {
         .lastSelectedGameModeId {"game.lastSelectedGameModeId", gamemode::kVanillaGameModeId}
     },
 
+    .graphics = {
+        .preset {"graphics.preset", GraphicsPreset::Original},
+        .textureMaterials {"graphics.textureMaterials", true},
+        .stochasticTiling {"graphics.stochasticTiling", false},
+        .legacyMatMaps {"graphics.legacyMatMaps", false},
+        .pbr {"graphics.pbr", false},
+        .legacyBlend {"graphics.legacyBlend", 0.0f},
+        .exposure {"graphics.exposure", GraphicsExposure::MatchLegacy},
+        .exposureBias {"graphics.exposureBias", 0.0f},
+        .tonemap {"graphics.tonemap", GraphicsTonemap::PbrNeutral},
+        .taa {"graphics.taa", false},
+        .taaSharpness {"graphics.taaSharpness", 0.25f},
+        .ao {"graphics.ao", GraphicsQuality::Off},
+        .ssil {"graphics.ssil", false},
+        .shadowQuality {"graphics.shadowQuality", GraphicsQuality::Off},
+        .shadowPages {"graphics.shadowPages", 1024},
+        .shadowPageBudget {"graphics.shadowPageBudget", 64},
+        .gameShadows {"graphics.gameShadows", GraphicsGameShadows::Auto},
+        .legacyShadowGain {"graphics.legacyShadowGain", 1.0f},
+        .keepShadowCues {"graphics.keepShadowCues", false},
+        .gi {"graphics.gi", GraphicsGi::Off},
+        .rt {"graphics.rt", GraphicsRtMode::Off},
+        .rtBackend {"graphics.rtBackend", GraphicsRtBackend::Auto},
+        .reflections {"graphics.reflections", GraphicsReflections::Off},
+        .fogVolumetric {"graphics.fogVolumetric", GraphicsQuality::Off},
+        .godRays {"graphics.godRays", GraphicsGodRays::Off},
+        .fogScattering {"graphics.fogScattering", 1.0f},
+        .shaftStrength {"graphics.shaftStrength", 1.0f},
+        .fogLegacyMatch {"graphics.fogLegacyMatch", false},
+        .fogTranslucents {"graphics.fogTranslucents", false},
+        .clouds {"graphics.clouds", GraphicsQuality::Off},
+        .cloudStyle {"graphics.cloudStyle", -1.0f},
+        .cloudShadows {"graphics.cloudShadows", false},
+        .cloudShadowStrength {"graphics.cloudShadowStrength", 1.0f},
+        .keepCloudDome {"graphics.keepCloudDome", false},
+        .cloudCoverage {"graphics.cloudCoverage", 1.0f},
+        .cloudDensity {"graphics.cloudDensity", 1.0f},
+        .cloudAltitude {"graphics.cloudAltitude", 1.0f},
+        .cloudWindSpeed {"graphics.cloudWindSpeed", 1.0f},
+        .cloudSilverLining {"graphics.cloudSilverLining", 1.0f},
+        .cloudPowder {"graphics.cloudPowder", 1.0f},
+        .grassQuality {"graphics.grassQuality", GraphicsQuality::Off},
+        .grassReplaceGame {"graphics.grassReplaceGame", true},
+        .grassTerrain {"graphics.grassTerrain", true},
+        .grassDistanceM {"graphics.grassDistanceM", 0},
+        .grassDensity {"graphics.grassDensity", 1.0f},
+        .grassDistantDensity {"graphics.grassDistantDensity", 0.0f},
+        .grassShadows {"graphics.grassShadows", GraphicsGrassShadows::Contact},
+        .grassLegacyShadows {"graphics.grassLegacyShadows", true},
+        .grassInteraction {"graphics.grassInteraction", true},
+        .grassWind {"graphics.grassWind", 1.0f},
+        .terrainDetail {"graphics.terrainDetail", GraphicsTerrainDetail::Off},
+        .terrainQuality {"graphics.terrainQuality", GraphicsQuality::High},
+        .terrainStrength {"graphics.terrainStrength", 1.0f},
+        .terrainDistanceM {"graphics.terrainDistanceM", 0},
+        .terrainFlatten {"graphics.terrainFlatten", false},
+        .gpuFoliage {"graphics.gpuFoliage", false},
+        .gpuWeather {"graphics.gpuWeather", false},
+        .gpuParticles {"graphics.gpuParticles", false},
+        .gpuDeform {"graphics.gpuDeform", false},
+        .meshReplacement {"graphics.meshReplacement", false},
+        .staticWorld {"graphics.staticWorld", GraphicsStaticWorld::Off},
+        .debugView {"graphics.debugView", 0},
+    },
+
     .backend = {
         .isoPath {"backend.isoPath", ""},
         .isoVerification {"backend.isoVerification", DiscVerificationState::Unknown},
@@ -228,6 +295,7 @@ UserSettings g_userSettings = {
         },
     }
 };
+// clang-format on
 
 UserSettings& getSettings() {
     return g_userSettings;
@@ -248,6 +316,13 @@ void applyResampler(Resampler resampler) {
         break;
     }
 }
+
+namespace {
+template <typename T>
+void RegisterGraphics(ConfigVar<T>& var) {
+    Register(var, [](const T&, const T&) { render::mark_dirty(); });
+}
+}  // namespace
 
 void registerSettings() {
     // Video
@@ -396,6 +471,69 @@ void registerSettings() {
     Register(g_userSettings.game.enableLED[2]);
     Register(g_userSettings.game.enableLED[3]);
     Register(g_userSettings.game.swapDirectSelect);
+
+    RegisterGraphics(g_userSettings.graphics.preset);
+    RegisterGraphics(g_userSettings.graphics.textureMaterials);
+    RegisterGraphics(g_userSettings.graphics.stochasticTiling);
+    RegisterGraphics(g_userSettings.graphics.legacyMatMaps);
+    RegisterGraphics(g_userSettings.graphics.pbr);
+    RegisterGraphics(g_userSettings.graphics.legacyBlend);
+    RegisterGraphics(g_userSettings.graphics.exposure);
+    RegisterGraphics(g_userSettings.graphics.exposureBias);
+    RegisterGraphics(g_userSettings.graphics.tonemap);
+    RegisterGraphics(g_userSettings.graphics.taa);
+    RegisterGraphics(g_userSettings.graphics.taaSharpness);
+    RegisterGraphics(g_userSettings.graphics.ao);
+    RegisterGraphics(g_userSettings.graphics.ssil);
+    RegisterGraphics(g_userSettings.graphics.shadowQuality);
+    RegisterGraphics(g_userSettings.graphics.shadowPages);
+    RegisterGraphics(g_userSettings.graphics.shadowPageBudget);
+    RegisterGraphics(g_userSettings.graphics.gameShadows);
+    RegisterGraphics(g_userSettings.graphics.legacyShadowGain);
+    RegisterGraphics(g_userSettings.graphics.keepShadowCues);
+    RegisterGraphics(g_userSettings.graphics.gi);
+    RegisterGraphics(g_userSettings.graphics.rt);
+    RegisterGraphics(g_userSettings.graphics.rtBackend);
+    RegisterGraphics(g_userSettings.graphics.reflections);
+    RegisterGraphics(g_userSettings.graphics.fogVolumetric);
+    RegisterGraphics(g_userSettings.graphics.godRays);
+    RegisterGraphics(g_userSettings.graphics.fogScattering);
+    RegisterGraphics(g_userSettings.graphics.shaftStrength);
+    RegisterGraphics(g_userSettings.graphics.fogLegacyMatch);
+    RegisterGraphics(g_userSettings.graphics.fogTranslucents);
+    RegisterGraphics(g_userSettings.graphics.clouds);
+    RegisterGraphics(g_userSettings.graphics.cloudStyle);
+    RegisterGraphics(g_userSettings.graphics.cloudShadows);
+    RegisterGraphics(g_userSettings.graphics.cloudShadowStrength);
+    RegisterGraphics(g_userSettings.graphics.keepCloudDome);
+    RegisterGraphics(g_userSettings.graphics.cloudCoverage);
+    RegisterGraphics(g_userSettings.graphics.cloudDensity);
+    RegisterGraphics(g_userSettings.graphics.cloudAltitude);
+    RegisterGraphics(g_userSettings.graphics.cloudWindSpeed);
+    RegisterGraphics(g_userSettings.graphics.cloudSilverLining);
+    RegisterGraphics(g_userSettings.graphics.cloudPowder);
+    RegisterGraphics(g_userSettings.graphics.grassQuality);
+    RegisterGraphics(g_userSettings.graphics.grassReplaceGame);
+    RegisterGraphics(g_userSettings.graphics.grassTerrain);
+    RegisterGraphics(g_userSettings.graphics.grassDistanceM);
+    RegisterGraphics(g_userSettings.graphics.grassDensity);
+    RegisterGraphics(g_userSettings.graphics.grassDistantDensity);
+    RegisterGraphics(g_userSettings.graphics.grassShadows);
+    RegisterGraphics(g_userSettings.graphics.grassLegacyShadows);
+    RegisterGraphics(g_userSettings.graphics.grassInteraction);
+    RegisterGraphics(g_userSettings.graphics.grassWind);
+    RegisterGraphics(g_userSettings.graphics.terrainDetail);
+    RegisterGraphics(g_userSettings.graphics.terrainQuality);
+    RegisterGraphics(g_userSettings.graphics.terrainStrength);
+    RegisterGraphics(g_userSettings.graphics.terrainDistanceM);
+    RegisterGraphics(g_userSettings.graphics.terrainFlatten);
+    RegisterGraphics(g_userSettings.graphics.gpuFoliage);
+    RegisterGraphics(g_userSettings.graphics.gpuWeather);
+    RegisterGraphics(g_userSettings.graphics.gpuParticles);
+    RegisterGraphics(g_userSettings.graphics.gpuDeform);
+    RegisterGraphics(g_userSettings.graphics.meshReplacement);
+    RegisterGraphics(g_userSettings.graphics.staticWorld);
+    RegisterGraphics(g_userSettings.graphics.debugView);
 
     Register(g_userSettings.backend.isoPath);
     Register(g_userSettings.backend.isoVerification);

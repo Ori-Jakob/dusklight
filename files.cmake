@@ -1460,6 +1460,8 @@ set(DUSK_FILES
         src/dusk/imgui/ImGuiMenuTools.cpp
         src/dusk/imgui/ImGuiMenuTools.hpp
         src/dusk/imgui/ImGuiProcessOverlay.cpp
+        src/dusk/imgui/ImGuiRenderDebugWindow.cpp
+        src/dusk/imgui/ImGuiRenderDebugWindow.hpp
         src/dusk/imgui/ImGuiSaveEditor.cpp
         src/dusk/imgui/ImGuiStateShare.cpp
         src/dusk/imgui/ImGuiStateShare.hpp
@@ -1559,6 +1561,9 @@ set(DUSK_FILES
         src/dusk/mouse.cpp
         src/dusk/presentation.cpp
         src/dusk/presentation.hpp
+        src/dusk/render/graphics_fields.inl
+        src/dusk/render/render_bridge.cpp
+        src/dusk/render/render_bridge.hpp
         src/dusk/scope_guard.hpp
         src/dusk/save_manager.cpp
         src/dusk/save_manager.hpp

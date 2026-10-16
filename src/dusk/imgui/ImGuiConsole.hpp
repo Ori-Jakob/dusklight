@@ -21,6 +21,7 @@ public:
     void UpdateSettings();
     void PreDraw();
     void PostDraw();
+    void OpenRenderDebugWindow();
 
     static bool CheckMenuViewToggle(ImGuiKey key, bool& active);
 

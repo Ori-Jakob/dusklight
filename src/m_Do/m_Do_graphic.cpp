@@ -52,6 +52,7 @@
 #include "dusk/imgui/ImGuiConsole.hpp"
 #include "dusk/interp/frame_interpolation.h"
 #include "dusk/logging.h"
+#include "dusk/render/render_bridge.hpp"
 #include "dusk/settings.h"
 #include "helpers/endian.h"
 #include "helpers/gx_helper.h"
@@ -2185,6 +2186,7 @@ int mDoGph_Painter() {
 
 #if TARGET_PC
     dusk::g_imguiConsole.PreDraw();
+    dusk::render::present();
 #endif
 
     #if DEBUG
