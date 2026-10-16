@@ -22,6 +22,7 @@
 #include <SDL3/SDL_power.h>
 #include <SDL3/SDL_video.h>
 #include <absl/container/flat_hash_set.h>
+#include <aurora/input.hpp>
 #include <aurora/lib/window.hpp>
 #include <aurora/rmlui.hpp>
 #include <borealis/io.hpp>
@@ -93,6 +94,27 @@ std::vector<PendingDrop> sPendingDrops;
 // notifications for gamepads that we sent a connected notification for.
 absl::flat_hash_set<SDL_JoystickID> sConnectedGamepads;
 
+aurora::input::LayerId sInputLayer = aurora::input::kInvalidLayerId;
+
+// Gamepads already reach the menus through handle_event, so routing them here would act twice
+bool is_menu_source(const aurora::input::InputSource& source) noexcept {
+    return source.kind != aurora::input::InputSource::Kind::Controller;
+}
+
+aurora::input::EventResult route_menu_input(const aurora::input::InputEvent& event, void*) {
+    if (!is_menu_source(event.source)) {
+        return aurora::input::EventResult::Pass;
+    }
+    aurora::rmlui::process_input(event);
+    // Hidden documents also stop keys, so only an open menu may keep them from the game
+    return any_document_visible() ? aurora::input::EventResult::Consume :
+                                    aurora::input::EventResult::Pass;
+}
+
+bool menu_captures(const aurora::input::InputSource& source, void*) {
+    return is_menu_source(source) && any_document_visible();
+}
+
 }  // namespace
 
 bool initialize() noexcept {
@@ -115,6 +137,12 @@ bool initialize() noexcept {
     register_icon_texture_provider();
     register_mod_texture_provider();
     register_remote_texture_provider();
+    sInputLayer = aurora::input::register_layer({
+        .label = "dusk.ui",
+        .priority = aurora::input::kRmlUiLayerPriority,
+        .onEvent = route_menu_input,
+        .capturesSource = menu_captures,
+    });
     Rml::StyleSheetSpecification::RegisterProperty("mod-icon-tint", "transparent", false)
         .AddParser("color");
     Rml::StyleSheetSpecification::RegisterProperty("mod-icon-background", "transparent", false)
@@ -131,6 +159,7 @@ void shutdown() noexcept {
     }
     sPendingDrops.clear();
     sDroppedPackages.clear();
+    aurora::input::unregister_layer(std::exchange(sInputLayer, aurora::input::kInvalidLayerId));
     unregister_remote_texture_provider();
     unregister_mod_texture_provider();
     unregister_icon_texture_provider();
