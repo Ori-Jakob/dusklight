@@ -23,8 +23,9 @@ struct FieldText {
     std::string requested;
     std::string clamped;
     std::string effective;
+    std::string sent;
 
-    bool differs() const noexcept { return requested != clamped || clamped != effective; }
+    bool differs() const noexcept { return sent != clamped || clamped != effective; }
 };
 
 struct SelfTestReport {

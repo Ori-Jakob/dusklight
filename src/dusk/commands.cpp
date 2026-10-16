@@ -7,7 +7,9 @@
 #include "dusk/logging.h"
 #include "dusk/main.h"
 #include "dusk/render/render_bridge.hpp"
+#include "dusk/render/render_settings.hpp"
 #include "dusk/settings.h"
+#include "dusk/ui/settings_graphics.hpp"
 #include "game_clock.h"
 
 #include "c/c_damagereaction.h"
@@ -37,6 +39,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
@@ -346,7 +349,7 @@ static void WriteTraceMetadata(const std::filesystem::path& tracePath, long fram
         effective[std::string(field.key)] = field.effective;
     }
     meta["graphics"] = {
-        {"preset", std::string(render::preset_name(settings.graphics.preset.getValue()))},
+        {"preset", std::string(render::preset_name(render::detect_preset()))},
         {"requested", std::move(requested)},
         {"effective", std::move(effective)},
     };
@@ -480,6 +483,8 @@ static constexpr const char* kRenderFeaturesUsage = "Usage: render.features";
 static constexpr const char* kRenderSetUsage = "Usage: render.set <graphics.key> <value>";
 static constexpr const char* kRenderSelfTestUsage = "Usage: render.selftest";
 static constexpr const char* kRenderGraphDumpUsage = "Usage: render.graph.dump [file]";
+static constexpr const char* kRenderPresetUsage =
+    "Usage: render.preset [original|low|medium|high|ultra|recommended|reset]";
 static constexpr const char* kRenderGraphDumpFile = "render_graph.json";
 
 static const char* YesNo(bool value) {
@@ -493,14 +498,14 @@ static void RunRenderSettings(
         return;
     }
     const bool all = args.size() == 2;
-    const auto preset = getSettings().graphics.preset.getValue();
     const uint32_t latency = render::last_latch_latency();
     const bool inSync =
         render::same_settings(aurora::render::effective_settings(), render::last_clamped());
     TraceReply(state, output,
         fmt::format(
             FMT_STRING("preset {} (base {}), pushes {}, pending {}, latency {} frames, in sync {}"),
-            render::preset_name(preset), render::preset_name(preset), render::push_count(),
+            render::preset_name(render::detect_preset()),
+            render::preset_name(render::base_preset()), render::push_count(),
             YesNo(render::is_pending()), latency == 0 ? std::string{"-"} : std::to_string(latency),
             YesNo(inSync)));
 
@@ -577,6 +582,8 @@ static void RunRenderSelfTest(
     }
     render::SelfTestReport report;
     render::bridge_self_test(report);
+    render::settings_self_test(report);
+    ui::graphics_tab_self_test(report);
     for (const auto& failure : report.failed) {
         TraceError(state, output, "FAIL " + failure);
     }
@@ -589,6 +596,49 @@ static void RunRenderSelfTest(
     TraceReply(state, output,
         fmt::format(FMT_STRING("render.selftest: {} passed{}, {} failed"), report.passed, skipped,
             report.failed.size()));
+}
+
+static bool EqualsIgnoreCase(std::string_view a, std::string_view b) {
+    return std::ranges::equal(
+        a, b, [](unsigned char x, unsigned char y) { return std::tolower(x) == std::tolower(y); });
+}
+
+static std::optional<GraphicsPreset> ParseGraphicsPreset(std::string_view name) {
+    for (const auto preset : {GraphicsPreset::Original, GraphicsPreset::Low, GraphicsPreset::Medium,
+             GraphicsPreset::High, GraphicsPreset::Ultra})
+    {
+        if (EqualsIgnoreCase(name, render::preset_name(preset))) {
+            return preset;
+        }
+    }
+    return std::nullopt;
+}
+
+static void RunRenderPreset(
+    const std::vector<std::string>& args, CommandState& state, const CommandOutput& output) {
+    if (args.size() > 2) {
+        TraceError(state, output, kRenderPresetUsage);
+        return;
+    }
+    if (args.size() == 1) {
+        TraceReply(state, output,
+            fmt::format(FMT_STRING("Graphics preset: {}, recommended: {}"),
+                render::preset_display_name(), render::preset_name(render::recommended_preset())));
+        return;
+    }
+    if (EqualsIgnoreCase(args[1], "reset")) {
+        render::reset_to_preset();
+    } else if (EqualsIgnoreCase(args[1], "recommended")) {
+        render::apply_preset(render::recommended_preset());
+    } else if (const auto preset = ParseGraphicsPreset(args[1])) {
+        render::apply_preset(*preset);
+    } else {
+        TraceError(state, output, kRenderPresetUsage);
+        return;
+    }
+    config::save();
+    TraceReply(state, output,
+        fmt::format(FMT_STRING("Graphics preset: {}"), render::preset_display_name()));
 }
 
 static void RunRenderGraphDump(
@@ -1317,6 +1367,11 @@ void runCommand(std::string_view cmdLine, CommandState& state, const CommandOutp
         return;
     }
 
+    if (cmd == "render.preset") {
+        RunRenderPreset(args, state, output);
+        return;
+    }
+
     if (cmd == "help") {
         output("@<ref>  =  @<procId> | @found | @link");
         output("");
@@ -1341,6 +1396,7 @@ void runCommand(std::string_view cmdLine, CommandState& state, const CommandOutp
         output("rate [hz]                                   Get or set sim rate (1-480, default 30)");
         output(
             "render.graph.dump [file]                    Write the compiled render graph as JSON");
+        output("render.preset <name|recommended|reset>      Apply or show the graphics preset");
         output("render.selftest                             Check the renderer bridge and Graphics "
                "tab tables");
         output("render.set <graphics.key> <value>           Override a graphics setting until "

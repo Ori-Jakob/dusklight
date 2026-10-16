@@ -2,6 +2,7 @@
 
 #include "button.hpp"
 #include "dusk/config.hpp"
+#include "dusk/render/render_settings.hpp"
 #include "dusk/settings.h"
 #include "ui.hpp"
 
@@ -23,6 +24,7 @@ void applyPresetClassic() {
     s.game.menuScalingMode.setValue(MenuScaling::GameCube);
     s.game.enableMenuPointer.setValue(false);
     AuroraSetViewportPolicy(AURORA_VIEWPORT_FIT);
+    render::apply_preset(GraphicsPreset::Original);
 }
 
 void applyPresetDusk() {
@@ -55,6 +57,7 @@ void applyPresetDusk() {
     s.game.menuScalingMode.setValue(MenuScaling::Dusklight);
     s.game.enhancedMapMenus.setValue(true);
     s.game.enableMenuPointer.setValue(true);
+    render::apply_preset(render::recommended_preset());
 }
 
 }  // namespace

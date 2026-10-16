@@ -2,6 +2,8 @@
 
 #include "ui.hpp"
 
+#include "m_Do/m_Do_audio.h"
+
 #include <utility>
 
 namespace dusk::ui {
@@ -97,6 +99,7 @@ bool SelectButton::handle_nav_command(NavCommand cmd) {
 
 void BaseControlledSelectButton::update() {
     set_disabled(disabled());
+    mRoot->SetClass("locked", locked());
     set_value_label(format_value());
     set_modified(modified());
     SelectButton::update();
@@ -116,11 +119,25 @@ bool ControlledSelectButton::disabled() const {
     return BaseControlledSelectButton::disabled();
 }
 
+bool ControlledSelectButton::locked() const {
+    return mIsLocked && mIsLocked();
+}
+
 Rml::String ControlledSelectButton::format_value() {
     if (!mGetValue) {
         return "";
     }
     return mGetValue();
+}
+
+bool ControlledSelectButton::handle_nav_command(NavCommand cmd) {
+    if (locked() &&
+        (cmd == NavCommand::Confirm || cmd == NavCommand::Left || cmd == NavCommand::Right))
+    {
+        mDoAud_seStartMenu(kSoundWarning);
+        return true;
+    }
+    return SelectButton::handle_nav_command(cmd);
 }
 
 }  // namespace dusk::ui

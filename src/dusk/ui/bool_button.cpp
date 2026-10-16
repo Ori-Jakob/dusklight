@@ -13,7 +13,7 @@ BoolButton::BoolButton(Rml::Element* parent, Props props)
           }),
       mGetValue(std::move(props.getValue)), mSetValue(std::move(props.setValue)),
       mIsDisabled(std::move(props.isDisabled)), mIsModified(std::move(props.isModified)),
-      mValueOverride(std::move(props.valueOverride)) {}
+      mValueOverride(std::move(props.valueOverride)), mIsLocked(std::move(props.isLocked)) {}
 
 bool BoolButton::modified() const {
     if (mIsModified) {
@@ -29,6 +29,10 @@ bool BoolButton::disabled() const {
     return BaseControlledSelectButton::disabled();
 }
 
+bool BoolButton::locked() const {
+    return mIsLocked && mIsLocked();
+}
+
 Rml::String BoolButton::format_value() {
     if (mValueOverride) {
         if (std::string value = mValueOverride(); !value.empty()) {
@@ -40,6 +44,12 @@ Rml::String BoolButton::format_value() {
 }
 
 bool BoolButton::handle_nav_command(NavCommand cmd) {
+    if (locked() &&
+        (cmd == NavCommand::Confirm || cmd == NavCommand::Left || cmd == NavCommand::Right))
+    {
+        mDoAud_seStartMenu(kSoundWarning);
+        return true;
+    }
     if (cmd == NavCommand::Confirm || cmd == NavCommand::Left || cmd == NavCommand::Right) {
         const bool newValue = !mGetValue();
         mSetValue(newValue);

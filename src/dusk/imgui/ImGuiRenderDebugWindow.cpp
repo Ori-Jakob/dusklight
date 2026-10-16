@@ -3,6 +3,7 @@
 #include "ImGuiMenuTools.hpp"
 
 #include "dusk/render/render_bridge.hpp"
+#include "dusk/render/render_settings.hpp"
 #include "dusk/settings.h"
 
 #include <aurora/render.hpp>
@@ -42,8 +43,8 @@ void DrawStatus() {
                                         fmt::format("{} frame{}", latency, latency == 1 ? "" : "s");
     const bool inSync =
         render::same_settings(aurora::render::effective_settings(), render::last_clamped());
-    ShowText(
-        fmt::format("Preset: {}", render::preset_name(getSettings().graphics.preset.getValue())));
+    ShowText(fmt::format("Preset: {}  Recommended: {}", render::preset_display_name(),
+        render::preset_name(render::recommended_preset())));
     ShowText(fmt::format("Pushes: {}  Pending: {}  Latch latency: {}  In sync: {}",
         render::push_count(), YesNo(render::is_pending()), latencyText, YesNo(inSync)));
 

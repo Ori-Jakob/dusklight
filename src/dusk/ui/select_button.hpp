@@ -44,6 +44,7 @@ public:
         : SelectButton(parent, std::move(props)) {}
 
     void update() override;
+    virtual bool locked() const { return false; }
 
 protected:
     virtual Rml::String format_value() = 0;
@@ -57,6 +58,7 @@ public:
         std::function<bool()> isDisabled;
         std::function<bool()> isModified;
         bool submit = true;
+        std::function<bool()> isLocked;
     };
 
     ControlledSelectButton(Rml::Element* parent, Props props)
@@ -66,17 +68,20 @@ public:
                   .submit = props.submit,
               }),
           mGetValue(std::move(props.getValue)), mIsDisabled(std::move(props.isDisabled)),
-          mIsModified(std::move(props.isModified)) {}
+          mIsModified(std::move(props.isModified)), mIsLocked(std::move(props.isLocked)) {}
 
     bool modified() const override;
     bool disabled() const override;
+    bool locked() const override;
 
 protected:
     Rml::String format_value() override;
+    bool handle_nav_command(NavCommand cmd) override;
 
     std::function<Rml::String()> mGetValue;
     std::function<bool()> mIsDisabled;
     std::function<bool()> mIsModified;
+    std::function<bool()> mIsLocked;
 };
 
 }  // namespace dusk::ui

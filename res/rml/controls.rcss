@@ -73,6 +73,10 @@ select-button value.modified {
     font-weight: bold;
 }
 
+select-button.locked value {
+    opacity: 0.6;
+}
+
 select-button input {
     text-align: right;
     font-size: var(--font-size-2xl);

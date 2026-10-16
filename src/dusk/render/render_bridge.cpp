@@ -3,6 +3,7 @@
 #include "dusk/config.hpp"
 #include "dusk/logging.h"
 #include "dusk/render/graphics_fields.inl"
+#include "dusk/render/render_settings.hpp"
 
 #include <fmt/format.h>
 #include <tracy/Tracy.hpp>
@@ -195,6 +196,16 @@ const T& read(const config::ConfigVar<T>& var, SettingsSource source) noexcept {
     return source == SettingsSource::Defaults ? var.getDefaultValue() : var.getValue();
 }
 
+// The preset member carries the detected preset, so editing a preset-controlled key requests Custom
+template <typename T>
+T requested_value(const config::ConfigVar<T>& var, SettingsSource source) {
+    if constexpr (std::is_same_v<T, GraphicsPreset>) {
+        return source == SettingsSource::Defaults ? GraphicsPreset::Original : detect_preset();
+    } else {
+        return read(var, source);
+    }
+}
+
 template <typename T>
 std::string field_text(const T& value) {
     if constexpr (std::is_same_v<T, bool>) {
@@ -255,7 +266,7 @@ void append_item(std::string& list, std::string_view item) {
 void log_clamps(const ar::Settings& clamped) {
     std::vector<std::string_view> keys;
     visit_fields([&](std::string_view key, const auto& var, auto get) {
-        if (field_text(var.getValue()) != field_text(get(clamped))) {
+        if (field_text(requested_value(var, SettingsSource::Current)) != field_text(get(clamped))) {
             keys.push_back(key);
         }
     });
@@ -452,8 +463,8 @@ void initialize() {
             ++supported;
         }
     }
-    RenderLog.info("Renderer bridge: preset {}, {} of {} features supported",
-        preset_name(getSettings().graphics.preset.getValue()), supported, all_features().size());
+    RenderLog.info("Renderer bridge: preset {}, {} of {} features supported", preset_display_name(),
+        supported, all_features().size());
 }
 
 void present() {
@@ -479,7 +490,7 @@ ar::Settings build_requested(SettingsSource source) {
     visit_fields([&](std::string_view, const auto& var, auto get) {
         auto& out = get(settings);
         out = convert<std::remove_reference_t<decltype(out)>>(
-            read(var, source), var.getDefaultValue());
+            requested_value(var, source), var.getDefaultValue());
     });
     return settings;
 }
@@ -510,9 +521,10 @@ std::vector<FieldText> describe_fields() {
     const ar::Settings& effective = ar::effective_settings();
     std::vector<FieldText> fields;
     fields.reserve(kFieldCount);
+    // Requested stays the saved text; the preset is compared as the detected tag aurora was sent
     visit_fields([&](std::string_view key, const auto& var, auto get) {
         fields.push_back({key, field_text(var.getValue()), field_text(get(s_lastClamped)),
-            field_text(get(effective))});
+            field_text(get(effective)), field_text(requested_value(var, SettingsSource::Current))});
     });
     return fields;
 }

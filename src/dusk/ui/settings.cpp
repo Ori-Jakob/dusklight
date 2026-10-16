@@ -9,6 +9,8 @@
 #include "pane.hpp"
 #include "prelaunch.hpp"
 #include "saves_window.hpp"
+#include "settings_controls.hpp"
+#include "settings_graphics.hpp"
 #include "touch_controls_editor.hpp"
 #include "ui.hpp"
 
@@ -326,28 +328,11 @@ void data_folder_dialog_callback(borealis::file_select::Result result) {
 const Rml::String kInternalResolutionHelpText =
     "Configure the resolution used for rendering the game. Higher values are more demanding on "
     "your graphics hardware.";
-const Rml::String kShadowResolutionHelpText =
-    "Configure the shadow-map resolution. Higher values improve shadow quality but increase GPU "
-    "and memory usage.";
 const Rml::String kResamplerHelpText =
     "Configure the sampling method used when scaling the internal resolution for final presentation.";
-const Rml::String kBloomHelpText =
-    "Configure the post-processing bloom effect. Classic uses the original bloom pass; Dusklight uses "
-    "a higher-quality bloom pass.";
-const Rml::String kBloomBrightnessHelpText =
-    "Configure bloom intensity. Higher values make bright areas glow more strongly.";
-const Rml::String kDepthOfFieldHelpText =
-    "Configure the post-processing depth-of-field effect. Classic uses the original depth-of-field pass;"
-    " Dusklight uses a higher-quality depth-of-field pass.";
 const Rml::String kUnlockFramerateHelpText =
     "<br/>Uses inter-frame interpolation to enable higher frame rates.<br/><br/>May introduce minor "
     "visual artifacts or animation glitches.";
-const Rml::String kTextureReplacementHelpText =
-    "Enable installed texture replacements.";
-
-int float_setting_percent(ConfigVar<float>& var) {
-    return static_cast<int>(var.getValue() * 100.0f + 0.5f);
-}
 
 bool gyro_enabled() {
     return getSettings().game.enableGyroAim || getSettings().game.enableGyroRollgoal;
@@ -359,131 +344,6 @@ Rml::String touch_targeting_label(TouchTargeting targeting) {
         return "Unknown";
     }
     return kTouchTargetingLabels[index];
-}
-
-struct ConfigBoolProps {
-    Rml::String key;
-    Rml::String icon;
-    Rml::String helpText;
-    std::function<void(bool)> onChange;
-    std::function<bool()> isDisabled;
-};
-
-SelectButton& config_bool_select(
-    Pane& leftPane, Pane& rightPane, ConfigVar<bool>& var, ConfigBoolProps props) {
-    auto& button = leftPane.add_child<BoolButton>(BoolButton::Props{
-        .key = std::move(props.key),
-        .icon = std::move(props.icon),
-        .getValue = [&var] { return var.getValue(); },
-        .setValue =
-            [&var, callback = std::move(props.onChange)](bool value) {
-                if (value == var.getValue()) {
-                    return;
-                }
-                var.setValue(value);
-                config::save();
-                if (callback) {
-                    callback(value);
-                }
-            },
-        .isDisabled = std::move(props.isDisabled),
-        .isModified = [&var] { return var.getValue() != var.getDefaultValue(); },
-    });
-    leftPane.register_control(
-        button, rightPane, [helpText = std::move(props.helpText)](Pane& pane) {
-            pane.clear();
-            pane.add_rml(helpText);
-        });
-    return button;
-}
-
-void add_speedrun_disabled_option(Pane& leftPane, Pane& rightPane, ConfigVar<bool>& var,
-    const Rml::String& key, const Rml::String& helpText) {
-    config_bool_select(leftPane, rightPane, var, {
-        .key = key,
-        .helpText = helpText,
-        .isDisabled = [] { return speedrun::isActive(); },
-    });
-}
-
-SelectButton& config_percent_select(Pane& leftPane, Pane& rightPane, ConfigVar<float>& var,
-    Rml::String key, Rml::String helpText, int min, int max, int step = 5,
-    std::function<bool()> isDisabled = {}) {
-    auto& button = leftPane.add_child<NumberButton>(NumberButton::Props{
-        .key = std::move(key),
-        .getValue = [&var] { return float_setting_percent(var); },
-        .setValue =
-            [&var, min, max](int value) {
-                var.setValue(std::clamp(value, min, max) / 100.0f);
-                config::save();
-            },
-        .isDisabled = std::move(isDisabled),
-        .isModified = [&var] { return var.getValue() != var.getDefaultValue(); },
-        .min = min,
-        .max = max,
-        .step = step,
-        .suffix = "%",
-    });
-    leftPane.register_control(button, rightPane, [helpText = std::move(helpText)](Pane& pane) {
-        pane.clear();
-        pane.add_rml(helpText);
-    });
-    return button;
-}
-
-SelectButton& config_int_select(Pane& leftPane, Pane& rightPane, ConfigVar<int>& var,
-    Rml::String key, Rml::String helpText, int min, int max, int step = 5,
-    std::function<bool()> isDisabled = {}, std::function<void(int)> onChange = {},
-    std::string suffix = "") {
-    auto& button = leftPane.add_child<NumberButton>(NumberButton::Props{
-        .key = std::move(key),
-        .getValue = [&var] { return var.getValue(); },
-        .setValue =
-            [&var, min, max, callback = std::move(onChange)](int value) {
-                const int clampedValue = std::clamp(value, min, max);
-                var.setValue(clampedValue);
-                config::save();
-                if (callback) {
-                    callback(clampedValue);
-                }
-            },
-        .isDisabled = std::move(isDisabled),
-        .isModified = [&var] { return var.getValue() != var.getDefaultValue(); },
-        .min = min,
-        .max = max,
-        .step = step,
-        .suffix = suffix,
-    });
-    leftPane.register_control(button, rightPane, [helpText = std::move(helpText)](Pane& pane) {
-        pane.clear();
-        pane.add_text(helpText);
-    });
-    return button;
-}
-
-void graphics_tuner_control(Window& window, Pane& leftPane, Pane& rightPane,
-    const GraphicsTunerProps& props) {
-    const auto setting = GraphicsSetting::of(props.option);
-    leftPane.register_control(
-        leftPane
-            .add_select_button({
-                .key = props.title,
-                .getValue = [setting] { return setting.text(); },
-                .isModified = [setting] { return setting.isModified(); },
-                .submit = false,
-            })
-            .on_nav_command([&window, props](Rml::Event&, NavCommand cmd) {
-                if (cmd == NavCommand::Confirm || cmd == NavCommand::Left ||
-                    cmd == NavCommand::Right) {
-                    window.push(std::make_unique<GraphicsTuner>(props));
-                    return true;
-                }
-                return false;
-            }),
-        rightPane, [helpText = props.helpText](Pane& pane) {
-            pane.clear();
-            pane.add_text(helpText);
-        });
 }
 
 }  // namespace
@@ -799,44 +659,12 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             });
         graphics_tuner_control(*this, leftPane, rightPane,
             GraphicsTunerProps{
-                .option = GraphicsOption::ShadowResolution,
-                .title = "Shadow Resolution",
-                .helpText = kShadowResolutionHelpText,
-            });
-        graphics_tuner_control(*this, leftPane, rightPane,
-            GraphicsTunerProps{
                 .option = GraphicsOption::Resampler,
                 .title = "Output Resampling",
                 .helpText = kResamplerHelpText,
             });
 
-        leftPane.add_section("Post-Processing");
-        graphics_tuner_control(*this, leftPane, rightPane,
-            GraphicsTunerProps{
-                .option = GraphicsOption::BloomMode,
-                .title = "Bloom",
-                .helpText = kBloomHelpText,
-            });
-        graphics_tuner_control(*this, leftPane, rightPane,
-            GraphicsTunerProps{
-                .option = GraphicsOption::BloomMultiplier,
-                .title = "Bloom Brightness",
-                .helpText = kBloomBrightnessHelpText,
-            });
-        graphics_tuner_control(*this, leftPane, rightPane,
-            GraphicsTunerProps{
-                .option = GraphicsOption::DepthOfFieldMode,
-                .title = "Depth of Field",
-                .helpText = kDepthOfFieldHelpText,
-            });
-
         leftPane.add_section("Rendering");
-        graphics_tuner_control(*this, leftPane, rightPane,
-            GraphicsTunerProps{
-                .option = GraphicsOption::TextureReplacements,
-                .title = "Enable Texture Replacements",
-                .helpText = kTextureReplacementHelpText,
-            });
         leftPane.register_control(
             leftPane.add_select_button({
                 .key = "Unlock Framerate",
@@ -917,6 +745,12 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
                     "<br/>Disable the top and bottom black bars during L-targeting, aiming, "
                     "cutscenes, dialogue, etc.");
             });
+    });
+
+    add_tab("Graphics", [this](Rml::Element* content) {
+        auto& leftPane = add_child<Pane>(content, Pane::Type::Controlled);
+        auto& rightPane = add_child<Pane>(content, Pane::Type::Uncontrolled);
+        build_graphics_tab(*this, leftPane, rightPane, mPrelaunch);
     });
 
     add_tab("Input", [this](Rml::Element* content) {

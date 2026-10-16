@@ -40,6 +40,16 @@ private:
     Rml::Element* mValueElem = nullptr;
 };
 
+enum class TunerFormat : u8 {
+    Custom,
+    Percent,
+    PercentAutoAtMin,
+    MetresAutoAtMin,
+    Ev,
+    Integer,
+    ViewAutoAtMin,
+};
+
 enum class GraphicsOption {
     InternalResolution,
     ShadowResolution,
@@ -48,6 +58,29 @@ enum class GraphicsOption {
     BloomMultiplier,
     DepthOfFieldMode,
     TextureReplacements,
+    PbrBlend,
+    ExposureBias,
+    LegacyShadowGain,
+    ShadowPagePool,
+    ShadowPageBudget,
+    FogScattering,
+    ShaftStrength,
+    CloudStyle,
+    CloudShadowStrength,
+    CloudCoverage,
+    CloudDensity,
+    CloudAltitude,
+    CloudWindSpeed,
+    CloudSilverLining,
+    CloudPowder,
+    GrassDistance,
+    GrassDensity,
+    GrassDistantDensity,
+    GrassWind,
+    TerrainStrength,
+    TerrainDistance,
+    TaaSharpness,
+    DebugView,
 };
 
 struct GraphicsSetting {
@@ -61,17 +94,25 @@ struct GraphicsSetting {
     Rml::String (*label)(int) = nullptr;
     const char* (*cvarName)() = nullptr;
     bool (*isModified)() = nullptr;
+    int scale = 100;
+    TunerFormat format = TunerFormat::Custom;
+    int (*reference)() = nullptr;
 
     static const GraphicsSetting& of(GraphicsOption option);
 
     void set(int value) const { write(std::clamp(value, min, max)); }
-    Rml::String text() const { return label(read()); }
+    int referenceValue() const { return reference != nullptr ? reference() : defaultValue; }
+    Rml::String format_value(int value) const;
+    Rml::String text() const { return format_value(read()); }
 };
 
 struct GraphicsTunerProps {
     GraphicsOption option;
     Rml::String title;
     Rml::String helpText;
+    std::function<bool()> isDisabled;
+    std::function<Rml::String()> unavailableReason;
+    std::function<Rml::String()> valueOverride;
 };
 
 class GraphicsTuner : public Document {

@@ -1564,6 +1564,8 @@ set(DUSK_FILES
         src/dusk/render/graphics_fields.inl
         src/dusk/render/render_bridge.cpp
         src/dusk/render/render_bridge.hpp
+        src/dusk/render/render_settings.cpp
+        src/dusk/render/render_settings.hpp
         src/dusk/scope_guard.hpp
         src/dusk/save_manager.cpp
         src/dusk/save_manager.hpp
@@ -1667,6 +1669,10 @@ set(DUSK_FILES
         src/dusk/ui/select_button.hpp
         src/dusk/ui/settings.cpp
         src/dusk/ui/settings.hpp
+        src/dusk/ui/settings_controls.cpp
+        src/dusk/ui/settings_controls.hpp
+        src/dusk/ui/settings_graphics.cpp
+        src/dusk/ui/settings_graphics.hpp
         src/dusk/ui/string_button.cpp
         src/dusk/ui/string_button.hpp
         src/dusk/ui/tab_bar.cpp

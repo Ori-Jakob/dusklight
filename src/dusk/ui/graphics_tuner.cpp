@@ -4,6 +4,7 @@
 
 #include "dusk/config.hpp"
 #include "dusk/logging.h"
+#include "dusk/render/render_settings.hpp"
 #include "dusk/settings.h"
 #include "m_Do/m_Do_audio.h"
 
@@ -11,6 +12,7 @@
 #include <fmt/format.h>
 
 #include <algorithm>
+#include <cmath>
 #include <string>
 #include <type_traits>
 
@@ -117,6 +119,64 @@ const GraphicsSetting& bind(Min min, Max max, Def def, int step, Rml::String (*l
     return desc;
 }
 
+template <typename T, int Scale>
+struct ScaledMap {
+    static int to_tuner(T value) {
+        if constexpr (std::is_floating_point_v<T>) {
+            return static_cast<int>(std::lround(value * Scale));
+        } else {
+            static_assert(Scale == 1);
+            return value;
+        }
+    }
+    static T from_tuner(int value) {
+        if constexpr (std::is_floating_point_v<T>) {
+            return value / static_cast<T>(Scale);
+        } else {
+            return value;
+        }
+    }
+};
+
+// The lowest stop stands for the -1 Auto sentinel
+struct CloudStyleMap {
+    static int to_tuner(float value) {
+        return value < 0.0f ? -5 : static_cast<int>(std::lround(value * 100.0f));
+    }
+    static float from_tuner(int value) { return value < 0 ? -1.0f : value / 100.0f; }
+};
+
+// The lowest stop stands for the 0 Auto sentinel
+struct DistantDensityMap {
+    static int to_tuner(float value) {
+        return value <= 0.0f ? 20 : static_cast<int>(std::lround(value * 100.0f));
+    }
+    static float from_tuner(int value) { return value <= 20 ? 0.0f : value / 100.0f; }
+};
+
+using PercentMap = ScaledMap<float, 100>;
+using IntegerMap = ScaledMap<int, 1>;
+
+template <auto Var, typename Map>
+const GraphicsSetting& bind_graphics(int min, int max, int step, int scale, TunerFormat format) {
+    static const GraphicsSetting desc{
+        .min = min,
+        .max = max,
+        .defaultValue = Map::to_tuner(Var().getDefaultValue()),
+        .step = step,
+        .read = []() -> int { return Map::to_tuner(Var().getValue()); },
+        .write = [](int value) { Var().setValue(Map::from_tuner(value)); },
+        .cvarName = []() -> const char* { return Var().getName(); },
+        .isModified = []() -> bool {
+            return Map::to_tuner(Var().getValue()) != Map::to_tuner(render::reference_value(Var()));
+        },
+        .scale = scale,
+        .format = format,
+        .reference = []() -> int { return Map::to_tuner(render::reference_value(Var())); },
+    };
+    return desc;
+}
+
 Rml::Element* create_stepped_carousel_root(Rml::Element* parent) {
     auto* doc = parent->GetOwnerDocument();
     auto root = doc->CreateElement("stepped-carousel");
@@ -164,9 +224,100 @@ const GraphicsSetting& GraphicsSetting::of(GraphicsOption option) {
     case GraphicsOption::TextureReplacements:
         return bind<[]() -> auto& { return getSettings().game.enableTextureReplacements; }>(
             0, 1, 0, 1, format_bool);
+    case GraphicsOption::PbrBlend:
+        return bind_graphics<[]() -> auto& { return getSettings().graphics.legacyBlend; },
+            PercentMap>(0, 100, 5, 100, TunerFormat::Percent);
+    case GraphicsOption::ExposureBias:
+        return bind_graphics<[]() -> auto& { return getSettings().graphics.exposureBias; },
+            ScaledMap<float, 10>>(-30, 30, 1, 10, TunerFormat::Ev);
+    case GraphicsOption::LegacyShadowGain:
+        return bind_graphics<[]() -> auto& { return getSettings().graphics.legacyShadowGain; },
+            PercentMap>(0, 200, 5, 100, TunerFormat::Percent);
+    case GraphicsOption::ShadowPagePool:
+        return bind_graphics<[]() -> auto& { return getSettings().graphics.shadowPages; },
+            IntegerMap>(256, 4096, 256, 1, TunerFormat::Integer);
+    case GraphicsOption::ShadowPageBudget:
+        return bind_graphics<[]() -> auto& { return getSettings().graphics.shadowPageBudget; },
+            IntegerMap>(8, 256, 8, 1, TunerFormat::Integer);
+    case GraphicsOption::FogScattering:
+        return bind_graphics<[]() -> auto& { return getSettings().graphics.fogScattering; },
+            PercentMap>(0, 200, 10, 100, TunerFormat::Percent);
+    case GraphicsOption::ShaftStrength:
+        return bind_graphics<[]() -> auto& { return getSettings().graphics.shaftStrength; },
+            PercentMap>(0, 200, 10, 100, TunerFormat::Percent);
+    case GraphicsOption::CloudStyle:
+        return bind_graphics<[]() -> auto& { return getSettings().graphics.cloudStyle; },
+            CloudStyleMap>(-5, 100, 5, 100, TunerFormat::PercentAutoAtMin);
+    case GraphicsOption::CloudShadowStrength:
+        return bind_graphics<[]() -> auto& { return getSettings().graphics.cloudShadowStrength; },
+            PercentMap>(0, 100, 5, 100, TunerFormat::Percent);
+    case GraphicsOption::CloudCoverage:
+        return bind_graphics<[]() -> auto& { return getSettings().graphics.cloudCoverage; },
+            PercentMap>(25, 200, 5, 100, TunerFormat::Percent);
+    case GraphicsOption::CloudDensity:
+        return bind_graphics<[]() -> auto& { return getSettings().graphics.cloudDensity; },
+            PercentMap>(25, 200, 5, 100, TunerFormat::Percent);
+    case GraphicsOption::CloudAltitude:
+        return bind_graphics<[]() -> auto& { return getSettings().graphics.cloudAltitude; },
+            PercentMap>(25, 200, 5, 100, TunerFormat::Percent);
+    case GraphicsOption::CloudWindSpeed:
+        return bind_graphics<[]() -> auto& { return getSettings().graphics.cloudWindSpeed; },
+            PercentMap>(25, 200, 5, 100, TunerFormat::Percent);
+    case GraphicsOption::CloudSilverLining:
+        return bind_graphics<[]() -> auto& { return getSettings().graphics.cloudSilverLining; },
+            PercentMap>(25, 200, 5, 100, TunerFormat::Percent);
+    case GraphicsOption::CloudPowder:
+        return bind_graphics<[]() -> auto& { return getSettings().graphics.cloudPowder; },
+            PercentMap>(25, 200, 5, 100, TunerFormat::Percent);
+    case GraphicsOption::GrassDistance:
+        return bind_graphics<[]() -> auto& { return getSettings().graphics.grassDistanceM; },
+            IntegerMap>(0, 256, 8, 1, TunerFormat::MetresAutoAtMin);
+    case GraphicsOption::GrassDensity:
+        return bind_graphics<[]() -> auto& { return getSettings().graphics.grassDensity; },
+            PercentMap>(25, 200, 5, 100, TunerFormat::Percent);
+    case GraphicsOption::GrassDistantDensity:
+        return bind_graphics<[]() -> auto& { return getSettings().graphics.grassDistantDensity; },
+            DistantDensityMap>(20, 50, 5, 100, TunerFormat::PercentAutoAtMin);
+    case GraphicsOption::GrassWind:
+        return bind_graphics<[]() -> auto& { return getSettings().graphics.grassWind; },
+            PercentMap>(0, 200, 10, 100, TunerFormat::Percent);
+    case GraphicsOption::TerrainStrength:
+        return bind_graphics<[]() -> auto& { return getSettings().graphics.terrainStrength; },
+            PercentMap>(0, 200, 10, 100, TunerFormat::Percent);
+    case GraphicsOption::TerrainDistance:
+        return bind_graphics<[]() -> auto& { return getSettings().graphics.terrainDistanceM; },
+            IntegerMap>(0, 200, 10, 1, TunerFormat::MetresAutoAtMin);
+    case GraphicsOption::TaaSharpness:
+        return bind_graphics<[]() -> auto& { return getSettings().graphics.taaSharpness; },
+            PercentMap>(0, 100, 5, 100, TunerFormat::Percent);
+    case GraphicsOption::DebugView:
+        return bind_graphics<[]() -> auto& { return getSettings().graphics.debugView; },
+            IntegerMap>(0, 63, 1, 1, TunerFormat::ViewAutoAtMin);
     }
     DuskLog.error("{} is an invalid GraphicsOption", static_cast<int>(option));
     abort();
+}
+
+Rml::String GraphicsSetting::format_value(int value) const {
+    if (label != nullptr) {
+        return label(value);
+    }
+    switch (format) {
+    case TunerFormat::Percent:
+        return format_percent(value);
+    case TunerFormat::PercentAutoAtMin:
+        return value == min ? "Auto" : format_percent(value);
+    case TunerFormat::MetresAutoAtMin:
+        return value == min ? "Auto" : fmt::format("{} m", value);
+    case TunerFormat::Ev:
+        return fmt::format("{:+.1f} EV", value / static_cast<double>(scale));
+    case TunerFormat::ViewAutoAtMin:
+        return value == min ? "Off" : fmt::format("View {}", value);
+    case TunerFormat::Integer:
+    case TunerFormat::Custom:
+        break;
+    }
+    return fmt::format("{}", value);
 }
 
 SteppedCarousel::SteppedCarousel(Rml::Element* parent, Props props)
@@ -256,7 +407,7 @@ GraphicsTuner::GraphicsTuner(GraphicsTunerProps props)
                 .step = mSetting.step,
                 .getValue = [this] { return mSetting.read(); },
                 .onChange = [this](int value) { mSetting.set(value); },
-                .formatValue = [this](int value) { return mSetting.label(value); },
+                .formatValue = [this](int value) { return mSetting.format_value(value); },
             });
     }
 
@@ -264,8 +415,10 @@ GraphicsTuner::GraphicsTuner(GraphicsTunerProps props)
         auto& returnButton = add_component<Button>(footer, "\xE2\x86\x90 Return", "footer-button")
                                  .on_pressed([this] { pop(); });
         returnButton.root()->SetClass("return", true);
+        const Rml::String resetLabel =
+            mSetting.reference != nullptr ? "Reset to preset" : "Reset to default";
         auto& resetButton =
-            add_component<Button>(footer, "Reset to default", "footer-button").on_pressed([this] {
+            add_component<Button>(footer, resetLabel, "footer-button").on_pressed([this] {
                 mDoAud_seStartMenu(kSoundItemChange);
                 reset_default();
             });
@@ -359,7 +512,7 @@ bool GraphicsTuner::handle_nav_command(Rml::Event& event, NavCommand cmd) {
 }
 
 void GraphicsTuner::reset_default() {
-    mSetting.set(mSetting.defaultValue);
+    mSetting.set(mSetting.referenceValue());
 }
 
 }  // namespace dusk::ui
