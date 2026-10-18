@@ -25,6 +25,10 @@
 #include "dusk/logging.h"
 #endif
 
+#if TARGET_PC
+#include "dusk/render/model_registry.hpp"
+#endif
+
 dRes_info_c::dRes_info_c() {
     mCount = 0;
     mDMCommand = NULL;
@@ -532,6 +536,11 @@ int dRes_info_c::loadResource() {
                     res = dBgWKCol::initKCollision(res);
                 }
 
+#if TARGET_PC
+                if (res != NULL && dusk::render::is_model_resource(nodeType)) {
+                    dusk::render::on_model_loaded(static_cast<J3DModelData*>(res), mArchiveName);
+                }
+#endif
                 JUT_ASSERT(1092, fileIndex < countFile);
                 mRes[fileIndex] = res;
             }

@@ -10,6 +10,10 @@
 #include "JSystem/J3DGraphAnimator/J3DModel.h"
 #include "JSystem/J3DGraphBase/J3DMaterial.h"
 
+#if TARGET_PC
+#include "dusk/render/model_registry.hpp"
+#endif
+
 void J3DModelData::clear() {
     mpRawData = 0;
     mFlags = 0;
@@ -19,6 +23,9 @@ void J3DModelData::clear() {
 
 J3DModelData::J3DModelData() {
     clear();
+#if TARGET_PC
+    dusk::render::on_model_data_created(this);
+#endif
 }
 
 s32 J3DModelData::newSharedDisplayList(u32 mdlFlags) {

@@ -7,6 +7,8 @@
 #include "dusk/logging.h"
 #include "dusk/main.h"
 #include "dusk/render/draw_tags.hpp"
+#include "dusk/render/material_tags.hpp"
+#include "dusk/render/model_registry.hpp"
 #include "dusk/render/render_bridge.hpp"
 #include "dusk/render/render_settings.hpp"
 #include "dusk/settings.h"
@@ -41,6 +43,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <charconv>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
@@ -488,6 +491,8 @@ static constexpr const char* kRenderPresetUsage =
     "Usage: render.preset [original|low|medium|high|ultra|recommended|reset]";
 static constexpr const char* kRenderGraphDumpFile = "render_graph.json";
 static constexpr const char* kRenderHintsUsage = "Usage: render.hints [reset|ids]";
+static constexpr const char* kRenderObjectsUsage = "Usage: render.objects [log <frames>]";
+static constexpr const char* kRenderTagsUsage = "Usage: render.tags [pending on|off]";
 
 static const char* YesNo(bool value) {
     return value ? "yes" : "no";
@@ -588,6 +593,8 @@ static void RunRenderSelfTest(
     ui::graphics_tab_self_test(report);
     render::hints_self_test(report);
     render::draw_tags_self_test(report);
+    render::registry_self_test(report);
+    render::material_tags_self_test(report);
     for (const auto& failure : report.failed) {
         TraceError(state, output, "FAIL " + failure);
     }
@@ -709,6 +716,50 @@ static void RunRenderHints(
         TraceReply(state, output, "hints: counters reset at the next painter frame");
     } else {
         TraceError(state, output, kRenderHintsUsage);
+    }
+}
+
+static void RunRenderObjects(
+    const std::vector<std::string>& args, CommandState& state, const CommandOutput& output) {
+    if (args.size() == 1) {
+        for (const auto& line : render::registry_report()) {
+            TraceReply(state, output, line);
+        }
+        for (const auto& line : render::tag_report()) {
+            TraceReply(state, output, line);
+        }
+        return;
+    }
+    uint32_t frames = 0;
+    const std::string_view count = args.size() == 3 ? std::string_view{args[2]} : "";
+    const auto [end, error] = std::from_chars(count.data(), count.data() + count.size(), frames);
+    if (args.size() != 3 || args[1] != "log" || error != std::errc{} ||
+        end != count.data() + count.size())
+    {
+        TraceError(state, output, kRenderObjectsUsage);
+        return;
+    }
+    render::set_object_log(frames);
+    TraceReply(state, output,
+        fmt::format(
+            FMT_STRING("render.objects: logging until frame {}"), render::object_log_until()));
+}
+
+static void RunRenderTags(
+    const std::vector<std::string>& args, CommandState& state, const CommandOutput& output) {
+    if (args.size() == 3 && args[1] == "pending" && (args[2] == "on" || args[2] == "off")) {
+        render::set_pending_tags_enabled(args[2] == "on");
+    } else if (args.size() != 1) {
+        TraceError(state, output, kRenderTagsUsage);
+        return;
+    }
+    TraceReply(state, output,
+        fmt::format(
+            FMT_STRING("pending review tags: {}"), render::pending_tags_enabled() ? "on" : "off"));
+    if (args.size() == 1) {
+        for (const auto& line : render::material_tag_report()) {
+            TraceReply(state, output, line);
+        }
     }
 }
 
@@ -1405,6 +1456,16 @@ void runCommand(std::string_view cmdLine, CommandState& state, const CommandOutp
         return;
     }
 
+    if (cmd == "render.objects") {
+        RunRenderObjects(args, state, output);
+        return;
+    }
+
+    if (cmd == "render.tags") {
+        RunRenderTags(args, state, output);
+        return;
+    }
+
     if (cmd == "help") {
         output("@<ref>  =  @<procId> | @found | @link");
         output("");
@@ -1430,12 +1491,16 @@ void runCommand(std::string_view cmdLine, CommandState& state, const CommandOutp
         output(
             "render.graph.dump [file]                    Write the compiled render graph as JSON");
         output("render.hints [reset|ids]                    Render hint counts per painter frame");
+        output("render.objects [log <frames>]               Renderer objects and scopes for the "
+               "last frame");
         output("render.preset <name|recommended|reset>      Apply or show the graphics preset");
         output("render.selftest                             Check the renderer bridge and Graphics "
                "tab tables");
         output("render.set <graphics.key> <value>           Override a graphics setting until "
                "restart");
         output("render.settings [all] | render.features     Renderer settings and feature support");
+        output("render.tags [pending on|off]                Tagged materials; toggle pending "
+               "review tags");
         output("render.trace [-f] <frames> [file]           Capture N frames to a GX trace file");
         output("render.trace stop | status                  Stop or query the trace capture");
         output("reset                                       Soft reset");

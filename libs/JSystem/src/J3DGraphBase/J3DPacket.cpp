@@ -12,6 +12,7 @@
 
 #if TARGET_PC
 #include <tracy/Tracy.hpp>
+#include "dusk/render/model_registry.hpp"
 #endif
 
 J3DError J3DDisplayListObj::newDisplayList(u32 maxSize) {
@@ -380,6 +381,9 @@ void J3DShapePacket::prepareDraw() const {
 
 void J3DShapePacket::draw() {
     if (!checkFlag(J3DShpFlag_Hidden) && mpShape != NULL) {
+#if TARGET_PC
+        const dusk::render::ShapeObject renderObject(this);
+#endif
         prepareDraw();
 
         if (mpTexMtxObj != NULL) {
@@ -400,6 +404,9 @@ void J3DShapePacket::draw() {
 void J3DShapePacket::drawFast() {
     ZoneScoped;
     if (!checkFlag(J3DShpFlag_Hidden) && mpShape != NULL) {
+#if TARGET_PC
+        const dusk::render::ShapeObject renderObject(this);
+#endif
         prepareDraw();
 
         if (mpTexMtxObj != NULL) {

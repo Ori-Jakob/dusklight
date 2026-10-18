@@ -13,6 +13,7 @@
 #include "dusk/interp/frame_interpolation.h"
 #include "dusk/interp/material.h"
 #include "dusk/interp/vertex.h"
+#include "dusk/render/model_registry.hpp"
 #endif
 
 #define J3D_ASSERTMSG(LINE, COND, MSG) JUT_ASSERT_MSG(LINE, (COND) != 0, MSG)
@@ -41,6 +42,9 @@ void J3DModel::initialize() {
     mVtxColorCalc = NULL;
     mUnkCalc1 = NULL;
     mUnkCalc2 = NULL;
+#if TARGET_PC
+    dusk::render::on_model_initialized(this);
+#endif
 }
 
 s32 J3DModel::entryModelData(J3DModelData* pModelData, u32 mdlFlags, u32 mtxNum) {

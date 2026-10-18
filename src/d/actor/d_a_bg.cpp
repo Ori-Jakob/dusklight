@@ -18,6 +18,10 @@
 #include "JSystem/J3DGraphAnimator/J3DMaterialAnm.h"
 #include <cstring>
 
+#if TARGET_PC
+#include "dusk/render/model_registry.hpp"
+#endif
+
 const char* daBg_c::setArcName() {
     static char arcName[32];
 
@@ -197,6 +201,9 @@ int daBg_c::createHeap() {
             if (bgPart->model == NULL) {
                 return 0;
             }
+#if TARGET_PC
+            dusk::render::declare_room_model(bgPart->model, roomNo, i);
+#endif
 
             bgPart->tevstr = JKR_NEW dKy_tevstr_c();
             if (bgPart->tevstr == NULL) {
