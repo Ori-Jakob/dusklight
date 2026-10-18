@@ -1561,7 +1561,10 @@ set(DUSK_FILES
         src/dusk/mouse.cpp
         src/dusk/presentation.cpp
         src/dusk/presentation.hpp
+        src/dusk/render/draw_tags.cpp
+        src/dusk/render/draw_tags.hpp
         src/dusk/render/graphics_fields.inl
+        src/dusk/render/hints.hpp
         src/dusk/render/render_bridge.cpp
         src/dusk/render/render_bridge.hpp
         src/dusk/render/render_settings.cpp

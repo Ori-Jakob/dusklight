@@ -52,6 +52,7 @@
 #include "dusk/imgui/ImGuiConsole.hpp"
 #include "dusk/interp/frame_interpolation.h"
 #include "dusk/logging.h"
+#include "dusk/render/draw_tags.hpp"
 #include "dusk/render/render_bridge.hpp"
 #include "dusk/settings.h"
 #include "helpers/endian.h"
@@ -2187,6 +2188,7 @@ int mDoGph_Painter() {
 #if TARGET_PC
     dusk::g_imguiConsole.PreDraw();
     dusk::render::present();
+    dusk::render::begin_painter();
 #endif
 
     #if DEBUG
@@ -2316,6 +2318,10 @@ int mDoGph_Painter() {
             captureScreenSetProjection(camera_p->view.projMtx);
             #endif
 
+#if TARGET_PC
+            dusk::render::submit_main_camera(
+                *camera_p, j3dSys.getViewMtx(), camera_p->view.projMtx);
+#endif
             PPCSync();
 
 #ifndef TARGET_PC
@@ -2327,12 +2333,19 @@ int mDoGph_Painter() {
                 dKy_setLight_again();
             }
 #endif
+#if TARGET_PC
+            dusk::render::begin_tag_scope(dusk::render::TagScope::Sky);
+#endif
             GX_DEBUG_GROUP(dComIfGd_drawOpaListSky);
             GX_DEBUG_GROUP(dComIfGd_drawXluListSky);
+#if TARGET_PC
+            dusk::render::end_tag_scope(dusk::render::TagScope::Sky);
+#endif
 
             GXSetClipMode(GX_CLIP_ENABLE);
 
 #if TARGET_PC
+            dusk::render::mark_stage(aurora::render::Stage::SceneBegin);
             dusk::mods::gfx_run_stage(GFX_STAGE_SCENE_BEGIN, &camera_p->view, view_port);
 #endif
 
@@ -2394,6 +2407,7 @@ int mDoGph_Painter() {
             GX_DEBUG_GROUP(dComIfGd_drawOpaListPacket);
 
 #if TARGET_PC
+            dusk::render::mark_stage(aurora::render::Stage::OpaqueDone);
             dusk::mods::gfx_run_stage(GFX_STAGE_SCENE_AFTER_OPAQUE, &camera_p->view, view_port);
 #endif
 
@@ -2446,6 +2460,9 @@ int mDoGph_Painter() {
             }
 #endif
 
+#if TARGET_PC
+            dusk::render::mark_stage(aurora::render::Stage::PrePost);
+#endif
             if (!dComIfGp_isPauseFlag()) {
                 #if DEBUG
                 fapGm_HIO_c::startCpuTimer();
@@ -2471,6 +2488,9 @@ int mDoGph_Painter() {
                 fapGm_HIO_c::startCpuTimer();
                 #endif
 
+#if TARGET_PC
+                dusk::render::begin_tag_scope(dusk::render::TagScope::ScreenRead);
+#endif
                 if (!(DEBUG && g_kankyoHIO.navy.field_0x30d != 0 &&
                       dKy_darkworld_check() == TRUE)) {
                     if (g_env_light.is_blure == 0) {
@@ -2487,6 +2507,9 @@ int mDoGph_Painter() {
                 fapGm_HIO_c::startCpuTimer();
                 #endif
 
+#if TARGET_PC
+                dusk::render::end_tag_scope(dusk::render::TagScope::ScreenRead);
+#endif
                 if (fapGmHIO_getParticle()) {
                     GX_DEBUG_GROUP(dComIfGp_particle_drawFogPri4, &draw_info);
                     GX_DEBUG_GROUP(dComIfGp_particle_drawProjection, &draw_info);
@@ -2510,6 +2533,9 @@ int mDoGph_Painter() {
 
                 GXSetClipMode(GX_CLIP_ENABLE);
 
+#if TARGET_PC
+                dusk::render::begin_tag_scope(dusk::render::TagScope::ScreenRead);
+#endif
                 if (DEBUG && g_kankyoHIO.navy.field_0x30d) {
                     if (dKy_darkworld_check() != TRUE) {
                         GX_DEBUG_GROUP(dComIfGd_drawOpaListFilter);
@@ -2525,6 +2551,9 @@ int mDoGph_Painter() {
                 fapGm_HIO_c::startCpuTimer();
                 #endif
 
+#if TARGET_PC
+                dusk::render::end_tag_scope(dusk::render::TagScope::ScreenRead);
+#endif
                 GXSetClipMode(GX_CLIP_ENABLE);
 
                 if (fapGmHIO_getParticle()) {
@@ -2555,6 +2584,9 @@ int mDoGph_Painter() {
 
                 GXSetClipMode(GX_CLIP_ENABLE);
 
+#if TARGET_PC
+                dusk::render::begin_tag_scope(dusk::render::TagScope::ScreenRead);
+#endif
                 if (!(DEBUG && g_kankyoHIO.navy.field_0x30d != 0 &&
                       dKy_darkworld_check() == TRUE)) {
                     if (g_env_light.is_blure == 1) {
@@ -2562,6 +2594,9 @@ int mDoGph_Painter() {
                         GX_DEBUG_GROUP(dComIfGd_drawXluListInvisible);
                     }
                 }
+#if TARGET_PC
+                dusk::render::end_tag_scope(dusk::render::TagScope::ScreenRead);
+#endif
 
                 if (fapGmHIO_getParticle()) {
                     GX_DEBUG_GROUP(dComIfGp_particle_drawScreen, &draw_info);
@@ -2600,7 +2635,13 @@ int mDoGph_Painter() {
 
                 cMtx_lookAt(m2, &sp38c, &cXyz::Zero, &sp398, 0);
                 j3dSys.setViewMtx(m2);
+#if TARGET_PC
+                dusk::render::begin_tag_scope(dusk::render::TagScope::Ui);
+#endif
                 GX_DEBUG_GROUP(dComIfGd_drawXluList2DScreen);
+#if TARGET_PC
+                dusk::render::end_tag_scope(dusk::render::TagScope::Ui);
+#endif
 
                 j3dSys.setViewMtx(camera_p->view.viewMtx);
                 GXSetProjection(camera_p->view.projMtx, GX_PERSPECTIVE);
@@ -2656,6 +2697,9 @@ int mDoGph_Painter() {
                 fapGm_HIO_c::startCpuTimer();
                 #endif
 
+#if TARGET_PC
+                dusk::render::mark_stage(aurora::render::Stage::SceneEnd);
+#endif
                 if (fapGmHIO_getParticle()) {
                     #if WIDESCREEN_SUPPORT
                     if (mDoGph_gInf_c::isWideZoom()) {
@@ -2688,6 +2732,9 @@ int mDoGph_Painter() {
                 fapGm_HIO_c::stopCpuTimer("カラーフェード描画（レンダリング）");
                 #endif
             }
+#if TARGET_PC
+            dusk::render::end_scene();
+#endif
         }
     }
 
@@ -2758,6 +2805,7 @@ int mDoGph_Painter() {
     #endif
 
 #if TARGET_PC
+    dusk::render::mark_stage(aurora::render::Stage::BeforeHud);
     dusk::mods::gfx_run_stage(GFX_STAGE_FRAME_BEFORE_HUD);
 #endif
 
@@ -2820,6 +2868,7 @@ int mDoGph_Painter() {
 
 #if TARGET_PC
     dusk::mods::gfx_run_stage(GFX_STAGE_FRAME_AFTER_HUD);
+    dusk::render::mark_stage(aurora::render::Stage::FrameEnd);
 #endif
 
     #if DEBUG

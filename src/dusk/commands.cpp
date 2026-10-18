@@ -6,6 +6,7 @@
 #include "dusk/input_replay.hpp"
 #include "dusk/logging.h"
 #include "dusk/main.h"
+#include "dusk/render/draw_tags.hpp"
 #include "dusk/render/render_bridge.hpp"
 #include "dusk/render/render_settings.hpp"
 #include "dusk/settings.h"
@@ -486,6 +487,7 @@ static constexpr const char* kRenderGraphDumpUsage = "Usage: render.graph.dump [
 static constexpr const char* kRenderPresetUsage =
     "Usage: render.preset [original|low|medium|high|ultra|recommended|reset]";
 static constexpr const char* kRenderGraphDumpFile = "render_graph.json";
+static constexpr const char* kRenderHintsUsage = "Usage: render.hints [reset|ids]";
 
 static const char* YesNo(bool value) {
     return value ? "yes" : "no";
@@ -584,6 +586,8 @@ static void RunRenderSelfTest(
     render::bridge_self_test(report);
     render::settings_self_test(report);
     ui::graphics_tab_self_test(report);
+    render::hints_self_test(report);
+    render::draw_tags_self_test(report);
     for (const auto& failure : report.failed) {
         TraceError(state, output, "FAIL " + failure);
     }
@@ -682,6 +686,30 @@ static void RunRenderGraphDump(
         return;
     }
     TraceReply(state, output, fmt::format(FMT_STRING("Wrote {}"), pathString));
+}
+
+static void RunRenderHints(
+    const std::vector<std::string>& args, CommandState& state, const CommandOutput& output) {
+    if (args.size() > 2) {
+        TraceError(state, output, kRenderHintsUsage);
+        return;
+    }
+    if (args.size() == 1) {
+        for (const auto& line : render::describe_hints()) {
+            TraceReply(state, output, line);
+        }
+        return;
+    }
+    if (args[1] == "ids") {
+        for (const auto& line : render::describe_hint_ids()) {
+            TraceReply(state, output, line);
+        }
+    } else if (args[1] == "reset") {
+        render::reset_hint_stats();
+        TraceReply(state, output, "hints: counters reset at the next painter frame");
+    } else {
+        TraceError(state, output, kRenderHintsUsage);
+    }
 }
 
 }  // namespace
@@ -1372,6 +1400,11 @@ void runCommand(std::string_view cmdLine, CommandState& state, const CommandOutp
         return;
     }
 
+    if (cmd == "render.hints") {
+        RunRenderHints(args, state, output);
+        return;
+    }
+
     if (cmd == "help") {
         output("@<ref>  =  @<procId> | @found | @link");
         output("");
@@ -1396,6 +1429,7 @@ void runCommand(std::string_view cmdLine, CommandState& state, const CommandOutp
         output("rate [hz]                                   Get or set sim rate (1-480, default 30)");
         output(
             "render.graph.dump [file]                    Write the compiled render graph as JSON");
+        output("render.hints [reset|ids]                    Render hint counts per painter frame");
         output("render.preset <name|recommended|reset>      Apply or show the graphics preset");
         output("render.selftest                             Check the renderer bridge and Graphics "
                "tab tables");

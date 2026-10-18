@@ -57,6 +57,17 @@ void DrawStatus() {
     }
 }
 
+void DrawHints() {
+    ImGui::SeparatorText("Hints");
+    for (const auto& line : render::describe_hints()) {
+        ShowText(line);
+    }
+    // Applied by the next painter, so pressing it mid-frame cannot split a frame's counts
+    if (ImGui::Button("Reset Hint Counters")) {
+        render::reset_hint_stats();
+    }
+}
+
 void DrawFeatures() {
     const auto features = render::all_features();
     size_t supported = 0;
@@ -145,6 +156,8 @@ void DrawRenderDebugWindow(bool& open) {
     }
     if (ImGui::CollapsingHeader("Dusklight", ImGuiTreeNodeFlags_DefaultOpen)) {
         DrawStatus();
+        ImGui::Spacing();
+        DrawHints();
         ImGui::Spacing();
         DrawFeatures();
         ImGui::Spacing();
