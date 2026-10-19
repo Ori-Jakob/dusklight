@@ -13,6 +13,7 @@
 #include "dusk/interp/frame_interpolation.h"
 #include "dusk/interp/material.h"
 #include "dusk/interp/vertex.h"
+#include "dusk/render/camera_cuts.hpp"
 #include "dusk/render/model_registry.hpp"
 #endif
 
@@ -131,6 +132,7 @@ void J3DModel::setAnmMtx(int jointNo, Mtx m) {
 }
 
 void J3DModel::forgetMtx() {
+    dusk::render::note_teleport(this);
     dusk::interp::vertex::reset(&mVertexBuffer);
     dusk::interp::forget_mtx(mPresentationBase);
     for (u16 i = 0; i < mModelData->getJointNum(); ++i) {

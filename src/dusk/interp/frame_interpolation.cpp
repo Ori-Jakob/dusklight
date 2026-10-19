@@ -6,6 +6,7 @@
 #include "dusk/interp/particle.h"
 #include "dusk/interp/samples.h"
 #include "dusk/interp/vertex.h"
+#include "dusk/render/camera_cuts.hpp"
 
 #include "mtx.h"
 
@@ -182,6 +183,7 @@ void end_record() {
 }
 
 void request_presentation_sync() {
+    dusk::render::note_camera_cut(dusk::render::CutSource::PresentationSync);
     if (!is_enabled()) {
         return;
     }

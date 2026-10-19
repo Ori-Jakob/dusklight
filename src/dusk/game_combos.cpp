@@ -4,6 +4,7 @@
 #include "SSystem/SComponent/c_xyz.h"
 #include "d/actor/d_a_alink.h"
 #include "d/d_com_inf_game.h"
+#include "dusk/render/camera_cuts.hpp"
 #include "dusk/settings.h"
 #include "m_Do/m_Do_controller_pad.h"
 
@@ -84,6 +85,7 @@ static const GameCombo kCombos[] = {
             p->current.pos = s_savedTeleportPos;
             p->shape_angle.y = s_savedTeleportAngle;
             p->mNormalSpeed = 0.0f;
+            render::note_camera_cut(render::CutSource::Warp);
         },
         PAD_BUTTON_DOWN,
         true,

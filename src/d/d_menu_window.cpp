@@ -28,6 +28,7 @@
 
 #if TARGET_PC
 #include "dusk/interp/frame_interpolation.h"
+#include "dusk/render/camera_cuts.hpp"
 #endif
 
 class dDlst_MENU_CAPTURE_c : public dDlst_base_c {
@@ -126,6 +127,7 @@ public:
     void setCaptureFlag() {
         mFlag = 1;
     #ifdef TARGET_PC
+        const dusk::render::ScopedCutSuppression heldBackground;
         dusk::interp::request_presentation_sync();
     #endif
     }

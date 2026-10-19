@@ -3,6 +3,7 @@
 #include "d/d_com_inf_game.h"
 #include "dusk/config.hpp"
 #include "dusk/logging.h"
+#include "dusk/render/camera_cuts.hpp"
 #include "dusk/render/draw_tags.hpp"
 #include "dusk/render/graphics_fields.inl"
 #include "dusk/render/hints.hpp"
@@ -615,12 +616,14 @@ constexpr uint8_t stage_bit(ar::Stage stage) noexcept {
 }
 constexpr uint8_t kAllMarkerBits = 0x3F;
 constexpr uint8_t kHudOnlyBits = stage_bit(ar::Stage::BeforeHud) | stage_bit(ar::Stage::FrameEnd);
-constexpr uint32_t kSingleCutEpoch = 1;
 constexpr uint16_t kFirstHintId = GX_AURORA_HINT_FIRST;
 constexpr uint16_t kLastHintId = GX_AURORA_HINT_LAST;
 constexpr size_t kHintIdCount = kLastHintId - kFirstHintId + 1;
-constexpr std::array<uint16_t, 4> kPainterHintIds{GX_AURORA_RENDER_CAMERA, GX_AURORA_RENDER_STAGE,
-    GX_AURORA_RENDER_SCOPE_PUSH, GX_AURORA_RENDER_SCOPE_POP};
+constexpr std::array<uint16_t, 5> kPainterHintIds{GX_AURORA_RENDER_CAMERA, GX_AURORA_RENDER_STAGE,
+    GX_AURORA_RENDER_SCOPE_PUSH, GX_AURORA_RENDER_SCOPE_POP, GX_AURORA_RENDER_SCENE_EPOCH};
+// aurora counts header and version bytes too, so the byte check needs the whole hint
+constexpr uint64_t kSceneEpochHintBytes = GX_AURORA_HINT_HEADER_SIZE + sizeof(u16) + sizeof(u32);
+static_assert(kSceneEpochHintBytes == 13);
 
 enum class FramePattern : u8 { Scene, HudOnly, Other };
 
@@ -1054,6 +1057,7 @@ std::string test_aurora_agrees() {
     const ar::HintCounters stage = hint_delta(GX_AURORA_RENDER_STAGE);
     const ar::HintCounters push = hint_delta(GX_AURORA_RENDER_SCOPE_PUSH);
     const ar::HintCounters pop = hint_delta(GX_AURORA_RENDER_SCOPE_POP);
+    const ar::HintCounters epoch = hint_delta(GX_AURORA_RENDER_SCENE_EPOCH);
     if (camera.decoded != s_hintStats.mainCameraHints) {
         append_item(problems, fmt::format("aurora decoded {} cameras, dusk sent {}", camera.decoded,
                                   s_hintStats.mainCameraHints));
@@ -1065,6 +1069,11 @@ std::string test_aurora_agrees() {
     if (push.decoded != pop.decoded) {
         append_item(problems,
             fmt::format("aurora decoded {} scope pushes, {} pops", push.decoded, pop.decoded));
+    }
+    const bool epochBytes = epoch.bytes == epoch.decoded * kSceneEpochHintBytes;
+    if (epoch.decoded != s_hintStats.frames || !epochBytes) {
+        append_item(problems, fmt::format("aurora decoded {} scene epochs ({} bytes), dusk sent {}",
+                                  epoch.decoded, epoch.bytes, s_hintStats.frames));
     }
     for (const uint16_t id : kPainterHintIds) {
         const ar::HintCounters counters = hint_delta(id);
@@ -1089,6 +1098,7 @@ void begin_painter() {
     // The previous frame has drained by now, so the baselines line up with the zeroed stats
     if (s_resetRequested) {
         s_hintStats = {};
+        reset_cut_stats();
         for (size_t i = 0; i < kHintIdCount; ++i) {
             s_baseline[i] = ar::hint_counters(static_cast<uint16_t>(kFirstHintId + i));
         }
@@ -1099,19 +1109,29 @@ void begin_painter() {
     s_pausedAtPrePost = false;
     s_painterFrame = aurora::gfx::current_frame();
     s_painterOpen = s_hintsOn;
+    begin_cut_frame();
+    const uint32_t sceneEpoch = advance_scene_epoch();
+    if (s_hintsOn) {
+        GXAuroraSetSceneEpoch(sceneEpoch);
+    }
+    apply_teleport_stamps();
 }
 
 void submit_main_camera(const camera_process_class& camera, const Mtx view, const Mtx44 proj) {
     if (!s_hintsOn) {
+        // The cut trackers run with hints off too, so their counts never depend on the switch
+        advance_cut_epoch(camera);
         return;
     }
     note_open_scopes(std::nullopt);
+    // A refused camera sends nothing, so its cuts wait for the next camera that is sent
     if (!s_frame.accept_main_camera()) {
         refuse(std::nullopt);
         return;
     }
-    GXAuroraSetCamera(AURORA_CAMERA_MAIN, view, proj, GX_PERSPECTIVE, kSingleCutEpoch);
-    s_cutEpoch = kSingleCutEpoch;
+    const uint32_t epoch = advance_cut_epoch(camera);
+    GXAuroraSetCamera(AURORA_CAMERA_MAIN, view, proj, GX_PERSPECTIVE, epoch);
+    s_cutEpoch = epoch;
     s_lastEye = camera.view.lookat.eye;
     s_lastFovy = camera.view.fovy;
     ++s_hintStats.mainCameraHints;
@@ -1173,15 +1193,19 @@ std::vector<std::string> describe_hints() {
         malformed += counters.malformed;
         late += counters.late;
     }
-    lines.push_back(fmt::format(
-        "hints: aurora decoded camera {}, stage {}, scope push {} pop {}; malformed {}, late {}",
+    lines.push_back(fmt::format("hints: aurora decoded camera {}, stage {}, scope push {} pop {}, "
+                                "scene epoch {}; malformed {}, late {}",
         hint_delta(GX_AURORA_RENDER_CAMERA).decoded, hint_delta(GX_AURORA_RENDER_STAGE).decoded,
         hint_delta(GX_AURORA_RENDER_SCOPE_PUSH).decoded,
-        hint_delta(GX_AURORA_RENDER_SCOPE_POP).decoded, malformed, late));
+        hint_delta(GX_AURORA_RENDER_SCOPE_POP).decoded,
+        hint_delta(GX_AURORA_RENDER_SCENE_EPOCH).decoded, malformed, late));
 
     const TagStats tags = last_tag_stats();
     lines.push_back(fmt::format(
         "tags: last frame {} {}, open {}", tags.frame, tag_count_text(tags), open_tag_scopes()));
+    for (std::string& line : describe_cuts()) {
+        lines.push_back(std::move(line));
+    }
     return lines;
 }
 
@@ -1220,9 +1244,13 @@ void hints_self_test(SelfTestReport& report) {
     check("hints.other_patterns", test_other_patterns());
     check("hints.open_at_marker", test_open_at_marker());
 
-    const char* liveSkip = !s_hintsOn              ? "hints are off" :
-                           s_hintStats.frames == 0 ? "no painter frame since the last reset" :
-                                                     nullptr;
+    // The gate is latched by the first painter, so until then only aurora knows if hints are on
+    const char* liveSkip = nullptr;
+    if (!ar::hints_enabled()) {
+        liveSkip = "hints are off";
+    } else if (!s_hintsOn || s_hintStats.frames == 0) {
+        liveSkip = "no painter frame since boot or the last reset";
+    }
     if (liveSkip != nullptr) {
         report.skipped.push_back(fmt::format("hints.live_frames: {}", liveSkip));
         report.skipped.push_back(fmt::format("hints.aurora_agrees: {}", liveSkip));

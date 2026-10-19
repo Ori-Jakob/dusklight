@@ -5,6 +5,7 @@
 #if TARGET_PC
 #include "dusk/audio.h"
 #include "dusk/interp/frame_interpolation.h"
+#include "dusk/render/camera_cuts.hpp"
 #include "dusk/settings.h"
 #endif
 
@@ -655,6 +656,14 @@ value_or_fun:
 
 value:
 #if TARGET_PC
+    // The block below tests the same operations, but only while interpolation is on
+    if (u <= 5 &&
+        (operation == data::UNK_0x2 || operation == data::UNK_0x3 || operation == data::UNK_0x12))
+    {
+        dusk::render::note_camera_cut(dusk::render::CutSource::PresentationSync);
+    }
+#endif
+#if TARGET_PC
     if (dusk::interp::is_enabled() && u <= 5 &&
         (operation == data::UNK_0x2 || operation == data::UNK_0x3 || operation == data::UNK_0x12))
     {
@@ -665,6 +674,14 @@ value:
     return;
 
 value_n:
+#if TARGET_PC
+    if ((pN == TAdaptor_camera::sauVariableValue_3_POSITION_XYZ ||
+            pN == TAdaptor_camera::sauVariableValue_3_TARGET_POSITION_XYZ) &&
+        (operation == data::UNK_0x2 || operation == data::UNK_0x3 || operation == data::UNK_0x12))
+    {
+        dusk::render::note_camera_cut(dusk::render::CutSource::PresentationSync);
+    }
+#endif
 #if TARGET_PC
     if (dusk::interp::is_enabled() &&
         (pN == TAdaptor_camera::sauVariableValue_3_POSITION_XYZ || pN == TAdaptor_camera::sauVariableValue_3_TARGET_POSITION_XYZ) &&

@@ -6,6 +6,7 @@
 #include "dusk/input_replay.hpp"
 #include "dusk/logging.h"
 #include "dusk/main.h"
+#include "dusk/render/camera_cuts.hpp"
 #include "dusk/render/draw_tags.hpp"
 #include "dusk/render/lights.hpp"
 #include "dusk/render/material_tags.hpp"
@@ -184,6 +185,15 @@ static bool TryAngle(
     }
     out = (s16)*a;
     return true;
+}
+
+// A player warp drops every history, while any other actor only needs its own model's
+static void NoteActorMoved(const fopAc_ac_c* actor) {
+    if (actor == dComIfGp_getPlayer(0)) {
+        render::note_camera_cut(render::CutSource::Warp);
+    } else {
+        render::note_teleport(actor->model);
+    }
 }
 
 static std::string actorLine(const base_process_class* proc) {
@@ -598,6 +608,7 @@ static void RunRenderSelfTest(
     render::material_tags_self_test(report);
     render::lights_self_test(report);
     render::environment_self_test(report);
+    render::cuts_self_test(report);
     for (const auto& failure : report.failed) {
         TraceError(state, output, "FAIL " + failure);
     }
@@ -891,6 +902,7 @@ void runCommand(std::string_view cmdLine, CommandState& state, const CommandOutp
                 }
                 const cXyz destPos = destAc->current.pos;
                 ac->current.pos = destPos;
+                NoteActorMoved(ac);
                 output(fmt::format(FMT_STRING("Moved actor {} to ({:.2f}, {:.2f}, {:.2f})"), ac->id,
                     destPos.x, destPos.y, destPos.z));
                 return;
@@ -903,6 +915,7 @@ void runCommand(std::string_view cmdLine, CommandState& state, const CommandOutp
                     return;
                 }
                 ac->current.pos = *pos;
+                NoteActorMoved(ac);
                 if (!TryAngle(ac->shape_angle.y, args, 5, output)) {
                     return;
                 }
@@ -912,6 +925,7 @@ void runCommand(std::string_view cmdLine, CommandState& state, const CommandOutp
             }
 
             player->current.pos = ac->current.pos;
+            render::note_camera_cut(render::CutSource::Warp);
             output(fmt::format(FMT_STRING("Teleported to actor {} ({:.2f}, {:.2f}, {:.2f})"),
                 ac->id, ac->current.pos.x, ac->current.pos.y, ac->current.pos.z));
             return;
@@ -927,6 +941,7 @@ void runCommand(std::string_view cmdLine, CommandState& state, const CommandOutp
             return;
         }
         player->current.pos = *pos;
+        render::note_camera_cut(render::CutSource::Warp);
         if (!TryAngle(player->shape_angle.y, args, 4, output)) {
             return;
         }
@@ -1520,7 +1535,7 @@ void runCommand(std::string_view cmdLine, CommandState& state, const CommandOutp
         output("render.env [show|check|counts|log <n>]      Renderer environment state");
         output(
             "render.graph.dump [file]                    Write the compiled render graph as JSON");
-        output("render.hints [reset|ids]                    Render hint counts per painter frame");
+        output("render.hints [reset|ids]                    Hint counts, camera cuts, scene epoch");
         output("render.lights [list|slots|check|counts]     Renderer scene lights");
         output("render.lights log <n>                       Log the next n light lists");
         output("render.objects [log <frames>]               Renderer objects and scopes for the "

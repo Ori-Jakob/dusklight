@@ -1561,6 +1561,8 @@ set(DUSK_FILES
         src/dusk/mouse.cpp
         src/dusk/presentation.cpp
         src/dusk/presentation.hpp
+        src/dusk/render/camera_cuts.cpp
+        src/dusk/render/camera_cuts.hpp
         src/dusk/render/draw_tags.cpp
         src/dusk/render/draw_tags.hpp
         src/dusk/render/fog_probe.hpp

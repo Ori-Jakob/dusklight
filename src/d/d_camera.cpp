@@ -37,6 +37,7 @@
 #include "dusk/interp/frame_interpolation.h"
 #include "dusk/logging.h"
 #include "dusk/mouse.h"
+#include "dusk/render/camera_cuts.hpp"
 #include "dusk/settings.h"
 #include "dusk/touch_camera.h"
 
@@ -10511,6 +10512,13 @@ bool dCamera_c::eventCamera(s32 param_0) {
 #endif
 
 #if TARGET_PC
+        // The block below tests the same actions, but only while interpolation is on
+        if (var_r29 == 3 || var_r29 == 4 || var_r29 == 5 || var_r29 == 12) {
+            dusk::render::note_camera_cut(dusk::render::CutSource::PresentationSync);
+        }
+#endif
+
+#if TARGET_PC
         if (dusk::interp::is_enabled()) {
             switch (var_r29) {
                 case 3:
@@ -10824,6 +10832,9 @@ int dCamera_c::Set(cXyz i_center, cXyz i_eye, s16 i_bank, f32 i_fovy) {
 }
 
 int dCamera_c::Reset(cXyz i_center, cXyz i_eye, f32 i_fovy, s16 i_bank) {
+#if TARGET_PC
+    dusk::render::note_camera_reset(*this);
+#endif
     mCenter = i_center;
     mEye = i_eye;
     mFovy = i_fovy;
@@ -10832,6 +10843,9 @@ int dCamera_c::Reset(cXyz i_center, cXyz i_eye, f32 i_fovy, s16 i_bank) {
 }
 
 int dCamera_c::Reset(cXyz i_center, cXyz i_eye) {
+#if TARGET_PC
+    dusk::render::note_camera_reset(*this);
+#endif
     mCenter = i_center;
     mEye = i_eye;
     return Reset();
@@ -11542,6 +11556,9 @@ static int camera_draw(camera_process_class* i_this) {
     process->view.viewMtxNoTrans[2][3] = 0.0f;
     cMtx_concatProjView(process->view.projMtx, process->view.viewMtx, process->view.projViewMtx);
 
+#if TARGET_PC
+    dusk::render::latch_camera_cuts(camera_id);
+#endif
     body->Draw();
     return 1;
 }

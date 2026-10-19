@@ -19,6 +19,7 @@
 #include <cstring>
 
 #if TARGET_PC
+#include "dusk/render/camera_cuts.hpp"
 #include "dusk/render/model_registry.hpp"
 #endif
 
@@ -279,6 +280,11 @@ daBg_c::~daBg_c() {
     daGrass_c::deleteRoomGrass(roomNo);
     daGrass_c::deleteRoomFlower(roomNo);
     daSus_c::reset(roomNo);
+#if TARGET_PC
+    if (dComIfGp_roomControl_checkStatusFlag(roomNo, 0x10)) {
+        dusk::render::note_room_geometry(roomNo, false);
+    }
+#endif
     dComIfGp_roomControl_offStatusFlag(roomNo, 0x10);
 }
 
@@ -629,6 +635,9 @@ int daBg_c::create() {
     }
 
     dComIfGp_roomControl_onStatusFlag(roomNo, 0x10);
+#if TARGET_PC
+    dusk::render::note_room_geometry(roomNo, true);
+#endif
     OS_REPORT("<BG> room%d\n", roomNo);
 
     IF_DUSK(draw_interp_frame = true);

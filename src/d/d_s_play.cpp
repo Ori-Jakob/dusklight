@@ -46,6 +46,8 @@
 #include "dusk/trigger_viewer.h"
 #include "dusk/ui/ui.hpp"
 #include "mods/items.h"
+
+#include "dusk/render/camera_cuts.hpp"
 #endif
 
 #if DEBUG
@@ -688,6 +690,10 @@ static int dScnPly_Draw(dScnPly_c* i_this) {
 
         dAttention_c* attention = dComIfGp_getAttention();
         attention->Draw();
+#if TARGET_PC
+        // The cursor forgets its matrices here, after this tick's camera latch
+        dusk::render::latch_teleports();
+#endif
     }
 
     #if DEBUG
