@@ -1565,6 +1565,8 @@ set(DUSK_FILES
         src/dusk/render/draw_tags.hpp
         src/dusk/render/graphics_fields.inl
         src/dusk/render/hints.hpp
+        src/dusk/render/lights.cpp
+        src/dusk/render/lights.hpp
         src/dusk/render/material_tags.cpp
         src/dusk/render/material_tags.hpp
         src/dusk/render/model_registry.cpp

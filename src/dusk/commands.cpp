@@ -7,6 +7,7 @@
 #include "dusk/logging.h"
 #include "dusk/main.h"
 #include "dusk/render/draw_tags.hpp"
+#include "dusk/render/lights.hpp"
 #include "dusk/render/material_tags.hpp"
 #include "dusk/render/model_registry.hpp"
 #include "dusk/render/render_bridge.hpp"
@@ -595,6 +596,7 @@ static void RunRenderSelfTest(
     render::draw_tags_self_test(report);
     render::registry_self_test(report);
     render::material_tags_self_test(report);
+    render::lights_self_test(report);
     for (const auto& failure : report.failed) {
         TraceError(state, output, "FAIL " + failure);
     }
@@ -759,6 +761,19 @@ static void RunRenderTags(
     if (args.size() == 1) {
         for (const auto& line : render::material_tag_report()) {
             TraceReply(state, output, line);
+        }
+    }
+}
+
+static void RunRenderLights(
+    const std::vector<std::string>& args, CommandState& state, const CommandOutput& output) {
+    std::vector<std::string> lines;
+    const bool ok = render::lights_command(std::span(args).subspan(1), lines);
+    for (const auto& line : lines) {
+        if (ok) {
+            TraceReply(state, output, line);
+        } else {
+            TraceError(state, output, line);
         }
     }
 }
@@ -1466,6 +1481,11 @@ void runCommand(std::string_view cmdLine, CommandState& state, const CommandOutp
         return;
     }
 
+    if (cmd == "render.lights") {
+        RunRenderLights(args, state, output);
+        return;
+    }
+
     if (cmd == "help") {
         output("@<ref>  =  @<procId> | @found | @link");
         output("");
@@ -1491,6 +1511,7 @@ void runCommand(std::string_view cmdLine, CommandState& state, const CommandOutp
         output(
             "render.graph.dump [file]                    Write the compiled render graph as JSON");
         output("render.hints [reset|ids]                    Render hint counts per painter frame");
+        output("render.lights [list|slots|check|log <n>]    Renderer scene lights");
         output("render.objects [log <frames>]               Renderer objects and scopes for the "
                "last frame");
         output("render.preset <name|recommended|reset>      Apply or show the graphics preset");

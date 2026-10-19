@@ -53,6 +53,7 @@
 #include "dusk/interp/frame_interpolation.h"
 #include "dusk/logging.h"
 #include "dusk/render/draw_tags.hpp"
+#include "dusk/render/lights.hpp"
 #include "dusk/render/render_bridge.hpp"
 #include "dusk/settings.h"
 #include "helpers/endian.h"
@@ -2338,6 +2339,7 @@ int mDoGph_Painter() {
             if (dusk::interp::is_enabled()) {
                 dKy_setLight_again();
             }
+            dusk::render::submit_lights();
 #endif
 #if TARGET_PC
             dusk::render::begin_tag_scope(dusk::render::TagScope::Sky);
