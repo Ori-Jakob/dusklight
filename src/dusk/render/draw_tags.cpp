@@ -1,6 +1,7 @@
 #include "dusk/render/draw_tags.hpp"
 
 #include "dusk/render/hints.hpp"
+#include "dusk/render/model_registry.hpp"
 #include "dusk/render/render_bridge.hpp"
 
 #include <aurora/gfx.hpp>
@@ -22,8 +23,16 @@ constexpr std::array<TagScopeDesc, TagScopeCount> kRows{{
     {"sky", AURORA_CAT_SKY, 0, AURORA_CAMERA_SKY},
     {"screen_read", AURORA_CAT_SCREEN_READ | AURORA_CAT_NO_PBR, 0, AURORA_CAMERA_INHERIT},
     {"ui", AURORA_CAT_UI | AURORA_CAT_NO_CAPTURE | AURORA_CAT_NO_PBR, 0, AURORA_CAMERA_UI},
+    {"grass", AURORA_CAT_FOLIAGE, AURORA_OBJ_CPU_DEFORMED, AURORA_CAMERA_INHERIT},
+    {"flower", AURORA_CAT_FOLIAGE, AURORA_OBJ_CPU_DEFORMED, AURORA_CAMERA_INHERIT},
+    {"line3d", AURORA_CAT_DYNAMIC, AURORA_OBJ_CPU_DEFORMED, AURORA_CAMERA_INHERIT},
+    {"instanced", AURORA_CAT_DYNAMIC, 0, AURORA_CAMERA_INHERIT},
 }};
 static_assert(kRows.size() == TagScopeCount);
+
+constexpr u32 kObjectFlags = AURORA_OBJ_CAPTURE_ONLY | AURORA_OBJ_TELEPORT |
+                             AURORA_OBJ_CPU_DEFORMED | AURORA_OBJ_BAKED_VERTEX_LIGHT |
+                             AURORA_OBJ_DOUBLE_SIDED | AURORA_OBJ_BILLBOARD | AURORA_OBJ_IMMOBILE;
 
 struct TagScopeState {
     std::array<u32, TagScopeCount> open{};
@@ -72,6 +81,14 @@ bool pop(TagScopeState& state, TagScope scope) noexcept {
     return true;
 }
 
+// Same window and frame numbers as the registry log line, so both join to a trace on sourceFrame
+void log_finished_frame(const TagStats& stats) {
+    const u32 until = object_log_until();
+    if (until != 0 && stats.frame <= until) {
+        TagLog.info("render.objects log: frame {} scopes {}", stats.frame, tag_count_text(stats));
+    }
+}
+
 void append_problem(std::string& problems, std::string_view problem) {
     if (!problems.empty()) {
         problems += ", ";
@@ -84,15 +101,25 @@ std::string test_scope_table() {
         TagScope scope;
         std::string_view name;
         u32 categories;
+        u32 flags;
         AuroraCameraRole role;
     };
     constexpr std::array kExpected{
-        Expected{TagScope::Sky, "sky", AURORA_CAT_SKY, AURORA_CAMERA_SKY},
-        Expected{TagScope::ScreenRead, "screen_read", AURORA_CAT_SCREEN_READ | AURORA_CAT_NO_PBR,
+        Expected{TagScope::Sky, "sky", AURORA_CAT_SKY, 0, AURORA_CAMERA_SKY},
+        Expected{TagScope::ScreenRead, "screen_read", AURORA_CAT_SCREEN_READ | AURORA_CAT_NO_PBR, 0,
             AURORA_CAMERA_INHERIT},
-        Expected{TagScope::Ui, "ui", AURORA_CAT_UI | AURORA_CAT_NO_CAPTURE | AURORA_CAT_NO_PBR,
+        Expected{TagScope::Ui, "ui", AURORA_CAT_UI | AURORA_CAT_NO_CAPTURE | AURORA_CAT_NO_PBR, 0,
             AURORA_CAMERA_UI},
+        Expected{TagScope::Grass, "grass", AURORA_CAT_FOLIAGE, AURORA_OBJ_CPU_DEFORMED,
+            AURORA_CAMERA_INHERIT},
+        Expected{TagScope::Flower, "flower", AURORA_CAT_FOLIAGE, AURORA_OBJ_CPU_DEFORMED,
+            AURORA_CAMERA_INHERIT},
+        Expected{TagScope::Line3d, "line3d", AURORA_CAT_DYNAMIC, AURORA_OBJ_CPU_DEFORMED,
+            AURORA_CAMERA_INHERIT},
+        Expected{
+            TagScope::InstancedModel, "instanced", AURORA_CAT_DYNAMIC, 0, AURORA_CAMERA_INHERIT},
     };
+    static_assert(kExpected.size() == TagScopeCount);
     std::string problems;
     for (size_t i = 0; i < TagScopeCount; ++i) {
         const std::string_view name = kRows[i].name == nullptr ? "" : kRows[i].name;
@@ -107,14 +134,22 @@ std::string test_scope_table() {
         if (&tag_scope_desc(static_cast<TagScope>(i)) != &kRows[i]) {
             append_problem(problems, fmt::format("row {} is not found by its scope", i));
         }
+        if ((kRows[i].categories & (AURORA_CAT_OVERLAY | AURORA_CAT_STATIC)) != 0) {
+            append_problem(problems, fmt::format("row {} sets OVERLAY or STATIC", name));
+        }
+        if ((kRows[i].flags & ~kObjectFlags) != 0) {
+            append_problem(problems, fmt::format("row {} has flags outside AURORA_OBJ_*", name));
+        }
     }
-    for (const auto& expected : kExpected) {
+    for (size_t i = 0; i < kExpected.size(); ++i) {
+        const Expected& expected = kExpected[i];
         const TagScopeDesc& row = tag_scope_desc(expected.scope);
-        if (row.name != expected.name || row.categories != expected.categories || row.flags != 0 ||
+        if (static_cast<size_t>(expected.scope) != i || row.name != expected.name ||
+            row.categories != expected.categories || row.flags != expected.flags ||
             row.role != expected.role)
         {
             append_problem(
-                problems, fmt::format("row {} differs from the painter table", row.name));
+                problems, fmt::format("row {} differs from the expected table", row.name));
         }
     }
     if (TagScopeCount != kRows.size()) {
@@ -154,7 +189,10 @@ std::string test_scope_balance() {
     expect(accepted && open_count(full) == kMaxOpenScopes, "16 open scopes refused");
     expect(!push(full, TagScope::Sky, 3) && open_count(full) == kMaxOpenScopes,
         "the 17th open scope is accepted");
-    expect(full.current.scopes[0] == 6, "a refused push is counted as sent");
+    // The pushes cycle through the rows, so Sky took every TagScopeCount-th one
+    constexpr u32 kSkyPushes =
+        static_cast<u32>((kMaxOpenScopes + TagScopeCount - 1) / TagScopeCount);
+    expect(full.current.scopes[0] == kSkyPushes, "a refused push is counted as sent");
 
     TagScopeState same;
     u32 pushes = 0;
@@ -185,6 +223,9 @@ void begin_tag_scope(TagScope scope) noexcept {
         return;
     }
     const u32 frame = aurora::gfx::current_frame();
+    if (s_state.current.frame != frame) {
+        log_finished_frame(s_state.current);
+    }
     const TagScopeDesc& row = tag_scope_desc(scope);
     if (!push(s_state, scope, frame)) {
         if (!std::exchange(s_warnedDepth, true)) {

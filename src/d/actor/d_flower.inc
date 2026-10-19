@@ -7,6 +7,7 @@
 
 #if TARGET_PC
 #include "dusk/interp/frame_interpolation.h"
+#include "dusk/render/draw_tags.hpp"
 #endif
 
 const u16 l_J_Ohana00_64TEX__width = 63;
@@ -865,6 +866,7 @@ static void flower_emit(const batch::LeafTemplate& tpl, const Vec* xformedPos, G
 
 void dFlower_packet_c::draw() {
     ZoneScoped;
+    const dusk::render::TagScopeGuard renderScope(dusk::render::TagScope::Flower);
     dScnKy_env_light_c* kankyo = dKy_getEnvlight();
     j3dSys.reinitGX();
 

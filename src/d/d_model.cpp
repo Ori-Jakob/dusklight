@@ -7,9 +7,13 @@
 
 #if TARGET_PC
 #include "dusk/interp/frame_interpolation.h"
+#include "dusk/render/draw_tags.hpp"
 #endif
 
 void dMdl_c::draw() {
+#if TARGET_PC
+    const dusk::render::TagScopeGuard renderScope(dusk::render::TagScope::InstancedModel);
+#endif
     j3dSys.setVtxPos(mpModelData->getVtxPosArray(), mpModelData->getVtxNum());
     j3dSys.setVtxNrm(mpModelData->getVtxNrmArray(), mpModelData->getNrmNum());
     j3dSys.setVtxCol(mpModelData->getVtxColorArray(0), mpModelData->getColNum());

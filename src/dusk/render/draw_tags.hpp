@@ -16,9 +16,13 @@ enum class TagScope : u8 {
     Sky,
     ScreenRead,
     Ui,
+    Grass,
+    Flower,
+    Line3d,
+    InstancedModel,
 };
 
-inline constexpr size_t TagScopeCount = 3;
+inline constexpr size_t TagScopeCount = 7;
 
 struct TagScopeDesc {
     const char* name;

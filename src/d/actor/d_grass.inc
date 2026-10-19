@@ -14,6 +14,7 @@
 #if TARGET_PC
 #include "dusk/dvd_asset.hpp"
 #include "dusk/interp/frame_interpolation.h"
+#include "dusk/render/draw_tags.hpp"
 
 using GameVersion = dusk::version::GameVersion;
 
@@ -707,6 +708,7 @@ static void blade_emit(const batch::LeafTemplate& tpl, const Vec* xformedPos,
 
 void dGrass_packet_c::draw() {
     ZoneScoped;
+    const dusk::render::TagScopeGuard renderScope(dusk::render::TagScope::Grass);
     dScnKy_env_light_c* kankyo = dKy_getEnvlight();
 
     j3dSys.reinitGX();

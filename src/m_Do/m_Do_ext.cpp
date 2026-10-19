@@ -31,6 +31,7 @@
 #include "dusk/interp/line.h"
 #include "dusk/interp/material.h"
 #include "dusk/logging.h"
+#include "dusk/render/draw_tags.hpp"
 #include "dusk/version.hpp"
 #endif
 
@@ -3141,6 +3142,9 @@ void mDoExt_3DlineMatSortPacket::setMat(mDoExt_3DlineMat_c* i_3DlineMat) {
 }
 
 void mDoExt_3DlineMatSortPacket::draw() {
+#if TARGET_PC
+    const dusk::render::TagScopeGuard renderScope(dusk::render::TagScope::Line3d);
+#endif
     mp3DlineMat->setMaterial();
     mDoExt_3DlineMat_c* lineMat = mp3DlineMat;
     do {
