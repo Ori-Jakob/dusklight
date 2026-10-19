@@ -1,5 +1,8 @@
 #include "dusk/render/lights.hpp"
 
+#include "dusk/game_clock.h"
+#include "dusk/interp/frame_interpolation.h"
+#include "dusk/render/fog_probe.hpp"
 #include "dusk/render/hints.hpp"
 #include "dusk/render/render_bridge.hpp"
 
@@ -16,13 +19,17 @@
 #include <borealis/log.hpp>
 #include <dolphin/gx/GXAurora.h>
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 #include <tracy/Tracy.hpp>
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <charconv>
 #include <cmath>
+#include <cstddef>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <string_view>
 #include <tuple>
@@ -100,8 +107,11 @@ static_assert(kReportSlots == 127);
 
 constexpr double kPi = 3.14159265358979323846;
 constexpr f32 kRefBrightness = 0.99999f;
+// GxFogSet_Sub's planes when there is no view or its planes are unusable
+constexpr f32 kNoViewNear = 1.0f;
+constexpr f32 kNoViewFar = 160000.0f;
 // The game's far plane when it has no view, so an unattenuated light reaches all it can see
-constexpr f32 kMaxLightRadius = 160000.0f;
+constexpr f32 kMaxLightRadius = kNoViewFar;
 // The GX radius of a point light is about 5x the distance actors are lit to; M10 tunes this
 constexpr f32 kPointRadiusScale = 1.0f;
 constexpr u32 kCameraFillMask = AURORA_CAT_DYNAMIC | AURORA_CAT_PLAYER;
@@ -111,8 +121,12 @@ constexpr f32 kCrossFade = 15.0f;
 constexpr f32 kSkyDistance = 80000.0f;
 constexpr f32 kSkyDepth = -48000.0f;
 constexpr f32 kEnvSlotLift = 200.0f;
-constexpr u32 kHintHeaderBytes = 11;
-constexpr u32 kLightBytes = 72;
+// Every hint is the FIFO header and a u16 version, then its payload
+constexpr u32 kHintPrefixBytes = GX_AURORA_HINT_HEADER_SIZE + sizeof(u16);
+constexpr u32 kLightsFixedBytes = kHintPrefixBytes + sizeof(u16);
+constexpr u32 kLightBytes = sizeof(AuroraLight);
+constexpr u32 kEnvironmentHintBytes = kHintPrefixBytes + sizeof(AuroraEnvironment);
+static_assert(kLightsFixedBytes == 11 && kLightBytes == 72 && kEnvironmentHintBytes == 245);
 
 constexpr u8 kPrioKey = 255;
 constexpr u8 kPrioPlayerLight = 224;
@@ -147,18 +161,32 @@ constexpr std::array<FlagName, 9> kFlagNames{{
     {AURORA_LIGHT_NO_VOLUMETRIC, "NO_VOLUMETRIC"},
 }};
 
-// A flag added to aurora must get a name here before the list can print it
-constexpr bool flag_names_cover_every_bit() {
+constexpr std::array<FlagName, 9> kEnvFlagNames{{
+    {AURORA_ENV_INTERIOR, "INTERIOR"},
+    {AURORA_ENV_TWILIGHT, "TWILIGHT"},
+    {AURORA_ENV_UNDERWATER, "UNDERWATER"},
+    {AURORA_ENV_SENSES, "SENSES"},
+    {AURORA_ENV_RAIN, "RAIN"},
+    {AURORA_ENV_SNOW, "SNOW"},
+    {AURORA_ENV_NO_SUN, "NO_SUN"},
+    {AURORA_ENV_NO_VOLUMETRIC, "NO_VOLUMETRIC"},
+    {AURORA_ENV_ROOM, "ROOM"},
+}};
+
+// A flag added to aurora must get a name here before a listing can print it
+template <size_t N>
+constexpr bool names_cover_every_bit(const std::array<FlagName, N>& names, u32 top) {
     u32 seen = 0;
-    for (const FlagName& flag : kFlagNames) {
+    for (const FlagName& flag : names) {
         if (flag.bit == 0 || (flag.bit & (flag.bit - 1)) != 0 || (seen & flag.bit) != 0) {
             return false;
         }
         seen |= flag.bit;
     }
-    return seen == (static_cast<u32>(AURORA_LIGHT_NO_VOLUMETRIC) << 1) - 1;
+    return seen == (top << 1) - 1;
 }
-static_assert(flag_names_cover_every_bit());
+static_assert(names_cover_every_bit(kFlagNames, AURORA_LIGHT_NO_VOLUMETRIC));
+static_assert(names_cover_every_bit(kEnvFlagNames, AURORA_ENV_ROOM));
 
 std::string_view kind_name(LightKind kind) noexcept {
     constexpr std::array<std::string_view, kKindCount> kNames{"None", "Sun", "Moon", "KeyRoom",
@@ -175,9 +203,9 @@ std::string_view state_name(SlotState state) noexcept {
     return index < kNames.size() ? kNames[index] : "?";
 }
 
-std::string flag_names(u16 flags) {
+std::string names_of(u32 flags, std::span<const FlagName> names) {
     std::string text;
-    for (const FlagName& flag : kFlagNames) {
+    for (const FlagName& flag : names) {
         if ((flags & flag.bit) != 0) {
             if (!text.empty()) {
                 text += '|';
@@ -186,6 +214,14 @@ std::string flag_names(u16 flags) {
         }
     }
     return text.empty() ? std::string{"0"} : text;
+}
+
+std::string flag_names(u16 flags) {
+    return names_of(flags, kFlagNames);
+}
+
+std::string env_flag_names(u32 flags) {
+    return names_of(flags, kEnvFlagNames);
 }
 
 std::string_view size_name(u8 size) noexcept {
@@ -490,6 +526,15 @@ bool room_displayed(int room) {
     return room >= 0 && room < kRoomCount && dComIfGp_roomControl_checkStatusFlag(room, 0x10) != 0;
 }
 
+bool stage_is(const char* name) {
+    return strcmp(dComIfGp_getStartStageName(), name) == 0;
+}
+
+// One sun decision for both hints: sun and moon or KEY_ROOM in the list, NO_SUN in the environment
+bool sun_moon_lit() {
+    return dKy_SunMoon_Light_Check() == TRUE;
+}
+
 struct StageKey {
     std::array<char, 8> name{};
     s32 layer = -1;
@@ -677,6 +722,7 @@ struct SceneLights {
     int lightRoom = -1;
     StageKey stage;
     u32 frame = 0;
+    bool sunMoon = false;
     bool slot0 = false;
     Vec slot0Pos{};
     bool flame = false;
@@ -690,6 +736,7 @@ struct SceneLights {
         key = LightKind::None;
         lightRoom = -1;
         frame = 0;
+        sunMoon = false;
         slot0 = false;
         flame = false;
     }
@@ -848,7 +895,7 @@ void add_camera_fill(BuildContext& ctx) {
         in.power = nearest.mPow;
     }
     in.outdoor = dKy_Outdoor_check() == TRUE;
-    in.mn09a = strcmp(dComIfGp_getStartStageName(), "D_MN09A") == 0;
+    in.mn09a = stage_is("D_MN09A");
     if (!camera_fill(in)) {
         return;
     }
@@ -1103,7 +1150,8 @@ void build_scene_lights(LightState& state) {
         ctx.lightRoom = -1;
     }
     out.lightRoom = ctx.lightRoom;
-    ctx.sunMoon = dKy_SunMoon_Light_Check() == TRUE;
+    ctx.sunMoon = sun_moon_lit();
+    out.sunMoon = ctx.sunMoon;
     if (const cXyz* flame = lantern_flame(ctx.player)) {
         out.flame = true;
         out.flamePos = *flame;
@@ -1297,7 +1345,7 @@ CheckResult check_sun_matches_game() {
     if (dKy_SunMoon_Light_Check() != TRUE) {
         return skip("the SunMoon check fails in this stage");
     }
-    if (strcmp(dComIfGp_getStartStageName(), "F_SP200") == 0) {
+    if (stage_is("F_SP200")) {
         return skip("setSunpos skips F_SP200");
     }
     const camera_process_class* camera = dComIfGp_getCamera(0);
@@ -1528,55 +1576,75 @@ std::pair<RndState, RndState> rnd_states() {
     return states;
 }
 
-CheckResult check_read_only() {
+// Everything the builders read from, so a check can prove a build wrote none of it
+struct GameSnapshot {
     Snapshot env;
-    env.take(&g_env_light, sizeof(g_env_light));
     std::array<Snapshot, kRoomCount> rooms;
-    for (int room = 0; room < kRoomCount; ++room) {
-        rooms[room].take(dComIfGp_roomControl_getTevStr(room), sizeof(dKy_tevstr_c));
-    }
     Snapshot player;
-    if (const fopAc_ac_c* actor = dComIfGp_getPlayer(0)) {
-        player.take(&actor->tevStr, sizeof(actor->tevStr));
-    }
+    Snapshot camera;
     Snapshot sun;
-    if (g_env_light.mpSunPacket != nullptr) {
-        sun.take(g_env_light.mpSunPacket, sizeof(*g_env_light.mpSunPacket));
-    }
     Snapshot counter;
-    counter.take(&g_Counter, sizeof(g_Counter));
-    const u32 rnd = cM_getRndCallCount();
-    const auto states = rnd_states();
+    u32 rnd = 0;
+    std::pair<RndState, RndState> states{};
 
+    void take() {
+        env.take(&g_env_light, sizeof(g_env_light));
+        for (int room = 0; room < kRoomCount; ++room) {
+            rooms[room].take(dComIfGp_roomControl_getTevStr(room), sizeof(dKy_tevstr_c));
+        }
+        if (const fopAc_ac_c* actor = dComIfGp_getPlayer(0)) {
+            player.take(actor, sizeof(fopAc_ac_c));
+        }
+        if (const camera_process_class* view = dComIfGp_getCamera(0)) {
+            camera.take(view, sizeof(camera_process_class));
+        }
+        if (g_env_light.mpSunPacket != nullptr) {
+            sun.take(g_env_light.mpSunPacket, sizeof(*g_env_light.mpSunPacket));
+        }
+        counter.take(&g_Counter, sizeof(g_Counter));
+        rnd = cM_getRndCallCount();
+        states = rnd_states();
+    }
+
+    std::string problems() const {
+        std::string problems;
+        if (!env.unchanged()) {
+            append_problem(problems, "g_env_light changed");
+        }
+        for (int room = 0; room < kRoomCount; ++room) {
+            if (!rooms[room].unchanged()) {
+                append_problem(problems, fmt::format("room {} tevstr changed", room));
+            }
+        }
+        if (!player.unchanged()) {
+            append_problem(problems, "player actor changed");
+        }
+        if (!camera.unchanged()) {
+            append_problem(problems, "camera 0 changed");
+        }
+        if (!sun.unchanged()) {
+            append_problem(problems, "sun packet changed");
+        }
+        if (!counter.unchanged()) {
+            append_problem(problems, "g_Counter changed");
+        }
+        if (cM_getRndCallCount() != rnd) {
+            append_problem(problems, fmt::format("{} cM_rnd calls", cM_getRndCallCount() - rnd));
+        }
+        if (rnd_states() != states) {
+            append_problem(problems, "a random generator state moved");
+        }
+        return problems;
+    }
+};
+
+CheckResult check_read_only() {
+    auto before = std::make_unique<GameSnapshot>();
+    before->take();
     const auto scratch = make_scratch();
     build_scene_lights(*scratch);
-
-    std::string problems;
-    if (!env.unchanged()) {
-        append_problem(problems, "g_env_light changed");
-    }
-    for (int room = 0; room < kRoomCount; ++room) {
-        if (!rooms[room].unchanged()) {
-            append_problem(problems, fmt::format("room {} tevstr changed", room));
-        }
-    }
-    if (!player.unchanged()) {
-        append_problem(problems, "player tevstr changed");
-    }
-    if (!sun.unchanged()) {
-        append_problem(problems, "sun packet changed");
-    }
-    if (!counter.unchanged()) {
-        append_problem(problems, "g_Counter changed");
-    }
-    if (cM_getRndCallCount() != rnd) {
-        append_problem(problems, fmt::format("{} cM_rnd calls", cM_getRndCallCount() - rnd));
-    }
-    if (rnd_states() != states) {
-        append_problem(problems, "a random generator state moved");
-    }
-    return verdict(
-        problems, fmt::format("{} lights built, nothing written", scratch->lights.list.count));
+    return verdict(before->problems(),
+        fmt::format("{} lights built, nothing written", scratch->lights.list.count));
 }
 
 CheckResult check_aurora_agrees() {
@@ -2048,6 +2116,1209 @@ void record(SelfTestReport& report, std::string_view name, const CheckResult& re
     }
 }
 
+void record_test(SelfTestReport& report, std::string_view name, const std::string& failure) {
+    record(report, name, failure.empty() ? CheckResult{} : CheckResult{Verdict::Fail, failure});
+}
+
+static_assert(sizeof(AuroraEnvironment) == 236);
+static_assert(offsetof(AuroraEnvironment, fogRangeTable) == 212);
+
+// SP6 E7 measured 201-871 u/s per unit of pow by stage; M15-W1b replaces it with a per-stage table
+constexpr double kWindWorldSpeed = 420.0;
+constexpr double kWindPhasePeriod = 65536.0;
+constexpr std::array<double, 3> kFlutterHz{1.7, 3.1, 5.3};
+// A longer gap is a stalled or resumed clock, not wind to integrate
+constexpr u32 kMaxWindTicks = 30;
+constexpr double kTwoPi = 2.0 * kPi;
+
+constexpr std::string_view kEnvUsage = "Usage: render.env [show|check|counts|log <n>]";
+
+// dKy_Outdoor_check reads stage info without a null check, so a stage without it counts as a field
+u32 stage_type() {
+    stage_stag_info_class* info = dComIfGp_getStage()->getStagInfo();
+    return info != nullptr ? dStage_stagInfo_GetSTType(info) : ST_FIELD;
+}
+
+// checkNowWolfPowerUp reads through the Link actor, which a loading scene does not have yet
+bool senses_on() {
+    return dComIfGp_getLinkPlayer() != nullptr && daPy_py_c::checkNowWolfPowerUp() != 0;
+}
+
+struct FlagInputs {
+    u32 stageType = ST_FIELD;
+    bool twilight = false;
+    bool underwater = false;
+    bool senses = false;
+    int rain = 0;
+    int snowCount = 0;
+    bool sunMoon = true;
+};
+
+u32 environment_flags(const FlagInputs& in) noexcept {
+    u32 flags = 0;
+    if (in.stageType != ST_FIELD) {
+        flags |= AURORA_ENV_INTERIOR;
+    }
+    if (in.twilight) {
+        flags |= AURORA_ENV_TWILIGHT;
+    }
+    if (in.underwater) {
+        flags |= AURORA_ENV_UNDERWATER;
+    }
+    if (in.senses) {
+        flags |= AURORA_ENV_SENSES | AURORA_ENV_NO_VOLUMETRIC;
+    }
+    if (in.rain > 0) {
+        flags |= AURORA_ENV_RAIN;
+    }
+    if (in.snowCount > 0) {
+        flags |= AURORA_ENV_SNOW;
+    }
+    if (!in.sunMoon) {
+        flags |= AURORA_ENV_NO_SUN;
+    }
+    if (in.stageType == ST_ROOM) {
+        flags |= AURORA_ENV_ROOM;
+    }
+    return flags;
+}
+
+FlagInputs live_flag_inputs(bool sunMoon) {
+    FlagInputs in;
+    in.stageType = stage_type();
+    in.twilight = dKy_darkworld_check() != 0;
+    in.underwater = dKy_camera_water_in_status_check() != 0;
+    in.senses = senses_on();
+    in.rain = dKy_rain_check();
+    in.snowCount = g_env_light.mSnowCount;
+    in.sunMoon = sunMoon;
+    return in;
+}
+
+// The game hands these to GX as u8, so the s16 palette values wrap here the same way
+void put_gx_colour(f32 (&dst)[3], std::array<u8, 3>& gx, const GXColorS10& colour) noexcept {
+    gx = {static_cast<u8>(colour.r), static_cast<u8>(colour.g), static_cast<u8>(colour.b)};
+    for (size_t i = 0; i < gx.size(); ++i) {
+        dst[i] = gx[i] / 255.0f;
+    }
+}
+
+struct ViewRange {
+    f32 nearZ = kNoViewNear;
+    f32 farZ = kNoViewFar;
+};
+
+// The same checks as GxFogSet_Sub, so the hint carries the planes GXSetFog was given
+ViewRange fog_view_range() {
+    ViewRange range;
+    const view_class* view = dComIfGd_getView();
+    if (view != nullptr && view->near_ >= 0.0f && view->far_ >= 0.0f && view->near_ < view->far_) {
+        range = {view->near_, view->far_};
+    }
+    return range;
+}
+
+constexpr u32 pack_range_adj(u8 enable, u16 center) noexcept {
+    return (enable != 0 ? 1u : 0u) | static_cast<u32>(center) << 16;
+}
+
+void put_fog(AuroraEnvironment& env) {
+    env.fogType = GX_FOG_PERSP_LIN;
+    env.fogStart = g_env_light.mFogNear;
+    env.fogEnd = g_env_light.mFogFar;
+    const ViewRange view = fog_view_range();
+    env.viewNear = view.nearZ;
+    env.viewFar = view.farZ;
+    env.fogRangeAdj = pack_range_adj(g_env_light.mFogAdjEnable, g_env_light.mFogAdjCenter);
+    std::copy(std::begin(g_env_light.mXFogTbl.r), std::end(g_env_light.mXFogTbl.r),
+        std::begin(env.fogRangeTable));
+}
+
+// Negative values ask for the engine default; phaseG spans [-1, 1], so its sentinel is -2
+void apply_env_defaults(AuroraEnvironment& env) noexcept {
+    env.hazeAtFogEnd = -1.0f;
+    env.hazeDensity = -1.0f;
+    env.heightFogDensity = 0.0f;
+    env.heightFogBase = 0.0f;
+    env.heightFogFalloff = 0.0f;
+    std::fill(std::begin(env.mediaAlbedo), std::end(env.mediaAlbedo), -1.0f);
+    std::fill(std::begin(env.mediaEmissive), std::end(env.mediaEmissive), 0.0f);
+    env.phaseG = -2.0f;
+    env.phaseG2 = -2.0f;
+    env.phaseBlend = -1.0f;
+    env.noiseScale = -1.0f;
+    env.noiseAmount = -1.0f;
+    env.relightStrength = -1.0f;
+    env.relightAmbient = -1.0f;
+    env.sunGlow = -1.0f;
+    env.volumeFar = -1.0f;
+    std::fill(std::begin(env.fogRangeReserved), std::end(env.fogRangeReserved), u16{0});
+}
+
+struct ShaftInputs {
+    bool sunInitialized = false;
+    bool packet = false;
+    f32 daytime = 0.0f;
+    int rain = 0;
+    bool flareStage = true;
+    u8 colpatWeather = 0;
+    int snowCount = 0;
+    bool room = false;
+    bool sunMoon = false;
+    f32 sunAlpha = 0.0f;
+};
+
+// dKyr_sun_move's conditions for fading the sun in and letting its flare draw
+f32 shaft_gate(const ShaftInputs& in) noexcept {
+    if (!in.sunInitialized || !in.packet) {
+        return 0.0f;
+    }
+    const bool on = in.daytime > 77.5f && in.daytime < 285.0f && in.rain < 20 && in.flareStage &&
+                    in.colpatWeather == 0 && in.snowCount <= 10 && !in.room && in.sunMoon;
+    return on ? std::clamp(in.sunAlpha, 0.0f, 1.0f) : 0.0f;
+}
+
+ShaftInputs live_shaft_inputs(bool sunMoon) {
+    ShaftInputs in;
+    in.sunInitialized = g_env_light.mSunInitialized;
+    in.packet = g_env_light.mpSunPacket != nullptr;
+    in.daytime = g_env_light.daytime;
+    in.rain = dKy_rain_check();
+    in.flareStage = !stage_is("F_SP200") && !stage_is("D_MN09B");
+    in.colpatWeather = g_env_light.mColpatWeather;
+    in.snowCount = g_env_light.mSnowCount;
+    in.room = stage_type() == ST_ROOM;
+    in.sunMoon = sunMoon;
+    in.sunAlpha = in.packet ? g_env_light.mpSunPacket->mSunAlpha : 0.0f;
+    return in;
+}
+
+struct WindVector {
+    Vec dir{};
+    f32 strength = 0.0f;
+};
+
+// A NaN would stay in the phase accumulators until the next load, so it counts as calm
+WindVector wind_from(const Vec& vec, f32 pow) noexcept {
+    WindVector wind;
+    const bool finite =
+        std::isfinite(vec.x) && std::isfinite(vec.y) && std::isfinite(vec.z) && std::isfinite(pow);
+    if (finite && normalize(vec, wind.dir, 1e-6f)) {
+        wind.strength = pow;
+    }
+    return wind;
+}
+
+struct WindState {
+    std::array<double, 2> phase{};
+    std::array<double, 3> flutter{};
+    std::array<double, 2> presentedPhase{};
+    u32 lastCounter = 0;
+    StageKey stage{};
+    u64 presentationEpoch = 0;
+    bool valid = false;
+};
+
+struct WindInputs {
+    WindVector wind;
+    u32 counter = 0;
+    StageKey stage{};
+    u64 presentationEpoch = 0;
+    f32 step = 1.0f;
+};
+
+struct WindStep {
+    u32 ticks = 0;
+    bool reset = false;
+};
+
+double wrap_phase(double value, double period) noexcept {
+    const double wrapped = value - period * std::floor(value / period);
+    return wrapped >= period ? wrapped - period : wrapped;
+}
+
+// Phases count sim ticks, so they hold while the game clock stops and keep running in menus
+WindStep advance_wind(WindState& state, const WindInputs& in, AuroraEnvironment& env) noexcept {
+    WindStep step;
+    step.ticks = in.counter - state.lastCounter;
+    const bool newLoad = !state.valid || !(state.stage == in.stage);
+    step.reset =
+        newLoad || state.presentationEpoch != in.presentationEpoch || step.ticks > kMaxWindTicks;
+    if (step.reset) {
+        step.ticks = 0;
+    }
+    if (newLoad) {
+        state.phase = {};
+        state.flutter = {};
+    }
+    const double dt = dusk::game_clock::kSimPeriod;
+    const double behind = (1.0 - in.step) * dt;
+    const double speed = static_cast<double>(in.wind.strength) * kWindWorldSpeed;
+    const std::array<double, 2> velocity{in.wind.dir.x * speed, in.wind.dir.z * speed};
+    for (size_t i = 0; i < velocity.size(); ++i) {
+        state.phase[i] += velocity[i] * dt * step.ticks;
+        const double presented = state.phase[i] - behind * velocity[i];
+        const double current = wrap_phase(presented, kWindPhasePeriod);
+        const double previous =
+            step.reset ? current : current - (presented - state.presentedPhase[i]);
+        env.windPhase[i] = static_cast<f32>(current);
+        env.windPhasePrev[i] = static_cast<f32>(previous);
+        state.presentedPhase[i] = presented;
+    }
+    const double sweep = 0.25 + 0.75 * static_cast<double>(in.wind.strength);
+    for (size_t k = 0; k < kFlutterHz.size(); ++k) {
+        const double rate = kTwoPi * kFlutterHz[k] * sweep;
+        state.flutter[k] += rate * dt * step.ticks;
+        env.flutterPhase[k] =
+            static_cast<f32>(wrap_phase(state.flutter[k] - behind * rate, kTwoPi));
+    }
+    state.lastCounter = in.counter;
+    state.stage = in.stage;
+    state.presentationEpoch = in.presentationEpoch;
+    state.valid = true;
+    return step;
+}
+
+f32 presentation_step() {
+    return dusk::interp::is_enabled() ? dusk::interp::get_interpolation_step() : 1.0f;
+}
+
+struct EnvReport {
+    std::array<u8, 3> ambientGx{};
+    std::array<u8, 3> fogGx{};
+    bool skyVisible = false;
+    StageKey stage{};
+    int room = -1;
+    f32 daytime = 0.0f;
+    u32 frame = 0;
+    u32 counter = 0;
+    WindStep wind;
+};
+
+struct EnvState {
+    AuroraEnvironment env{};
+    WindState wind;
+    EnvReport report;
+};
+
+void build_environment(EnvState& state, LoadTracker& loads, bool sunMoon) {
+    AuroraEnvironment& env = state.env;
+    EnvReport& report = state.report;
+    env = {};
+    report = {};
+    apply_env_defaults(env);
+    report.stage = current_stage_key(loads);
+    report.frame = aurora::gfx::current_frame();
+    report.room = dComIfGp_roomControl_getStayNo();
+    report.daytime = g_env_light.daytime;
+    report.counter = g_Counter.mCounter0;
+
+    report.skyVisible = sky_visible();
+    env.skyVisibility = report.skyVisible ? 1.0f : 0.0f;
+    put_gx_colour(env.ambientColor, report.ambientGx, g_env_light.bg_amb_col[0]);
+    put_gx_colour(env.fogColor, report.fogGx, g_env_light.fog_col);
+    const GB_WIND_INFLUENCE& global = g_env_light.global_wind_influence;
+    const WindVector wind = wind_from(global.vec, global.pow);
+    put(env.windDir, wind.dir);
+    env.windStrength = wind.strength;
+    env.timeOfDay = g_env_light.daytime / 15.0f;
+    env.flags = environment_flags(live_flag_inputs(sunMoon));
+    env.unitsPerMeter = kUnitsPerMeter;
+    const WindInputs windIn{wind, report.counter, report.stage,
+        dusk::game_clock::g_frameTiming.presentationEpoch, presentation_step()};
+    report.wind = advance_wind(state.wind, windIn, env);
+    put_fog(env);
+    env.shadowSun = g_env_light.field_0x1238;
+    env.shadowLocal = g_env_light.field_0x123c;
+    const EF_THUNDER& thunder = g_env_light.mThunderEff;
+    env.shadowThunderAdd = thunder.mState != 0 && thunder.mState < 10 ? thunder.mFlashTimer : 0.0f;
+    env.grassDensityScale =
+        stage_is("F_SP127") && g_env_light.fishing_hole_season == 4 ? 0.0f : 1.0f;
+    env.sunShaftGate = shaft_gate(live_shaft_inputs(sunMoon));
+}
+
+enum class ProbeField : u8 {
+    None,
+    FogType,
+    FogStart,
+    FogEnd,
+    ViewNear,
+    ViewFar,
+    FogColor,
+    RangeEnable,
+    RangeCenter,
+    RangeTable,
+};
+
+std::string_view probe_field_name(ProbeField field) noexcept {
+    constexpr std::array<std::string_view, 10> kNames{"none", "fogType", "fogStart", "fogEnd",
+        "viewNear", "viewFar", "fogColor", "fogRangeAdj.enable", "fogRangeAdj.center",
+        "fogRangeTable"};
+    const auto index = static_cast<size_t>(field);
+    return index < kNames.size() ? kNames[index] : "?";
+}
+
+// The window is one painter: armed after the hint is sent, closed after FRAME_END
+struct FogProbe {
+    bool pending = false;
+    bool armed = false;
+    AuroraEnvironment checked{};
+    u32 frame = 0;
+    u32 fog = 0;
+    u32 range = 0;
+    ProbeField field = ProbeField::None;
+    int index = -1;
+    double hint = 0.0;
+    double draw = 0.0;
+};
+
+struct ProbeResult {
+    bool pass = false;
+    std::string line;
+};
+
+std::string probe_request(FogProbe& probe, bool hintsOn) {
+    if (!hintsOn) {
+        return "render.env check: SKIP (hints off)";
+    }
+    probe.pending = true;
+    return "render.env check: armed for the next scene frame";
+}
+
+void probe_arm(FogProbe& probe, const AuroraEnvironment& env, u32 frame) noexcept {
+    probe.armed = true;
+    probe.checked = env;
+    probe.frame = frame;
+    probe.fog = 0;
+    probe.range = 0;
+    probe.field = ProbeField::None;
+    probe.index = -1;
+}
+
+void probe_mismatch(
+    FogProbe& probe, ProbeField field, double hint, double draw, int index = -1) noexcept {
+    if (probe.field == ProbeField::None) {
+        probe.field = field;
+        probe.index = index;
+        probe.hint = hint;
+        probe.draw = draw;
+    }
+}
+
+bool same_bits(f32 a, f32 b) noexcept {
+    return std::bit_cast<u32>(a) == std::bit_cast<u32>(b);
+}
+
+void probe_fog(FogProbe& probe, GXFogType type, f32 startZ, f32 endZ, f32 nearZ, f32 farZ,
+    GXColor color) noexcept {
+    if (!probe.armed) {
+        return;
+    }
+    ++probe.fog;
+    const AuroraEnvironment& env = probe.checked;
+    if (static_cast<u32>(type) != env.fogType) {
+        probe_mismatch(probe, ProbeField::FogType, env.fogType, type);
+    }
+    const std::array<std::tuple<ProbeField, f32, f32>, 4> planes{{
+        {ProbeField::FogStart, env.fogStart, startZ},
+        {ProbeField::FogEnd, env.fogEnd, endZ},
+        {ProbeField::ViewNear, env.viewNear, nearZ},
+        {ProbeField::ViewFar, env.viewFar, farZ},
+    }};
+    for (const auto& [field, hint, draw] : planes) {
+        if (!same_bits(hint, draw)) {
+            probe_mismatch(probe, field, hint, draw);
+        }
+    }
+    const std::array<u8, 3> drawn{color.r, color.g, color.b};
+    for (size_t i = 0; i < drawn.size(); ++i) {
+        const auto sent = static_cast<u8>(std::lround(env.fogColor[i] * 255.0f));
+        if (drawn[i] != sent) {
+            probe_mismatch(probe, ProbeField::FogColor, sent, drawn[i], static_cast<int>(i));
+        }
+    }
+}
+
+void probe_range(FogProbe& probe, u8 enable, u16 center, const GXFogAdjTable& table) noexcept {
+    if (!probe.armed) {
+        return;
+    }
+    ++probe.range;
+    const u32 packed = probe.checked.fogRangeAdj;
+    if ((enable != 0) != ((packed & 1) != 0)) {
+        probe_mismatch(probe, ProbeField::RangeEnable, packed & 1, enable);
+    }
+    if (center != packed >> 16) {
+        probe_mismatch(probe, ProbeField::RangeCenter, packed >> 16, center);
+    }
+    for (size_t i = 0; i < std::size(table.r); ++i) {
+        if (table.r[i] != probe.checked.fogRangeTable[i]) {
+            probe_mismatch(probe, ProbeField::RangeTable, probe.checked.fogRangeTable[i],
+                table.r[i], static_cast<int>(i));
+        }
+    }
+}
+
+ProbeResult probe_close(FogProbe& probe) {
+    ProbeResult result;
+    probe.armed = false;
+    probe.pending = false;
+    if (probe.fog == 0) {
+        result.line = fmt::format(
+            "render.env check: FAIL no environment-fog program (frame {})", probe.frame);
+    } else if (probe.field != ProbeField::None) {
+        const std::string index = probe.index >= 0 ? fmt::format("[{}]", probe.index) : "";
+        result.line = fmt::format("render.env check: FAIL {}{} hint={:.9g} draw={:.9g} (frame {})",
+            probe_field_name(probe.field), index, probe.hint, probe.draw, probe.frame);
+    } else {
+        result.pass = true;
+        result.line = fmt::format("render.env check: PASS fog={} range={} (frame {})", probe.fog,
+            probe.range, probe.frame);
+    }
+    return result;
+}
+
+struct EnvStats {
+    u64 submits = 0;
+    bool any = false;
+    u32 lastFrame = 0;
+};
+
+EnvState s_env;
+EnvStats s_envStats;
+u32 s_envLogRemaining = 0;
+FogProbe s_probe;
+ProbeResult s_probeResult;
+bool s_probeRan = false;
+
+std::unique_ptr<EnvState> build_scratch_environment(bool sunMoon) {
+    auto state = std::make_unique<EnvState>();
+    state->wind = s_env.wind;
+    LoadTracker loads = s_live.loads;
+    build_environment(*state, loads, sunMoon);
+    return state;
+}
+
+std::string triple_text(const f32 (&v)[3]) {
+    return fmt::format("({:g},{:g},{:g})", v[0], v[1], v[2]);
+}
+
+std::string gx_text(const std::array<u8, 3>& gx) {
+    return fmt::format("({},{},{})", gx[0], gx[1], gx[2]);
+}
+
+std::string table_text(std::span<const u16> values) {
+    return fmt::format("{{{}}}", fmt::join(values, ","));
+}
+
+void describe_environment(std::vector<std::string>& out) {
+    if (!has_main_camera() || !s_envStats.any) {
+        out.emplace_back("render.env: hints off or no main camera");
+        return;
+    }
+    const AuroraEnvironment& e = s_env.env;
+    const EnvReport& r = s_env.report;
+    const auto line = [&out](std::string text) { out.push_back("render.env: " + std::move(text)); };
+    const auto scalar = [&line](std::string_view name, f32 value) {
+        line(fmt::format("{}={:g}", name, value));
+    };
+    scalar("skyVisibility", e.skyVisibility);
+    line(fmt::format("ambientColor={} gx={}", triple_text(e.ambientColor), gx_text(r.ambientGx)));
+    line(fmt::format("fogColor={} gx={}", triple_text(e.fogColor), gx_text(r.fogGx)));
+    line(fmt::format("windDir={}", triple_text(e.windDir)));
+    scalar("windStrength", e.windStrength);
+    scalar("exposureBias", e.exposureBias);
+    scalar("timeOfDay", e.timeOfDay);
+    line(fmt::format("flags=0x{:X} {}", e.flags, env_flag_names(e.flags)));
+    scalar("unitsPerMeter", e.unitsPerMeter);
+    line(fmt::format("windPhase=({:.3f},{:.3f})", e.windPhase[0], e.windPhase[1]));
+    line(fmt::format("windPhasePrev=({:.3f},{:.3f})", e.windPhasePrev[0], e.windPhasePrev[1]));
+    line(fmt::format("flutterPhase=({:.4f},{:.4f},{:.4f})", e.flutterPhase[0], e.flutterPhase[1],
+        e.flutterPhase[2]));
+    line(fmt::format("fogType={}", e.fogType));
+    scalar("fogStart", e.fogStart);
+    scalar("fogEnd", e.fogEnd);
+    scalar("viewNear", e.viewNear);
+    scalar("viewFar", e.viewFar);
+    line(fmt::format("fogRangeAdj=0x{:08X} enable={} center={}", e.fogRangeAdj, e.fogRangeAdj & 1,
+        e.fogRangeAdj >> 16));
+    scalar("shadowSun", e.shadowSun);
+    scalar("shadowLocal", e.shadowLocal);
+    scalar("shadowThunderAdd", e.shadowThunderAdd);
+    scalar("grassDensityScale", e.grassDensityScale);
+    scalar("sunShaftGate", e.sunShaftGate);
+    scalar("hazeAtFogEnd", e.hazeAtFogEnd);
+    scalar("hazeDensity", e.hazeDensity);
+    scalar("heightFogDensity", e.heightFogDensity);
+    scalar("heightFogBase", e.heightFogBase);
+    scalar("heightFogFalloff", e.heightFogFalloff);
+    line(fmt::format("mediaAlbedo={}", triple_text(e.mediaAlbedo)));
+    line(fmt::format("mediaEmissive={}", triple_text(e.mediaEmissive)));
+    scalar("phaseG", e.phaseG);
+    scalar("phaseG2", e.phaseG2);
+    scalar("phaseBlend", e.phaseBlend);
+    scalar("noiseScale", e.noiseScale);
+    scalar("noiseAmount", e.noiseAmount);
+    scalar("relightStrength", e.relightStrength);
+    scalar("relightAmbient", e.relightAmbient);
+    scalar("sunGlow", e.sunGlow);
+    scalar("volumeFar", e.volumeFar);
+    line(fmt::format("fogRangeTable={}", table_text(e.fogRangeTable)));
+    line(fmt::format("fogRangeReserved={}", table_text(e.fogRangeReserved)));
+    line(fmt::format("skyVisible={} shaftGate={:g} stage={} room={} daytime={:.2f}",
+        r.skyVisible ? 1 : 0, e.sunShaftGate, stage_text(r.stage), r.room, r.daytime));
+    line(fmt::format("frame={} counter={} windTicks={} windReset={}", r.frame, r.counter,
+        r.wind.ticks, r.wind.reset ? 1 : 0));
+}
+
+void describe_env_counts(std::vector<std::string>& out) {
+    out.push_back(fmt::format("render.env: submits {}, bytes {}, last frame {}", s_envStats.submits,
+        s_envStats.submits * kEnvironmentHintBytes, s_envStats.lastFrame));
+    const ar::HintCounters counters = ar::hint_counters(GX_AURORA_RENDER_ENVIRONMENT);
+    out.push_back(
+        fmt::format("render.env: aurora decoded {} skipped {} malformed {} late {} bytes {}",
+            counters.decoded, counters.skipped, counters.malformed, counters.late, counters.bytes));
+}
+
+CheckResult check_fog_fields() {
+    if (dComIfGp_getCamera(0) == nullptr) {
+        return skip("no camera 0");
+    }
+    const auto state = build_scratch_environment(sun_moon_lit());
+    const AuroraEnvironment& env = state->env;
+    std::string problems;
+    const auto plane = [&problems](std::string_view name, f32 sent, f32 source) {
+        if (!same_bits(sent, source)) {
+            append_problem(problems, fmt::format("{} {:.9g} against {:.9g}", name, sent, source));
+        }
+    };
+    // Restated from GxFogSet_Sub rather than shared with the builder
+    f32 nearZ = 1.0f;
+    f32 farZ = 160000.0f;
+    if (const view_class* view = dComIfGd_getView(); view != nullptr) {
+        if (view->near_ >= 0.0f && view->far_ >= 0.0f && view->near_ < view->far_) {
+            nearZ = view->near_;
+            farZ = view->far_;
+        }
+    }
+    if (env.fogType != GX_FOG_PERSP_LIN) {
+        append_problem(problems, fmt::format("fogType {}", env.fogType));
+    }
+    plane("fogStart", env.fogStart, g_env_light.mFogNear);
+    plane("fogEnd", env.fogEnd, g_env_light.mFogFar);
+    plane("viewNear", env.viewNear, nearZ);
+    plane("viewFar", env.viewFar, farZ);
+    const GXColorS10& fog = g_env_light.fog_col;
+    const std::array<u8, 3> fogGx{
+        static_cast<u8>(fog.r), static_cast<u8>(fog.g), static_cast<u8>(fog.b)};
+    for (size_t i = 0; i < fogGx.size(); ++i) {
+        if (!same_bits(env.fogColor[i], fogGx[i] / 255.0f)) {
+            append_problem(problems,
+                fmt::format("fogColor[{}] {:.9g} against {}", i, env.fogColor[i], fogGx[i]));
+        }
+    }
+    const u32 packed = (g_env_light.mFogAdjEnable != 0 ? 1u : 0u) |
+                       static_cast<u32>(g_env_light.mFogAdjCenter) << 16;
+    if (env.fogRangeAdj != packed) {
+        append_problem(problems,
+            fmt::format("fogRangeAdj 0x{:08X} against 0x{:08X}", env.fogRangeAdj, packed));
+    }
+    if (!std::equal(std::begin(env.fogRangeTable), std::end(env.fogRangeTable),
+            std::begin(g_env_light.mXFogTbl.r)))
+    {
+        append_problem(problems, "fogRangeTable differs from mXFogTbl");
+    }
+    if (env.fogRangeReserved[0] != 0 || env.fogRangeReserved[1] != 0) {
+        append_problem(problems, "fogRangeReserved is not 0");
+    }
+    return verdict(problems,
+        fmt::format("fog {:g}..{:g} view {:g}..{:g} colour {} table {}", env.fogStart, env.fogEnd,
+            env.viewNear, env.viewFar, gx_text(fogGx), table_text(env.fogRangeTable)));
+}
+
+// A failing pure leg still fails the case when its live leg cannot run
+CheckResult without_live_leg(const std::string& problems) {
+    if (!problems.empty()) {
+        return {Verdict::Fail, problems};
+    }
+    return skip("the pure rows pass; the live leg needs camera 0");
+}
+
+std::string flag_rule_problems() {
+    struct Row {
+        std::string_view what;
+        FlagInputs in;
+        u32 flags;
+    };
+    const auto with = [](auto change) {
+        FlagInputs in;
+        change(in);
+        return in;
+    };
+    const auto all = [](FlagInputs& in) { in = {ST_ROOM, true, true, true, 3, 12, false}; };
+    const std::array<Row, 15> rows{{
+        {"field, sun and moon", {}, 0},
+        {"dungeon", with([](FlagInputs& in) { in.stageType = ST_DUNGEON; }), AURORA_ENV_INTERIOR},
+        {"room", with([](FlagInputs& in) { in.stageType = ST_ROOM; }),
+            AURORA_ENV_INTERIOR | AURORA_ENV_ROOM},
+        {"boss room", with([](FlagInputs& in) { in.stageType = ST_BOSS_ROOM; }),
+            AURORA_ENV_INTERIOR},
+        {"castle town", with([](FlagInputs& in) { in.stageType = ST_CASTLE_TOWN; }),
+            AURORA_ENV_INTERIOR},
+        {"cloud sea", with([](FlagInputs& in) { in.stageType = ST_CLOUD_SEA; }),
+            AURORA_ENV_INTERIOR},
+        {"twilight", with([](FlagInputs& in) { in.twilight = true; }), AURORA_ENV_TWILIGHT},
+        {"underwater", with([](FlagInputs& in) { in.underwater = true; }), AURORA_ENV_UNDERWATER},
+        {"senses", with([](FlagInputs& in) { in.senses = true; }),
+            AURORA_ENV_SENSES | AURORA_ENV_NO_VOLUMETRIC},
+        {"rain 1", with([](FlagInputs& in) { in.rain = 1; }), AURORA_ENV_RAIN},
+        {"rain -1", with([](FlagInputs& in) { in.rain = -1; }), 0},
+        {"snow 1", with([](FlagInputs& in) { in.snowCount = 1; }), AURORA_ENV_SNOW},
+        {"snow 0", with([](FlagInputs& in) { in.snowCount = 0; }), 0},
+        {"SunMoon fails", with([](FlagInputs& in) { in.sunMoon = false; }), AURORA_ENV_NO_SUN},
+        {"everything", with(all), 0x1FF},
+    }};
+    std::string problems;
+    for (const Row& row : rows) {
+        const u32 flags = environment_flags(row.in);
+        if (flags != row.flags) {
+            append_problem(problems, fmt::format("{} gives {}", row.what, env_flag_names(flags)));
+        }
+    }
+    return problems;
+}
+
+// The light list shows its sun decision in what it emitted: a sun or moon key, or KEY_ROOM
+std::string no_sun_problem(const SceneLights& lights, u32 flags, std::string_view what) {
+    const bool noSun = (flags & AURORA_ENV_NO_SUN) != 0;
+    bool body = false;
+    for (size_t i = 0; i < lights.list.count; ++i) {
+        const LightKind kind = lights.list.notes[i].kind;
+        body = body || kind == LightKind::Sun || kind == LightKind::Moon;
+    }
+    const bool bodyKey = lights.key == LightKind::Sun || lights.key == LightKind::Moon;
+    if ((bodyKey || body) && noSun) {
+        return fmt::format("{}: NO_SUN set with the {} key", what, kind_name(lights.key));
+    }
+    if (lights.key == LightKind::KeyRoom && !noSun) {
+        return fmt::format("{}: NO_SUN clear with the KeyRoom key", what);
+    }
+    return {};
+}
+
+CheckResult check_env_flags() {
+    std::string problems = flag_rule_problems();
+    if (dComIfGp_getCamera(0) == nullptr) {
+        return without_live_leg(problems);
+    }
+    const auto state = build_scratch_environment(sun_moon_lit());
+    const u32 flags = state->env.flags;
+    stage_stag_info_class* info = dComIfGp_getStage()->getStagInfo();
+    const bool senses = dComIfGp_getLinkPlayer() != nullptr && daPy_py_c::checkNowWolfPowerUp();
+    const std::array<std::pair<u32, bool>, 9> kRows{{
+        {AURORA_ENV_INTERIOR, info != nullptr && dKy_Indoor_check() == TRUE},
+        {AURORA_ENV_TWILIGHT, dKy_darkworld_check() != 0},
+        {AURORA_ENV_UNDERWATER, dKy_camera_water_in_status_check() != 0},
+        {AURORA_ENV_SENSES, senses},
+        {AURORA_ENV_RAIN, dKy_rain_check() > 0},
+        {AURORA_ENV_SNOW, g_env_light.mSnowCount > 0},
+        {AURORA_ENV_NO_SUN, dKy_SunMoon_Light_Check() != TRUE},
+        {AURORA_ENV_NO_VOLUMETRIC, senses},
+        {AURORA_ENV_ROOM, info != nullptr && dStage_stagInfo_GetSTType(info) == ST_ROOM},
+    }};
+    u32 known = 0;
+    for (const auto& [bit, expected] : kRows) {
+        known |= bit;
+        if (((flags & bit) != 0) != expected) {
+            append_problem(problems,
+                fmt::format("{} is {}", env_flag_names(bit), (flags & bit) != 0 ? "set" : "clear"));
+        }
+    }
+    if ((flags & ~known) != 0) {
+        append_problem(problems, fmt::format("unknown bits 0x{:X}", flags & ~known));
+    }
+    // A scratch list built on its own, then the pair this painter actually sent
+    const auto lights = make_scratch();
+    build_scene_lights(*lights);
+    if (std::string mismatch = no_sun_problem(lights->lights, flags, "scratch"); !mismatch.empty())
+    {
+        append_problem(problems, mismatch);
+    }
+    std::string sent = "no pair sent in the last painter";
+    if (s_envStats.any && s_stats.any && s_env.report.frame == s_live.lights.frame) {
+        const std::string what = fmt::format("frame {}", s_env.report.frame);
+        if (std::string mismatch = no_sun_problem(s_live.lights, s_env.env.flags, what);
+            !mismatch.empty())
+        {
+            append_problem(problems, mismatch);
+        }
+        sent = fmt::format("frame {} sent key {} with NO_SUN {}", s_env.report.frame,
+            kind_name(s_live.lights.key),
+            (s_env.env.flags & AURORA_ENV_NO_SUN) != 0 ? "set" : "clear");
+    }
+    return verdict(problems, fmt::format("flags {}; scratch key {}; {}", env_flag_names(flags),
+                                 kind_name(lights->lights.key), sent));
+}
+
+CheckResult check_sky_visible() {
+    const bool predicate = sky_visible();
+    // wether_move_vrkumo's own conditions for drawing the clouds of the sky box
+    bool direct = false;
+    const bool skyBox = dComIfGp_checkStatus(1) != 0 && !g_env_light.hide_vrbox;
+    BOOL vrboxSwitch = FALSE;
+    roomRead_class* room = dComIfGp_getStageRoom();
+    const int stay = dComIfGp_roomControl_getStayNo();
+    if (room != nullptr && stay >= 0 && room->num > stay) {
+        vrboxSwitch = dStage_roomRead_dt_c_GetVrboxswitch(*room->m_entries[stay]);
+    }
+    if (skyBox) {
+        direct = stage_is("F_SP200") || vrboxSwitch != 0;
+    }
+    std::string problems;
+    if (predicate != direct) {
+        append_problem(problems, fmt::format("sky_visible() {} against {}", predicate, direct));
+    }
+    const auto state = build_scratch_environment(sun_moon_lit());
+    if (state->env.skyVisibility != (predicate ? 1.0f : 0.0f)) {
+        append_problem(problems, fmt::format("skyVisibility {:g}", state->env.skyVisibility));
+    }
+    return verdict(
+        problems, fmt::format("skyVisible {} (sky box {}, hide_vrbox {}, vrbox switch {}, stay {})",
+                      predicate ? 1 : 0, dComIfGp_checkStatus(1) != 0 ? 1 : 0,
+                      g_env_light.hide_vrbox ? 1 : 0, vrboxSwitch != 0 ? 1 : 0, stay));
+}
+
+// The sent values are f32, and just below the 65536 u wrap one f32 step is 2^-8 u
+constexpr double kWindStepTolerance = 1e-2;
+constexpr double kFlutterTolerance = 1e-5;
+
+double flutter_rate(size_t k, f32 strength) noexcept {
+    return kTwoPi * kFlutterHz[k] * (0.25 + 0.75 * static_cast<double>(strength)) *
+           dusk::game_clock::kSimPeriod;
+}
+
+std::string test_wind_phase() {
+    std::string problems;
+    const StageKey stage{{'F', '_', 'S', 'P', '1', '2', '1'}, 6, 1};
+    const WindVector wind{{1.0f, 0.0f, 0.0f}, static_cast<f32>(600.0 / kWindWorldSpeed)};
+    const double tick =
+        static_cast<double>(wind.strength) * kWindWorldSpeed * dusk::game_clock::kSimPeriod;
+    WindState state;
+    AuroraEnvironment env{};
+    WindInputs in{wind, 1000, stage, 1, 1.0f};
+    if (!advance_wind(state, in, env).reset || env.windPhase[0] != env.windPhasePrev[0]) {
+        append_problem(problems, "the first build is not a reset");
+    }
+    const auto step = [&env](size_t i) {
+        return static_cast<double>(env.windPhase[i]) - static_cast<double>(env.windPhasePrev[i]);
+    };
+    const auto in_turn = [](f32 phase) { return phase >= 0.0f && phase < kTwoPi; };
+    state.phase[0] = kWindPhasePeriod - 900.0;
+    state.presentedPhase[0] = state.phase[0];
+    bool wrapped = false;
+    bool flutterWrapped = false;
+    for (u32 t = 1; t <= 90; ++t) {
+        const f32 before = env.windPhase[0];
+        std::array<f32, 3> flutterBefore{};
+        std::copy(std::begin(env.flutterPhase), std::end(env.flutterPhase), flutterBefore.begin());
+        in.counter = 1000 + t;
+        const WindStep result = advance_wind(state, in, env);
+        wrapped = wrapped || env.windPhase[0] < before;
+        if (result.reset || result.ticks != 1 || std::fabs(step(0) - tick) > kWindStepTolerance ||
+            step(1) != 0.0 || env.windPhase[0] < 0.0f || !(env.windPhase[0] < kWindPhasePeriod))
+        {
+            append_problem(problems, fmt::format("tick {}: phase {} prev {}", t, env.windPhase[0],
+                                         env.windPhasePrev[0]));
+            break;
+        }
+        std::string flutterProblem;
+        for (size_t k = 0; k < kFlutterHz.size() && flutterProblem.empty(); ++k) {
+            double moved = static_cast<double>(env.flutterPhase[k]) - flutterBefore[k];
+            if (moved < 0.0) {
+                moved += kTwoPi;
+                flutterWrapped = true;
+            }
+            if (!in_turn(env.flutterPhase[k]) ||
+                std::fabs(moved - flutter_rate(k, wind.strength)) > kFlutterTolerance)
+            {
+                flutterProblem = fmt::format(
+                    "tick {}: flutter[{}] {} moved {}", t, k, env.flutterPhase[k], moved);
+            }
+        }
+        if (!flutterProblem.empty()) {
+            append_problem(problems, flutterProblem);
+            break;
+        }
+    }
+    if (!wrapped || !flutterWrapped) {
+        append_problem(problems, "90 ticks never crossed a wrap");
+    }
+    // A second presentation at the same tick and step shows the same phases
+    std::array<f32, 5> held{env.windPhase[0], env.windPhase[1], env.flutterPhase[0],
+        env.flutterPhase[1], env.flutterPhase[2]};
+    advance_wind(state, in, env);
+    if (held != std::array<f32, 5>{env.windPhase[0], env.windPhase[1], env.flutterPhase[0],
+                    env.flutterPhase[1], env.flutterPhase[2]})
+    {
+        append_problem(problems, "the phases move when no tick passes");
+    }
+    const auto expect_reset = [&](std::string_view what) {
+        const WindStep result = advance_wind(state, in, env);
+        if (!result.reset || env.windPhase[0] != env.windPhasePrev[0] ||
+            env.windPhase[1] != env.windPhasePrev[1])
+        {
+            append_problem(problems, fmt::format("{} does not give prev == cur", what));
+        }
+    };
+    in.stage.epoch = 2;
+    in.counter += 1;
+    expect_reset("a stage-key change");
+    if (env.windPhase[0] != 0.0f || env.flutterPhase[0] != 0.0f || env.flutterPhase[1] != 0.0f ||
+        env.flutterPhase[2] != 0.0f)
+    {
+        append_problem(problems, "a new load does not start the phases at 0");
+    }
+    in.presentationEpoch = 2;
+    in.counter += 1;
+    expect_reset("a presentation epoch change");
+    in.counter += kMaxWindTicks + 1;
+    expect_reset("a gap of more than 30 ticks");
+    // Two presentations of one tick add up to that tick
+    in.counter += 1;
+    in.step = 0.5f;
+    advance_wind(state, in, env);
+    const double first = step(0);
+    in.step = 1.0f;
+    advance_wind(state, in, env);
+    if (std::fabs(first - tick / 2.0) > kWindStepTolerance ||
+        std::fabs(first + step(0) - tick) > kWindStepTolerance)
+    {
+        append_problem(problems, fmt::format("half steps {} and {}", first, step(0)));
+    }
+    const f32 nan = std::numeric_limits<f32>::quiet_NaN();
+    const f32 inf = std::numeric_limits<f32>::infinity();
+    const std::array<std::pair<std::string_view, WindVector>, 5> calmRows{{
+        {"a zero vector", wind_from({0.0f, 0.0f, 0.0f}, 0.7f)},
+        {"a vector under 1e-6", wind_from({0.0f, 0.0f, 1e-7f}, 0.7f)},
+        {"a NaN strength", wind_from({0.0f, 0.0f, 1.0f}, nan)},
+        {"a NaN vector", wind_from({nan, 0.0f, 1.0f}, 0.7f)},
+        {"an infinite vector", wind_from({inf, 0.0f, 0.0f}, 0.7f)},
+    }};
+    for (const auto& [what, calm] : calmRows) {
+        if (calm.strength != 0.0f || length(calm.dir) != 0.0f) {
+            append_problem(problems, fmt::format("{} does not give a calm wind", what));
+        }
+    }
+    const WindVector breeze = wind_from({0.0f, 0.0f, 2.0f}, 0.3f);
+    if (breeze.strength != 0.3f || !within(breeze.dir, {0.0f, 0.0f, 1.0f}, 1e-6f)) {
+        append_problem(problems, "a breeze is not normalized");
+    }
+    in.wind = calmRows[0].second;
+    in.counter += 1;
+    advance_wind(state, in, env);
+    const f32 still = env.windPhase[0];
+    in.counter += 5;
+    advance_wind(state, in, env);
+    if (env.windPhase[0] != still || step(0) != 0.0) {
+        append_problem(problems, "the phase moves without wind");
+    }
+    return problems;
+}
+
+std::string shaft_rule_problems() {
+    ShaftInputs lit;
+    lit.sunInitialized = true;
+    lit.packet = true;
+    lit.daytime = 150.0f;
+    lit.sunMoon = true;
+    lit.sunAlpha = 0.75f;
+    struct Row {
+        std::string_view what;
+        ShaftInputs in;
+        f32 gate;
+    };
+    const auto with = [&lit](auto change) {
+        ShaftInputs in = lit;
+        change(in);
+        return in;
+    };
+    const std::array<Row, 17> rows{{
+        {"midday", lit, 0.75f},
+        {"no sun yet", with([](ShaftInputs& in) { in.sunInitialized = false; }), 0.0f},
+        {"no sun packet", with([](ShaftInputs& in) { in.packet = false; }), 0.0f},
+        {"daytime 77.5", with([](ShaftInputs& in) { in.daytime = 77.5f; }), 0.0f},
+        {"daytime 77.6", with([](ShaftInputs& in) { in.daytime = 77.6f; }), 0.75f},
+        {"daytime 285", with([](ShaftInputs& in) { in.daytime = 285.0f; }), 0.0f},
+        {"daytime 284.9", with([](ShaftInputs& in) { in.daytime = 284.9f; }), 0.75f},
+        {"rain 20", with([](ShaftInputs& in) { in.rain = 20; }), 0.0f},
+        {"rain 19", with([](ShaftInputs& in) { in.rain = 19; }), 0.75f},
+        {"F_SP200 or D_MN09B", with([](ShaftInputs& in) { in.flareStage = false; }), 0.0f},
+        {"weather pattern", with([](ShaftInputs& in) { in.colpatWeather = 1; }), 0.0f},
+        {"snow 11", with([](ShaftInputs& in) { in.snowCount = 11; }), 0.0f},
+        {"snow 10", with([](ShaftInputs& in) { in.snowCount = 10; }), 0.75f},
+        {"room stage", with([](ShaftInputs& in) { in.room = true; }), 0.0f},
+        {"SunMoon fails", with([](ShaftInputs& in) { in.sunMoon = false; }), 0.0f},
+        {"alpha 1.5", with([](ShaftInputs& in) { in.sunAlpha = 1.5f; }), 1.0f},
+        {"alpha -0.2", with([](ShaftInputs& in) { in.sunAlpha = -0.2f; }), 0.0f},
+    }};
+    std::string problems;
+    for (const Row& row : rows) {
+        if (shaft_gate(row.in) != row.gate) {
+            append_problem(problems, fmt::format("{} gives {}", row.what, shaft_gate(row.in)));
+        }
+    }
+    return problems;
+}
+
+CheckResult check_shaft_gate() {
+    std::string problems = shaft_rule_problems();
+    if (dComIfGp_getCamera(0) == nullptr) {
+        return without_live_leg(problems);
+    }
+    // dKyr_sun_move's conditions restated from game state, not read through live_shaft_inputs
+    const dKankyo_sun_Packet* sun = g_env_light.mpSunPacket;
+    stage_stag_info_class* info = dComIfGp_getStage()->getStagInfo();
+    const char* name = dComIfGp_getStartStageName();
+    const bool room = info != nullptr && dStage_stagInfo_GetSTType(info) == ST_ROOM;
+    const bool flareStage = strcmp(name, "F_SP200") != 0 && strcmp(name, "D_MN09B") != 0;
+    const bool fadesIn = g_env_light.daytime > 77.5f && g_env_light.daytime < 285.0f &&
+                         dKy_rain_check() < 20 && flareStage;
+    const bool flare = g_env_light.mColpatWeather == 0 && g_env_light.mSnowCount <= 10 && !room;
+    const bool sunMoon = dKy_SunMoon_Light_Check() == TRUE;
+    const bool on = g_env_light.mSunInitialized && sun != nullptr && fadesIn && flare && sunMoon;
+    const f32 expected = on ? std::clamp(sun->mSunAlpha, 0.0f, 1.0f) : 0.0f;
+    const ShaftInputs in = live_shaft_inputs(sun_moon_lit());
+    const std::array<std::pair<std::string_view, bool>, 10> kSame{{
+        {"sunInitialized", in.sunInitialized == g_env_light.mSunInitialized},
+        {"packet", in.packet == (sun != nullptr)},
+        {"daytime", same_bits(in.daytime, g_env_light.daytime)},
+        {"rain", in.rain == dKy_rain_check()},
+        {"flareStage", in.flareStage == flareStage},
+        {"colpatWeather", in.colpatWeather == g_env_light.mColpatWeather},
+        {"snowCount", in.snowCount == g_env_light.mSnowCount},
+        {"room", in.room == room},
+        {"sunMoon", in.sunMoon == sunMoon},
+        {"sunAlpha", sun == nullptr ? in.sunAlpha == 0.0f : same_bits(in.sunAlpha, sun->mSunAlpha)},
+    }};
+    for (const auto& [field, same] : kSame) {
+        if (!same) {
+            append_problem(problems, fmt::format("input {} differs from the game", field));
+        }
+    }
+    const auto state = build_scratch_environment(sunMoon);
+    if (shaft_gate(in) != expected || state->env.sunShaftGate != expected) {
+        append_problem(problems, fmt::format("gate {:g} and sent {:g} against {:g}", shaft_gate(in),
+                                     state->env.sunShaftGate, expected));
+    }
+    return verdict(
+        problems, fmt::format("gate {:g} (fades in {}, flare {}, SunMoon {}, alpha {:g})", expected,
+                      fadesIn ? 1 : 0, flare ? 1 : 0, sunMoon ? 1 : 0,
+                      sun != nullptr ? sun->mSunAlpha : 0.0f));
+}
+
+std::string default_problems(const AuroraEnvironment& env, bool exposure) {
+    struct Row {
+        std::string_view name;
+        f32 value;
+        f32 expected;
+    };
+    const std::array<Row, 21> rows{{
+        {"hazeAtFogEnd", env.hazeAtFogEnd, -1.0f},
+        {"hazeDensity", env.hazeDensity, -1.0f},
+        {"heightFogDensity", env.heightFogDensity, 0.0f},
+        {"heightFogBase", env.heightFogBase, 0.0f},
+        {"heightFogFalloff", env.heightFogFalloff, 0.0f},
+        {"mediaAlbedo.r", env.mediaAlbedo[0], -1.0f},
+        {"mediaAlbedo.g", env.mediaAlbedo[1], -1.0f},
+        {"mediaAlbedo.b", env.mediaAlbedo[2], -1.0f},
+        {"mediaEmissive.r", env.mediaEmissive[0], 0.0f},
+        {"mediaEmissive.g", env.mediaEmissive[1], 0.0f},
+        {"mediaEmissive.b", env.mediaEmissive[2], 0.0f},
+        {"phaseG", env.phaseG, -2.0f},
+        {"phaseG2", env.phaseG2, -2.0f},
+        {"phaseBlend", env.phaseBlend, -1.0f},
+        {"noiseScale", env.noiseScale, -1.0f},
+        {"noiseAmount", env.noiseAmount, -1.0f},
+        {"relightStrength", env.relightStrength, -1.0f},
+        {"relightAmbient", env.relightAmbient, -1.0f},
+        {"sunGlow", env.sunGlow, -1.0f},
+        {"volumeFar", env.volumeFar, -1.0f},
+        {"exposureBias", env.exposureBias, 0.0f},
+    }};
+    // exposureBias is last: apply_env_defaults leaves it to the zeroed struct
+    std::string problems;
+    for (const Row& row : std::span(rows).first(exposure ? rows.size() : rows.size() - 1)) {
+        if (!same_bits(row.value, row.expected)) {
+            append_problem(problems, fmt::format("{} = {:g}", row.name, row.value));
+        }
+    }
+    if (env.fogRangeReserved[0] != 0 || env.fogRangeReserved[1] != 0) {
+        append_problem(problems, "fogRangeReserved is not 0");
+    }
+    return problems;
+}
+
+CheckResult check_env_defaults() {
+    // Filled first, so a row expecting 0 proves apply_env_defaults wrote it
+    AuroraEnvironment filled;
+    std::memset(&filled, 0x7F, sizeof filled);
+    apply_env_defaults(filled);
+    std::string problems = default_problems(filled, false);
+    if (pack_range_adj(1, 0x140) != 0x01400001u || pack_range_adj(0, 0xFFFF) != 0xFFFF0000u ||
+        pack_range_adj(2, 0) != 1u)
+    {
+        append_problem(problems, "fogRangeAdj packing");
+    }
+    if (dComIfGp_getCamera(0) == nullptr) {
+        return without_live_leg(problems);
+    }
+    const auto state = build_scratch_environment(sun_moon_lit());
+    const AuroraEnvironment& env = state->env;
+    if (const std::string built = default_problems(env, true); !built.empty()) {
+        append_problem(problems, "built: " + built);
+    }
+    if (env.unitsPerMeter != kUnitsPerMeter) {
+        append_problem(problems, fmt::format("unitsPerMeter {:g}", env.unitsPerMeter));
+    }
+    if (!same_bits(env.timeOfDay, g_env_light.daytime / 15.0f)) {
+        append_problem(problems,
+            fmt::format("timeOfDay {:g} for daytime {:g}", env.timeOfDay, g_env_light.daytime));
+    }
+    return verdict(problems, fmt::format("sentinels set, unitsPerMeter {:g}, timeOfDay {:g}",
+                                 env.unitsPerMeter, env.timeOfDay));
+}
+
+std::string test_fog_probe_window() {
+    std::string problems;
+    AuroraEnvironment env{};
+    env.fogType = GX_FOG_PERSP_LIN;
+    env.fogStart = 500.0f;
+    env.fogEnd = 26000.0f;
+    env.viewNear = 5.0f;
+    env.viewFar = 320000.0f;
+    const GXColor colour{200, 210, 220, 0};
+    env.fogColor[0] = colour.r / 255.0f;
+    env.fogColor[1] = colour.g / 255.0f;
+    env.fogColor[2] = colour.b / 255.0f;
+    env.fogRangeAdj = pack_range_adj(1, 0x140);
+    const GXFogAdjTable table{{260, 260, 270, 280, 290, 300, 310, 320, 330, 340}};
+    std::copy(std::begin(table.r), std::end(table.r), std::begin(env.fogRangeTable));
+    const auto matching = [&](FogProbe& probe) {
+        probe_fog(probe, GX_FOG_PERSP_LIN, 500.0f, 26000.0f, 5.0f, 320000.0f, colour);
+    };
+
+    FogProbe probe;
+    if (probe_request(probe, false) != "render.env check: SKIP (hints off)" || probe.pending) {
+        append_problem(problems, "hints off does not give the SKIP reply");
+    }
+    if (probe_request(probe, true) != "render.env check: armed for the next scene frame" ||
+        !probe.pending)
+    {
+        append_problem(problems, "a request does not leave a check pending");
+    }
+    probe_fog(probe, GX_FOG_NONE, 0.0f, 0.0f, 0.0f, 0.0f, colour);
+    probe_arm(probe, env, 7);
+    matching(probe);
+    matching(probe);
+    probe_range(probe, 1, 0x140, table);
+    probe_range(probe, 1, 0x140, table);
+    const ProbeResult pass = probe_close(probe);
+    if (!pass.pass || pass.line != "render.env check: PASS fog=2 range=2 (frame 7)" ||
+        probe.pending || probe.armed)
+    {
+        append_problem(problems, fmt::format("two matching calls give '{}'", pass.line));
+    }
+    probe_fog(probe, GX_FOG_NONE, 1.0f, 2.0f, 3.0f, 4.0f, colour);
+    probe_range(probe, 0, 0, table);
+    if (probe.fog != 2 || probe.range != 2 || probe.field != ProbeField::None) {
+        append_problem(problems, "a call after the close was counted");
+    }
+
+    GXFogAdjTable bad = table;
+    bad.r[3] = 999;
+    probe_arm(probe, env, 8);
+    matching(probe);
+    probe_range(probe, 1, 0x140, bad);
+    const ProbeResult tableFail = probe_close(probe);
+    if (tableFail.pass || !tableFail.line.starts_with("render.env check: FAIL fogRangeTable[3]")) {
+        append_problem(problems, fmt::format("a mismatching table gives '{}'", tableFail.line));
+    }
+
+    probe_arm(probe, env, 9);
+    probe_fog(
+        probe, GX_FOG_PERSP_LIN, std::nextafter(500.0f, 1e9f), 26000.0f, 5.0f, 320000.0f, colour);
+    const ProbeResult startFail = probe_close(probe);
+    if (startFail.pass || !startFail.line.starts_with("render.env check: FAIL fogStart")) {
+        append_problem(problems, fmt::format("a start one ulp off gives '{}'", startFail.line));
+    }
+
+    probe_arm(probe, env, 10);
+    probe_range(probe, 1, 0x140, table);
+    const ProbeResult none = probe_close(probe);
+    if (none.pass || none.line != "render.env check: FAIL no environment-fog program (frame 10)") {
+        append_problem(problems, fmt::format("no fog call gives '{}'", none.line));
+    }
+    return problems;
+}
+
+CheckResult check_fog_probe() {
+    if (!s_probeRan) {
+        return skip(s_probe.pending ? "a render.env check is still pending" :
+                                      "no render.env check has run");
+    }
+    return {s_probeResult.pass ? Verdict::Pass : Verdict::Fail, s_probeResult.line};
+}
+
+CheckResult check_env_read_only() {
+    auto before = std::make_unique<GameSnapshot>();
+    before->take();
+    const auto lights = make_scratch();
+    build_scene_lights(*lights);
+    const auto env = build_scratch_environment(lights->lights.sunMoon);
+    const bool sky = sky_visible();
+    const ViewRange view = fog_view_range();
+    const GXColorS10& fog = g_env_light.fog_col;
+    FogProbe probe;
+    probe_arm(probe, env->env, env->report.frame);
+    probe_fog(probe, GX_FOG_PERSP_LIN, g_env_light.mFogNear, g_env_light.mFogFar, view.nearZ,
+        view.farZ, {static_cast<u8>(fog.r), static_cast<u8>(fog.g), static_cast<u8>(fog.b), 0});
+    probe_range(probe, g_env_light.mFogAdjEnable, g_env_light.mFogAdjCenter, g_env_light.mXFogTbl);
+    const ProbeResult result = probe_close(probe);
+    return verdict(before->problems(),
+        fmt::format("{} lights and the environment built (sky {}, gate {:g}, probe {}), "
+                    "nothing written",
+            lights->lights.list.count, sky ? 1 : 0, env->env.sunShaftGate,
+            result.pass ? "PASS" : "FAIL"));
+}
+
+CheckResult check_env_aurora_agrees() {
+    if (!hints_active()) {
+        return skip("hints are off");
+    }
+    if (!s_envStats.any) {
+        return skip("no environment sent yet");
+    }
+    const ar::HintCounters counters = ar::hint_counters(GX_AURORA_RENDER_ENVIRONMENT);
+    // An environment sent in the frame still being recorded has not reached the decoder yet
+    const bool inFlight = s_envStats.any && s_envStats.lastFrame == aurora::gfx::current_frame();
+    const u64 sent = s_envStats.submits - (inFlight ? 1 : 0);
+    std::string problems;
+    if (counters.decoded != sent) {
+        append_problem(problems,
+            fmt::format("aurora decoded {} environments, dusk sent {}", counters.decoded, sent));
+    }
+    if (counters.malformed != 0 || counters.late != 0) {
+        append_problem(
+            problems, fmt::format("malformed {} late {}", counters.malformed, counters.late));
+    }
+    if (counters.skipped == 0 && counters.bytes != counters.decoded * kEnvironmentHintBytes) {
+        append_problem(
+            problems, fmt::format("bytes {} for {} hints", counters.bytes, counters.decoded));
+    }
+    return verdict(
+        problems, fmt::format("decoded {} = sent, bytes {}", counters.decoded, counters.bytes));
+}
+
 }  // namespace
 
 void submit_lights() {
@@ -2059,7 +3330,7 @@ void submit_lights() {
     const u16 count = lights.list.count;
     ++s_stats.submits;
     s_stats.lights += count;
-    s_stats.bytes += kHintHeaderBytes + kLightBytes * count;
+    s_stats.bytes += kLightsFixedBytes + kLightBytes * count;
     s_stats.dropped += lights.list.dropped;
     s_stats.maxCount = std::max(s_stats.maxCount, count);
     s_stats.any = true;
@@ -2073,7 +3344,7 @@ void submit_lights() {
     if (s_logRemaining != 0) {
         --s_logRemaining;
         LightLog.info("render.lights: frame={} lights={} bytes={}", lights.frame, count,
-            kHintHeaderBytes + kLightBytes * count);
+            kLightsFixedBytes + kLightBytes * count);
     }
 }
 
@@ -2099,28 +3370,109 @@ bool lights_command(std::span<const std::string> args, std::vector<std::string>&
 }
 
 void lights_self_test(SelfTestReport& report) {
-    const auto check = [&report](std::string_view name, const std::string& failure) {
-        if (failure.empty()) {
-            ++report.passed;
-        } else {
-            report.failed.push_back(fmt::format("{}: {}", name, failure));
-        }
-    };
-    check("lights.sky_angle", test_sky_angle());
+    record_test(report, "lights.sky_angle", test_sky_angle());
     record(report, "lights.sun_matches_game", check_sun_matches_game());
     record(report, "lights.key_matches_base_light", check_key_matches_base_light());
-    check("lights.crossfade", test_crossfade());
-    check("lights.attn_radius", test_attn_radius());
-    check("lights.spot_shape", test_spot_shape());
-    check("lights.camera_fill_rule", test_camera_fill_rule());
-    check("lights.player_light", test_player_light());
-    check("lights.ids", test_ids());
-    check("lights.order_truncation", test_order_truncation());
-    check("lights.linear_colour", test_linear_colour());
-    check("lights.gate", test_gate());
+    record_test(report, "lights.crossfade", test_crossfade());
+    record_test(report, "lights.attn_radius", test_attn_radius());
+    record_test(report, "lights.spot_shape", test_spot_shape());
+    record_test(report, "lights.camera_fill_rule", test_camera_fill_rule());
+    record_test(report, "lights.player_light", test_player_light());
+    record_test(report, "lights.ids", test_ids());
+    record_test(report, "lights.order_truncation", test_order_truncation());
+    record_test(report, "lights.linear_colour", test_linear_colour());
+    record_test(report, "lights.gate", test_gate());
     record(report, "lights.slot_coverage", check_slot_coverage());
     record(report, "lights.read_only", check_read_only());
     record(report, "lights.aurora_agrees", check_aurora_agrees());
+}
+
+void submit_environment() {
+    ZoneScopedN("dusk::render::submit_environment");
+    if (!has_main_camera()) {
+        return;
+    }
+    // NO_SUN takes the sun decision of the light list this painter sent
+    const bool listed = s_stats.any && s_live.lights.frame == aurora::gfx::current_frame();
+    build_environment(s_env, s_live.loads, listed ? s_live.lights.sunMoon : sun_moon_lit());
+    GXAuroraSetEnvironment(&s_env.env);
+    ++s_envStats.submits;
+    s_envStats.any = true;
+    s_envStats.lastFrame = s_env.report.frame;
+    if (s_probe.pending) {
+        probe_arm(s_probe, s_env.env, s_env.report.frame);
+    }
+    if (s_envLogRemaining != 0) {
+        --s_envLogRemaining;
+        LightLog.info("render.env: frame={} bytes={}", s_env.report.frame, kEnvironmentHintBytes);
+    }
+}
+
+void fog_probe_env(
+    GXFogType type, f32 startZ, f32 endZ, f32 nearZ, f32 farZ, GXColor color) noexcept {
+    if (s_probe.armed) {
+        probe_fog(s_probe, type, startZ, endZ, nearZ, farZ, color);
+    }
+}
+
+void fog_probe_range(u8 enable, u16 center, const GXFogAdjTable& table) noexcept {
+    if (s_probe.armed) {
+        probe_range(s_probe, enable, center, table);
+    }
+}
+
+void fog_probe_close() noexcept {
+    if (!s_probe.armed) {
+        return;
+    }
+    s_probeResult = probe_close(s_probe);
+    s_probeRan = true;
+    LightLog.info("{}", s_probeResult.line);
+}
+
+bool sky_visible() {
+    if (dComIfGp_checkStatus(1) == 0 || g_env_light.hide_vrbox) {
+        return false;
+    }
+    if (stage_is("F_SP200")) {
+        return true;
+    }
+    roomRead_class* room = dComIfGp_getStageRoom();
+    const int stay = dComIfGp_roomControl_getStayNo();
+    return room != nullptr && stay >= 0 && room->num > stay &&
+           dStage_roomRead_dt_c_GetVrboxswitch(*room->m_entries[stay]) != 0;
+}
+
+bool environment_command(std::span<const std::string> args, std::vector<std::string>& out) {
+    const std::string_view verb = args.empty() ? std::string_view{"show"} : args[0];
+    u32 count = 0;
+    if (args.size() <= 1 && verb == "show") {
+        describe_environment(out);
+    } else if (args.size() == 1 && verb == "check") {
+        out.push_back(probe_request(s_probe, ar::hints_enabled()));
+    } else if (args.size() == 1 && verb == "counts") {
+        describe_env_counts(out);
+    } else if (args.size() == 2 && verb == "log" && parse_count(args[1], count)) {
+        s_envLogRemaining = count;
+        out.push_back(fmt::format("render.env: logging the next {} submits", count));
+    } else {
+        out.emplace_back(kEnvUsage);
+        return false;
+    }
+    return true;
+}
+
+void environment_self_test(SelfTestReport& report) {
+    record(report, "env.fog_fields", check_fog_fields());
+    record(report, "env.flags", check_env_flags());
+    record(report, "env.sky_visible", check_sky_visible());
+    record_test(report, "env.wind_phase", test_wind_phase());
+    record(report, "env.shaft_gate", check_shaft_gate());
+    record(report, "env.defaults", check_env_defaults());
+    record_test(report, "env.fog_probe_window", test_fog_probe_window());
+    record(report, "env.fog_probe", check_fog_probe());
+    record(report, "env.read_only", check_env_read_only());
+    record(report, "env.aurora_agrees", check_env_aurora_agrees());
 }
 
 }  // namespace dusk::render

@@ -1563,6 +1563,7 @@ set(DUSK_FILES
         src/dusk/presentation.hpp
         src/dusk/render/draw_tags.cpp
         src/dusk/render/draw_tags.hpp
+        src/dusk/render/fog_probe.hpp
         src/dusk/render/graphics_fields.inl
         src/dusk/render/hints.hpp
         src/dusk/render/lights.cpp

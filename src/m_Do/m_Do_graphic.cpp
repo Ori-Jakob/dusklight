@@ -2340,6 +2340,7 @@ int mDoGph_Painter() {
                 dKy_setLight_again();
             }
             dusk::render::submit_lights();
+            dusk::render::submit_environment();
 #endif
 #if TARGET_PC
             dusk::render::begin_tag_scope(dusk::render::TagScope::Sky);
@@ -2881,6 +2882,7 @@ int mDoGph_Painter() {
 #if TARGET_PC
     dusk::mods::gfx_run_stage(GFX_STAGE_FRAME_AFTER_HUD);
     dusk::render::mark_stage(aurora::render::Stage::FrameEnd);
+    dusk::render::fog_probe_close();
 #endif
 
     #if DEBUG

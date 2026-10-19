@@ -597,6 +597,7 @@ static void RunRenderSelfTest(
     render::registry_self_test(report);
     render::material_tags_self_test(report);
     render::lights_self_test(report);
+    render::environment_self_test(report);
     for (const auto& failure : report.failed) {
         TraceError(state, output, "FAIL " + failure);
     }
@@ -765,10 +766,13 @@ static void RunRenderTags(
     }
 }
 
-static void RunRenderLights(
-    const std::vector<std::string>& args, CommandState& state, const CommandOutput& output) {
+using RenderTableCommand = bool (*)(
+    std::span<const std::string> args, std::vector<std::string>& out);
+
+static void RunRenderTable(RenderTableCommand command, const std::vector<std::string>& args,
+    CommandState& state, const CommandOutput& output) {
     std::vector<std::string> lines;
-    const bool ok = render::lights_command(std::span(args).subspan(1), lines);
+    const bool ok = command(std::span(args).subspan(1), lines);
     for (const auto& line : lines) {
         if (ok) {
             TraceReply(state, output, line);
@@ -1482,7 +1486,12 @@ void runCommand(std::string_view cmdLine, CommandState& state, const CommandOutp
     }
 
     if (cmd == "render.lights") {
-        RunRenderLights(args, state, output);
+        RunRenderTable(&render::lights_command, args, state, output);
+        return;
+    }
+
+    if (cmd == "render.env") {
+        RunRenderTable(&render::environment_command, args, state, output);
         return;
     }
 
@@ -1508,10 +1517,12 @@ void runCommand(std::string_view cmdLine, CommandState& state, const CommandOutp
         output("list [id|name]                              List actors in scene");
         output("pos                                         Print player position and stage");
         output("rate [hz]                                   Get or set sim rate (1-480, default 30)");
+        output("render.env [show|check|counts|log <n>]      Renderer environment state");
         output(
             "render.graph.dump [file]                    Write the compiled render graph as JSON");
         output("render.hints [reset|ids]                    Render hint counts per painter frame");
-        output("render.lights [list|slots|check|log <n>]    Renderer scene lights");
+        output("render.lights [list|slots|check|counts]     Renderer scene lights");
+        output("render.lights log <n>                       Log the next n light lists");
         output("render.objects [log <frames>]               Renderer objects and scopes for the "
                "last frame");
         output("render.preset <name|recommended|reset>      Apply or show the graphics preset");

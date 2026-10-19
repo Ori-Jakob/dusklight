@@ -37,6 +37,8 @@
 #include "dusk/game_clock.h"
 #include "dusk/interp/material.h"
 #include "dusk/imgui/ImGuiBloomWindow.hpp"
+
+#include "dusk/render/fog_probe.hpp"
 static f32 timeScale = 1.0f;
 #endif
 
@@ -9394,6 +9396,10 @@ static void GxFogSet_Sub(GXColor* fog_col_p) {
     }
 
     GXSetFog(GX_FOG_PERSP_LIN, g_env_light.mFogNear, g_env_light.mFogFar, near_z, far_z, color);
+#if TARGET_PC
+    dusk::render::fog_probe_env(
+        GX_FOG_PERSP_LIN, g_env_light.mFogNear, g_env_light.mFogFar, near_z, far_z, color);
+#endif
 }
 
 static void GxFog_set() {
@@ -9457,6 +9463,10 @@ void dKy_GfFog_tevstr_set(dKy_tevstr_c* tevstr_p) {
 static void GxXFog_set() {
     dKyd_xfog_table_set(g_env_light.mFogAdjTableType);
     GXSetFogRangeAdj(g_env_light.mFogAdjEnable, (u16)g_env_light.mFogAdjCenter, &g_env_light.mXFogTbl);
+#if TARGET_PC
+    dusk::render::fog_probe_range(
+        g_env_light.mFogAdjEnable, (u16)g_env_light.mFogAdjCenter, g_env_light.mXFogTbl);
+#endif
 }
 
 void dKy_change_colpat(u8 colpat) {
