@@ -1199,6 +1199,30 @@ u32 s_logRemaining = 0;
 StageKey s_droppedStage;
 bool s_warnedDropped = false;
 
+struct CameraPainter {
+    bool seen = false;
+    u32 frame = 0;
+    Vec sunLightPos{};
+    Vec previousSunLightPos{};
+};
+
+CameraPainter s_cameraPainter;
+
+// dKy_setLight runs just before this in the same camera block, so this sees every sun_light_pos
+void note_camera_painter() noexcept {
+    const Vec copied = g_env_light.sun_light_pos;
+    s_cameraPainter.previousSunLightPos =
+        s_cameraPainter.seen ? s_cameraPainter.sunLightPos : copied;
+    s_cameraPainter.sunLightPos = copied;
+    s_cameraPainter.seen = true;
+    s_cameraPainter.frame = aurora::gfx::current_frame();
+}
+
+// sun_light_pos and the painter's GX light programming only move in a painter with a camera block
+bool last_painter_had_camera() noexcept {
+    return s_cameraPainter.seen && s_cameraPainter.frame + 1 == aurora::gfx::current_frame();
+}
+
 // Copies the live ids and load epoch so a check never moves what the game's own frames see
 std::unique_ptr<LightState> make_scratch() {
     auto scratch = std::make_unique<LightState>();
@@ -1409,6 +1433,26 @@ std::string base_light_source(const Vec& base) {
     return {};
 }
 
+std::string key_values(const SceneLights& lights, const Vec& base, const Vec& eye) {
+    std::string text = fmt::format("base_light=({:.1f},{:.1f},{:.1f}) eye=({:.1f},{:.1f},{:.1f})",
+        base.x, base.y, base.z, eye.x, eye.y, eye.z);
+    const LightList& list = lights.list;
+    if (list.count != 0) {
+        const AuroraLight& first = list.lights[0];
+        text += fmt::format(" list[0]={} prio={} dir=({:.4f},{:.4f},{:.4f})",
+            kind_name(list.notes[0].kind), first.shadowPriority, first.direction[0],
+            first.direction[1], first.direction[2]);
+    }
+    text += fmt::format(" lightRoom={}", lights.lightRoom);
+    const RoomLights room = room_lights(lights.lightRoom);
+    if (room.count > 0) {
+        const Vec lgt0 = room.info[0].position;
+        text += fmt::format(" slot0={} LGT0=({:.1f},{:.1f},{:.1f})",
+            state_name(lights.rooms[lights.lightRoom][0].state), lgt0.x, lgt0.y, lgt0.z);
+    }
+    return text;
+}
+
 CheckResult check_key_matches_base_light() {
     const camera_process_class* camera = dComIfGp_getCamera(0);
     if (camera == nullptr) {
@@ -1419,72 +1463,110 @@ CheckResult check_key_matches_base_light() {
     const SceneLights& lights = scratch->lights;
     const LightList& list = lights.list;
     const Vec base = g_env_light.base_light.mPosition;
-    const bool sunMoon = dKy_SunMoon_Light_Check() == TRUE;
+    const Vec eye = camera->view.lookat.eye;
+    const RoomLights room = room_lights(lights.lightRoom);
     std::string problems;
+    const auto finish = [&](std::string detail) {
+        if (!problems.empty()) {
+            detail += "; " + key_values(lights, base, eye);
+        }
+        return verdict(problems, std::move(detail));
+    };
     for (size_t i = 1; i < list.count; ++i) {
         if (list.lights[i].shadowPriority == kPrioKey) {
             append_problem(problems,
                 fmt::format("#{} {} also has the key priority", i, kind_name(list.notes[i].kind)));
         }
     }
-    if (lights.key == LightKind::None) {
-        if (list.count != 0 && list.lights[0].shadowPriority == kPrioKey) {
-            append_problem(problems, "a key priority light with no key");
-        }
-        if (sunMoon) {
-            const int body = sun_is_key(g_env_light.daytime) ? 0 : 1;
-            if (!body_black(lights.lightRoom, body)) {
+    const bool keyFirst = list.count != 0 && list.notes[0].kind == lights.key &&
+                          list.lights[0].shadowPriority == kPrioKey;
+    if (lights.key == LightKind::None && list.count != 0 &&
+        list.lights[0].shadowPriority == kPrioKey)
+    {
+        append_problem(problems, "a key priority light with no key");
+    }
+    if (dKy_SunMoon_Light_Check() == TRUE) {
+        const bool sunKey = sun_is_key(g_env_light.daytime);
+        if (lights.key == LightKind::None) {
+            if (!body_black(lights.lightRoom, sunKey ? 0 : 1)) {
                 append_problem(problems, "no key although the key body is lit");
             }
-            return verdict(problems, "no key: the key body is black");
+            return finish("no key: the key body is black");
         }
-        const std::string source = base_light_source(base);
-        if (source.empty()) {
-            append_problem(problems, "base_light matches no displayed LGT0 or env slot");
+        if (!keyFirst) {
+            append_problem(problems,
+                fmt::format("list[0] is not the {} key with priority 255", kind_name(lights.key)));
+            return finish("key check");
         }
-        return verdict(problems, fmt::format("no key; base_light at {}", source));
-    }
-    if (list.count == 0 || list.notes[0].kind != lights.key ||
-        list.lights[0].shadowPriority != kPrioKey)
-    {
-        append_problem(problems,
-            fmt::format("list[0] is not the {} key with priority 255", kind_name(lights.key)));
-        return verdict(problems, "key check");
-    }
-    const AuroraLight& key = list.lights[0];
-    if (sunMoon) {
-        const LightKind expected =
-            sun_is_key(g_env_light.daytime) ? LightKind::Sun : LightKind::Moon;
-        Vec toBase;
-        if (!normalize(sub(base, camera->view.lookat.eye), toBase, 1.0f)) {
-            append_problem(problems, "base_light sits on the eye");
-            return verdict(problems, "key check");
-        }
-        const double degrees = angle_degrees(negate(get(key.direction)), toBase);
-        if (lights.key != expected) {
+        if (lights.key != (sunKey ? LightKind::Sun : LightKind::Moon)) {
             append_problem(
                 problems, fmt::format("key {} outside its window", kind_name(lights.key)));
         }
-        if (degrees > 1.0) {
-            append_problem(problems, fmt::format("{:.4f} deg from base_light", degrees));
+        Vec toBody;
+        Vec toBase;
+        const Vec body = sunKey ? sub(g_env_light.sun_pos, eye) : Vec(g_env_light.moon_pos);
+        if (!normalize(body, toBody, 1.0f) || !normalize(sub(base, eye), toBase, 1.0f)) {
+            append_problem(problems, "the key body or base_light sits on the eye");
+            return finish("key check");
         }
-        return verdict(problems, fmt::format("key {} {:.4f} deg", kind_name(lights.key), degrees));
+        const Vec keyToBody = negate(get(list.lights[0].direction));
+        const double bodyDegrees = angle_degrees(keyToBody, toBody);
+        if (bodyDegrees > 1.0) {
+            append_problem(problems, fmt::format("{:.4f} deg from {}", bodyDegrees,
+                                         sunKey ? "sun_pos" : "eye + moon_pos"));
+        }
+        // A coupled painter copies before SetBaseLight reads; separate presentation paints after it
+        const bool copiedBase =
+            within(base, g_env_light.sun_light_pos, 1.0f) ||
+            (s_cameraPainter.seen && within(base, s_cameraPainter.previousSunLightPos, 1.0f));
+        if (sunKey && !copiedBase) {
+            append_problem(problems,
+                "base_light is neither sun_light_pos nor its value before the last camera painter");
+        }
+        // SetBaseLight reads sun_light_pos, which only a painter with a camera block refreshes
+        const double lag = angle_degrees(toBase, toBody);
+        if (sunKey && lag > 1.0) {
+            return finish(
+                fmt::format("key Sun {:.4f} deg from sun_pos; base_light lags it by {:.4f} "
+                            "deg until a painter with a camera copies it",
+                    bodyDegrees, lag));
+        }
+        const double baseDegrees = angle_degrees(keyToBody, toBase);
+        if (baseDegrees > 1.0) {
+            append_problem(problems, fmt::format("{:.4f} deg from base_light", baseDegrees));
+        }
+        return finish(fmt::format("key {} {:.4f} deg", kind_name(lights.key), baseDegrees));
     }
-    const RoomLights room = room_lights(lights.lightRoom);
+    // base_light is the game's GX slot 2, rewritten only when a room with LGT data is programmed
+    const bool settled = room.count > 0 && last_painter_had_camera();
+    const std::string source = base_light_source(base);
+    if (settled && source.empty()) {
+        append_problem(problems, "base_light matches no displayed LGT0 or env slot");
+    }
+    const std::string where = source.empty() ? std::string{"an older programmed position"} : source;
+    if (lights.key == LightKind::None) {
+        if (room.count > 0 && light_switch_on(room.info[0], lights.lightRoom) &&
+            !body_black(lights.lightRoom, 0))
+        {
+            append_problem(problems, "no key although the light room's LGT0 is on and lit");
+        }
+        return finish(fmt::format("no key; base_light at {}", where));
+    }
+    if (!keyFirst) {
+        append_problem(problems,
+            fmt::format("list[0] is not the {} key with priority 255", kind_name(lights.key)));
+        return finish("key check");
+    }
     if (lights.key != LightKind::KeyRoom || room.count == 0 ||
-        !within(get(key.position), room.info[0].position, 1e-3f))
+        !within(get(list.lights[0].position), room.info[0].position, 1e-3f))
     {
         append_problem(problems, "the key is not KeyRoom at the light room's LGT0");
     } else if (lights.rooms[lights.lightRoom][0].state != SlotState::Key) {
         append_problem(problems, fmt::format("room {} slot 0 reports {}", lights.lightRoom,
                                      state_name(lights.rooms[lights.lightRoom][0].state)));
     }
-    const std::string source = base_light_source(base);
-    if (source.empty()) {
-        append_problem(problems, "base_light matches no displayed LGT0 or env slot");
-    }
-    return verdict(problems,
-        fmt::format("key KeyRoom room {} LGT0, base_light at {}", lights.lightRoom, source));
+    return finish(
+        fmt::format("key KeyRoom room {} LGT0, base_light at {}", lights.lightRoom, where));
 }
 
 bool game_slot_empty(SlotTableId table, size_t index) {
@@ -3323,6 +3405,7 @@ CheckResult check_env_aurora_agrees() {
 
 void submit_lights() {
     ZoneScopedN("dusk::render::submit_lights");
+    note_camera_painter();
     if (!submit_through(kLiveSeam, s_live)) {
         return;
     }
