@@ -17,6 +17,7 @@
 #include "dusk/game_clock.h"
 #include "dusk/interp/frame_interpolation.h"
 #include "dusk/logging.h"
+#include "dusk/render/draw_tags.hpp"
 #include "helpers/gx_helper.h"
 
 #include "d/d_menu_collect.h"
@@ -1678,6 +1679,10 @@ void dDlst_shadowControl_c::draw(Mtx param_0) {
 
             GXSetTevSwapModeTable(GX_TEV_SWAP0, GX_CH_RED, GX_CH_GREEN, GX_CH_BLUE,
                                   l_tevColorChan[i2]);
+#if TARGET_PC
+            const dusk::render::ShadowEntryObject shadowEntry(dusk::render::ObjectKind::RealShadow,
+                real->mpModels[0], int(real - mReal), real->mShadowRealPoly.mCount != 0);
+#endif
             real->draw();
             i2 = (i2 + 1) % 4;
         }
@@ -1692,6 +1697,10 @@ void dDlst_shadowControl_c::draw(Mtx param_0) {
 
     dDlst_shadowSimple_c* simple = mSimple;
     for (int i = 0; i < mSimpleNum; i++) {
+#if TARGET_PC
+        const dusk::render::ShadowEntryObject shadowEntry(
+            dusk::render::ObjectKind::SimpleShadow, nullptr, i, true);
+#endif
         simple->draw();
         simple++;
     }

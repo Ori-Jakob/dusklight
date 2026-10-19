@@ -27,12 +27,12 @@ constexpr std::array<TagScopeDesc, TagScopeCount> kRows{{
     {"flower", AURORA_CAT_FOLIAGE, AURORA_OBJ_CPU_DEFORMED, AURORA_CAMERA_INHERIT},
     {"line3d", AURORA_CAT_DYNAMIC, AURORA_OBJ_CPU_DEFORMED, AURORA_CAMERA_INHERIT},
     {"instanced", AURORA_CAT_DYNAMIC, 0, AURORA_CAMERA_INHERIT},
+    {"shadow_image", 0, 0, AURORA_CAMERA_SHADOW, true},
+    {"fake_shadow", kFakeShadowCategories, 0, AURORA_CAMERA_INHERIT},
+    {"reflection", 0, 0, AURORA_CAMERA_REFLECTION, true},
 }};
 static_assert(kRows.size() == TagScopeCount);
-
-constexpr u32 kObjectFlags = AURORA_OBJ_CAPTURE_ONLY | AURORA_OBJ_TELEPORT |
-                             AURORA_OBJ_CPU_DEFORMED | AURORA_OBJ_BAKED_VERTEX_LIGHT |
-                             AURORA_OBJ_DOUBLE_SIDED | AURORA_OBJ_BILLBOARD | AURORA_OBJ_IMMOBILE;
+static_assert((kFakeShadowCategories & AURORA_CAT_OVERLAY) == 0);
 
 struct TagScopeState {
     std::array<u32, TagScopeCount> open{};
@@ -52,12 +52,16 @@ u32 open_count(const TagScopeState& state) noexcept {
     return std::accumulate(state.open.begin(), state.open.end(), u32{0});
 }
 
-bool push(TagScopeState& state, TagScope scope, u32 frame) noexcept {
-    const size_t i = row_index(scope);
+void roll(TagScopeState& state, u32 frame) noexcept {
     if (state.current.frame != frame) {
         state.last = state.current;
         state.current = TagStats{frame};
     }
+}
+
+bool push(TagScopeState& state, TagScope scope, u32 frame) noexcept {
+    const size_t i = row_index(scope);
+    roll(state, frame);
     if (open_count(state) >= kMaxOpenScopes) {
         ++state.refused[i];
         return false;
@@ -85,8 +89,25 @@ bool pop(TagScopeState& state, TagScope scope) noexcept {
 void log_finished_frame(const TagStats& stats) {
     const u32 until = object_log_until();
     if (until != 0 && stats.frame <= until) {
-        TagLog.info("render.objects log: frame {} scopes {}", stats.frame, tag_count_text(stats));
+        TagLog.info("render.objects log: frame {} scopes {} real {} simple {} mirror {} leaks {}",
+            stats.frame, tag_count_text(stats), stats.realShadows, stats.simpleShadows,
+            stats.mirrorShapes, stats.mirrorLeaks);
     }
+}
+
+// Counts made outside a scope push must still land in the frame that drew them
+TagStats& live_frame() noexcept {
+    const u32 frame = aurora::gfx::current_frame();
+    if (s_state.current.frame != frame) {
+        log_finished_frame(s_state.current);
+        roll(s_state, frame);
+    }
+    return s_state.current;
+}
+
+// Unknown casters fall back to their slot, so their entries still get distinct ids
+u32 shadow_entry_value(u32 serial, int slot) noexcept {
+    return serial != 0 ? serial : static_cast<u32>(slot);
 }
 
 void append_problem(std::string& problems, std::string_view problem) {
@@ -97,12 +118,17 @@ void append_problem(std::string& problems, std::string_view problem) {
 }
 
 std::string test_scope_table() {
+    constexpr u32 kObjectFlags = AURORA_OBJ_CAPTURE_ONLY | AURORA_OBJ_TELEPORT |
+                                 AURORA_OBJ_CPU_DEFORMED | AURORA_OBJ_BAKED_VERTEX_LIGHT |
+                                 AURORA_OBJ_DOUBLE_SIDED | AURORA_OBJ_BILLBOARD |
+                                 AURORA_OBJ_IMMOBILE;
     struct Expected {
         TagScope scope;
         std::string_view name;
         u32 categories;
         u32 flags;
         AuroraCameraRole role;
+        bool suppressObjects = false;
     };
     constexpr std::array kExpected{
         Expected{TagScope::Sky, "sky", AURORA_CAT_SKY, 0, AURORA_CAMERA_SKY},
@@ -118,6 +144,11 @@ std::string test_scope_table() {
             AURORA_CAMERA_INHERIT},
         Expected{
             TagScope::InstancedModel, "instanced", AURORA_CAT_DYNAMIC, 0, AURORA_CAMERA_INHERIT},
+        Expected{TagScope::ShadowImage, "shadow_image", 0, 0, AURORA_CAMERA_SHADOW, true},
+        Expected{TagScope::FakeShadow, "fake_shadow",
+            AURORA_CAT_FAKE_SHADOW | AURORA_CAT_DECAL | AURORA_CAT_NO_CAPTURE, 0,
+            AURORA_CAMERA_INHERIT},
+        Expected{TagScope::Reflection, "reflection", 0, 0, AURORA_CAMERA_REFLECTION, true},
     };
     static_assert(kExpected.size() == TagScopeCount);
     std::string problems;
@@ -146,7 +177,7 @@ std::string test_scope_table() {
         const TagScopeDesc& row = tag_scope_desc(expected.scope);
         if (static_cast<size_t>(expected.scope) != i || row.name != expected.name ||
             row.categories != expected.categories || row.flags != expected.flags ||
-            row.role != expected.role)
+            row.role != expected.role || row.suppressObjects != expected.suppressObjects)
         {
             append_problem(
                 problems, fmt::format("row {} differs from the expected table", row.name));
@@ -212,6 +243,58 @@ std::string test_scope_balance() {
     return problems;
 }
 
+std::string test_fake_shadow_categories() {
+    std::string problems;
+    if (kFakeShadowCategories !=
+        (AURORA_CAT_FAKE_SHADOW | AURORA_CAT_DECAL | AURORA_CAT_NO_CAPTURE))
+    {
+        append_problem(problems, "kFakeShadowCategories is not FAKE_SHADOW|DECAL|NO_CAPTURE");
+    }
+    if ((kFakeShadowCategories & AURORA_CAT_OVERLAY) != 0) {
+        append_problem(problems, "kFakeShadowCategories sets OVERLAY");
+    }
+    if (tag_scope_desc(TagScope::FakeShadow).categories != kFakeShadowCategories) {
+        append_problem(problems, "the fake_shadow row does not use kFakeShadowCategories");
+    }
+    return problems;
+}
+
+std::string test_redraw_roles() {
+    std::string problems;
+    const auto expect_row = [&problems](TagScope scope, AuroraCameraRole role, bool suppress) {
+        const TagScopeDesc& row = tag_scope_desc(scope);
+        if (row.role != role || row.suppressObjects != suppress) {
+            append_problem(problems, fmt::format("row {} has role {} and suppression {}", row.name,
+                                         static_cast<int>(row.role), row.suppressObjects));
+        }
+    };
+    expect_row(TagScope::ShadowImage, AURORA_CAMERA_SHADOW, true);
+    expect_row(TagScope::FakeShadow, AURORA_CAMERA_INHERIT, false);
+    expect_row(TagScope::Reflection, AURORA_CAMERA_REFLECTION, true);
+    for (size_t i = 0; i < row_index(TagScope::ShadowImage); ++i) {
+        if (kRows[i].suppressObjects) {
+            append_problem(problems, fmt::format("row {} suppresses objects", kRows[i].name));
+        }
+    }
+    return problems;
+}
+
+std::string test_shadow_entry_ids() {
+    std::string problems;
+    for (const u32 value : {0u, 1u, 127u, 0xFFFF'FFFFu}) {
+        const u64 model = make_object_id(ObjectKind::J3dModel, value);
+        const u64 real = make_object_id(ObjectKind::RealShadow, value);
+        const u64 simple = make_object_id(ObjectKind::SimpleShadow, value);
+        if (real == model || simple == model || real == simple) {
+            append_problem(problems, fmt::format("ids for value {} collide", value));
+        }
+    }
+    if (shadow_entry_value(42, 3) != 42 || shadow_entry_value(0, 3) != 3) {
+        append_problem(problems, "an unknown caster does not fall back to its slot");
+    }
+    return problems;
+}
+
 }  // namespace
 
 const TagScopeDesc& tag_scope_desc(TagScope scope) noexcept {
@@ -222,10 +305,7 @@ void begin_tag_scope(TagScope scope) noexcept {
     if (!hints_active()) {
         return;
     }
-    const u32 frame = aurora::gfx::current_frame();
-    if (s_state.current.frame != frame) {
-        log_finished_frame(s_state.current);
-    }
+    const u32 frame = live_frame().frame;
     const TagScopeDesc& row = tag_scope_desc(scope);
     if (!push(s_state, scope, frame)) {
         if (!std::exchange(s_warnedDepth, true)) {
@@ -235,16 +315,65 @@ void begin_tag_scope(TagScope scope) noexcept {
         return;
     }
     GXAuroraPushScope(row.categories, row.flags, row.role);
+    if (row.suppressObjects) {
+        push_object_suppression();
+    }
 }
 
 void end_tag_scope(TagScope scope) noexcept {
-    if (pop(s_state, scope)) {
-        GXAuroraPopScope();
+    if (!pop(s_state, scope)) {
+        return;
     }
+    if (tag_scope_desc(scope).suppressObjects) {
+        pop_object_suppression();
+    }
+    GXAuroraPopScope();
 }
 
 u32 open_tag_scopes() noexcept {
     return open_count(s_state);
+}
+
+ShadowEntryObject::ShadowEntryObject(
+    ObjectKind kind, const J3DModel* caster, int slot, bool draws) noexcept
+    : mOpen(draws && hints_active()) {
+    if (!mOpen) {
+        return;
+    }
+    const u32 serial = caster != nullptr ? model_serial(caster) : 0;
+    GXAuroraBeginObject(
+        make_object_id(kind, shadow_entry_value(serial, slot)), 0, 0, kFakeShadowCategories, 0);
+    note_object_open();
+    TagStats& stats = live_frame();
+    if (kind == ObjectKind::RealShadow) {
+        ++stats.realShadows;
+    } else {
+        ++stats.simpleShadows;
+    }
+}
+
+ShadowEntryObject::~ShadowEntryObject() {
+    if (mOpen) {
+        GXAuroraEndObject();
+        note_object_close();
+    }
+}
+
+MirrorDrawCheck::MirrorDrawCheck() noexcept {
+    if (hints_active()) {
+        mStart = current_registry_stats();
+    }
+}
+
+// Any object the mirror packet emits has escaped the suppressing Reflection scope
+MirrorDrawCheck::~MirrorDrawCheck() {
+    if (!hints_active()) {
+        return;
+    }
+    const RegistryStats now = current_registry_stats();
+    TagStats& stats = live_frame();
+    stats.mirrorLeaks += now.objects - mStart.objects;
+    stats.mirrorShapes += now.suppressedShapes - mStart.suppressedShapes;
 }
 
 TagStats last_tag_stats() noexcept {
@@ -264,8 +393,14 @@ std::string tag_count_text(const TagStats& stats) {
 
 std::vector<std::string> tag_report() {
     const TagStats stats = last_tag_stats();
-    return {fmt::format("render.objects: tag scopes frame {} {} open {}", stats.frame,
-        tag_count_text(stats), open_tag_scopes())};
+    return {
+        fmt::format("render.objects: tag scopes frame {} {} open {}", stats.frame,
+            tag_count_text(stats), open_tag_scopes()),
+        fmt::format("render.objects: fake shadows real {} simple {}", stats.realShadows,
+            stats.simpleShadows),
+        fmt::format(
+            "render.objects: mirror shapes {} leaks {}", stats.mirrorShapes, stats.mirrorLeaks),
+    };
 }
 
 void draw_tags_self_test(SelfTestReport& report) {
@@ -278,6 +413,9 @@ void draw_tags_self_test(SelfTestReport& report) {
     };
     check("tags.scope_table", test_scope_table());
     check("tags.scope_balance", test_scope_balance());
+    check("tags.fake_shadow_categories", test_fake_shadow_categories());
+    check("tags.redraw_roles", test_redraw_roles());
+    check("tags.shadow_entry_ids", test_shadow_entry_ids());
 }
 
 }  // namespace dusk::render

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "dusk/render/model_registry.hpp"
+
 #include <dolphin/gx/GXAurora.h>
 #include <dolphin/types.h>
 
@@ -20,20 +22,31 @@ enum class TagScope : u8 {
     Flower,
     Line3d,
     InstancedModel,
+    ShadowImage,
+    FakeShadow,
+    Reflection,
 };
 
-inline constexpr size_t TagScopeCount = 7;
+inline constexpr size_t TagScopeCount = 10;
+
+inline constexpr u32 kFakeShadowCategories =
+    AURORA_CAT_FAKE_SHADOW | AURORA_CAT_DECAL | AURORA_CAT_NO_CAPTURE;
 
 struct TagScopeDesc {
     const char* name;
     u32 categories;
     u32 flags;
     AuroraCameraRole role;
+    bool suppressObjects = false;
 };
 
 struct TagStats {
     u32 frame = 0;
     std::array<u32, TagScopeCount> scopes{};
+    u32 realShadows = 0;
+    u32 simpleShadows = 0;
+    u32 mirrorShapes = 0;
+    u32 mirrorLeaks = 0;
 };
 
 const TagScopeDesc& tag_scope_desc(TagScope scope) noexcept;
@@ -52,6 +65,29 @@ public:
 
 private:
     TagScope mScope;
+};
+
+class ShadowEntryObject {
+public:
+    [[nodiscard]] ShadowEntryObject(
+        ObjectKind kind, const J3DModel* caster, int slot, bool draws) noexcept;
+    ~ShadowEntryObject();
+    ShadowEntryObject(const ShadowEntryObject&) = delete;
+    ShadowEntryObject& operator=(const ShadowEntryObject&) = delete;
+
+private:
+    bool mOpen;
+};
+
+class MirrorDrawCheck {
+public:
+    [[nodiscard]] MirrorDrawCheck() noexcept;
+    ~MirrorDrawCheck();
+    MirrorDrawCheck(const MirrorDrawCheck&) = delete;
+    MirrorDrawCheck& operator=(const MirrorDrawCheck&) = delete;
+
+private:
+    RegistryStats mStart;
 };
 
 TagStats last_tag_stats() noexcept;

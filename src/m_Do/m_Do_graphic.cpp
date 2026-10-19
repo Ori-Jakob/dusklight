@@ -2242,6 +2242,9 @@ int mDoGph_Painter() {
             fapGm_HIO_c::startCpuTimer();
             #endif
 
+#if TARGET_PC
+            dusk::render::begin_tag_scope(dusk::render::TagScope::ShadowImage);
+#endif
             GX_DEBUG_GROUP(dComIfGd_imageDrawShadow, camera_p->view.viewMtx);
 
             #if DEBUG
@@ -2251,6 +2254,9 @@ int mDoGph_Painter() {
             fapGm_HIO_c::startCpuTimer();
             #endif
 
+#if TARGET_PC
+            dusk::render::end_tag_scope(dusk::render::TagScope::ShadowImage);
+#endif
             view_port_class* view_port = window_p->getViewPort();
 
             if (view_port->x_orig != 0.0f || view_port->y_orig != 0.0f) {
@@ -2375,9 +2381,13 @@ int mDoGph_Painter() {
             fapGm_HIO_c::startCpuTimer();
             #endif
 
+#if TARGET_PC
+            dusk::render::begin_tag_scope(dusk::render::TagScope::FakeShadow);
+#endif
             GX_DEBUG_GROUP(dComIfGd_drawShadow, camera_p->view.viewMtx);
 
 #if TARGET_PC
+            dusk::render::end_tag_scope(dusk::render::TagScope::FakeShadow);
             dusk::mods::gfx_run_stage(GFX_STAGE_SCENE_AFTER_TERRAIN, &camera_p->view, view_port);
 #endif
 

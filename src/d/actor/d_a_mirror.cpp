@@ -14,6 +14,10 @@
 #include <gf/GFLight.h>
 #include "m_Do/m_Do_lib.h"
 
+#if TARGET_PC
+#include "dusk/render/draw_tags.hpp"
+#endif
+
 static BOOL daMirror_c_createHeap(fopAc_ac_c* i_this) {
     return ((daMirror_c*)i_this)->createHeap();
 }
@@ -441,9 +445,15 @@ void dMirror_packet_c::mainDraw() {
         mDoMtx_stack_c::concat(sp16C);
         J3DShape::resetVcdVatCache();
 
+#if TARGET_PC
+        dusk::render::begin_tag_scope(dusk::render::TagScope::Reflection);
+#endif
         for (int i = 0; i < mModelCount; i++) {
             modelDraw(mModels[i], mDoMtx_stack_c::get());
         }
+#if TARGET_PC
+        dusk::render::end_tag_scope(dusk::render::TagScope::Reflection);
+#endif
 
         j3dSys.reinitGX();
         GXSetScissor(scissor[0], scissor[1], scissor[2], scissor[3]);
@@ -452,6 +462,9 @@ void dMirror_packet_c::mainDraw() {
 }
 
 void dMirror_packet_c::draw() {
+#if TARGET_PC
+    const dusk::render::MirrorDrawCheck mirrorCheck;
+#endif
     mDoLib_clipper::changeFar(dComIfGd_getView()->far_);
     if (!mDoLib_clipper::clip(j3dSys.getViewMtx(), &mMaxVal, &mMinVal)) {
         mainDraw();
