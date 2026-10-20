@@ -201,6 +201,8 @@ struct LoadedMod {
     };
 
     ModMetadata metadata;
+    // The bundle's mod.json as loaded, for ModsService.
+    std::string manifestJson;
     std::filesystem::path modPath;
     std::filesystem::path dir;
     // Stable UTF-8 storage for HostService::mod_dir.

@@ -196,6 +196,7 @@ LoadedMod* ModLoader::try_load_mod(const fs::path& modPath, bool fromDir, uint32
     mod.nativeInPlace = m_searchDirs[searchDirIndex].inPlaceNative && fromDir;
     mod.fileIdentity = file_identity(modPath);
     mod.metadata = std::move(manifest.metadata);
+    mod.manifestJson = std::move(manifest.rawJson);
     mod.runtime = std::move(manifest.runtime);
     mod.bundle = std::move(bundle);
     mod.context = std::make_unique<ModContext>();
@@ -648,6 +649,7 @@ bool ModLoader::reload_bundle(LoadedMod& mod) {
     }
 
     mod.metadata = std::move(newManifest.metadata);
+    mod.manifestJson = std::move(newManifest.rawJson);
     mod.runtime = std::move(newManifest.runtime);
     // In-flight readers of the old bundle keep it alive through their shared_ptr.
     mod.bundle = std::move(newBundle);

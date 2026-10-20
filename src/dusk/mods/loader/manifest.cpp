@@ -149,6 +149,7 @@ LoadedManifest load_manifest(const std::filesystem::path& modPath, ModBundle& bu
                 std::move(bannerPath),
             },
         .runtime = parse_runtime(j),
+        .rawJson = std::string{metaJson.begin(), metaJson.end()},
     };
 }
 
