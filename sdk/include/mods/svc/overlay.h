@@ -8,7 +8,7 @@
 
 #define OVERLAY_SERVICE_ID DUSKLIGHT_SERVICE_ID_PREFIX "overlay"
 #define OVERLAY_SERVICE_MAJOR 1u
-#define OVERLAY_SERVICE_MINOR 0u
+#define OVERLAY_SERVICE_MINOR 1u
 
 /* Handle for a runtime overlay registration. 0 is never a valid handle. */
 typedef uint64_t OverlayHandle;
@@ -48,6 +48,18 @@ typedef struct OverlayService {
 
     /* Remove a runtime overlay previously added by the calling mod. */
     ModResult (*remove)(ModContext* ctx, OverlayHandle handle);
+
+    /* Minor version 1 */
+
+    /*
+     * Serve the disc file source_disc_path at disc_path, exactly as it is on the disc: overlays of
+     * source_disc_path do not apply. The data streams from the disc on each open; nothing is
+     * copied. Mounting such an alias of an archive gives a vanilla copy whose entry overlays live
+     * under the alias's own path (e.g. "/res/Object/my/Kmdl.arc" takes entries from
+     * "/res/Object/my/Kmdl/..."). MOD_UNAVAILABLE if the disc has no file at source_disc_path.
+     */
+    ModResult (*add_base_alias)(ModContext* ctx, const char* disc_path, const char* source_disc_path,
+        OverlayHandle* out_handle);
 } OverlayService;
 
 MOD_DECLARE_SERVICE(

@@ -1,4 +1,5 @@
 #include "internal.hpp"
+#include "overrides.hpp"
 #include "registry.hpp"
 
 #include "dusk/mods/loader/loader.hpp"
@@ -42,12 +43,26 @@ struct RuntimeOverlaySlot {
     std::string discPath;
     std::string bundlePath;                         // bundle-backed if non-empty
     std::shared_ptr<const std::vector<u8>> buffer;  // buffer-backed otherwise
+    std::string aliasOf;                            // base alias if non-empty
+    int32_t baseEntryNum = -1;
     size_t size = 0;
     uint64_t order = 0;
 };
 SlotMap<RuntimeOverlaySlot> s_runtimeOverlays;
 uint64_t s_nextRuntimeOrder = 0;
 bool s_overlaysDirty = false;
+uint64_t s_registrationGeneration = 0;
+uint64_t s_syncCount = 0;
+
+AuroraOverlayFile make_overlay_file(const std::string& discPath, uintptr_t id, size_t size) {
+    return AuroraOverlayFile{
+        .fileName = strdup(discPath.c_str()),
+        .userData = reinterpret_cast<void*>(id),
+        .size = size,
+        .kind = AURORA_OVERLAY_FILE_NORMAL,
+        .baseEntryNum = -1,
+    };
+}
 
 // Aurora matches overlay paths against the disc case-insensitively and later entries win, so
 // claims are tracked by lowercased path and re-claims by a different mod warn.
@@ -69,46 +84,50 @@ void claim_overlay_path(std::unordered_map<std::string, const LoadedMod*>& claim
 
 void find_overlay_files(std::vector<AuroraOverlayFile>& files, LoadedMod& mod,
     std::unordered_map<std::string, const LoadedMod*>& claims) {
-    for (const auto& file : mod.bundle->getFileNames()) {
-        if (!file.starts_with("overlay/")) {
-            continue;
-        }
-
-        auto overlayPath = file.substr("overlay/"s.size());
-        assert(!overlayPath.starts_with('/'));
-        overlayPath.insert(0, "/");
-
-        const auto size = mod.bundle->getFileSize(file);
-
+    for (const auto& file : overlay_static_entries(mod)) {
         const auto id = s_nextOverlayId++;
-        s_overlayFiles.emplace(id, OverlayFileData{file, mod.bundle, nullptr});
-        claim_overlay_path(claims, overlayPath, mod);
-        files.emplace_back(strdup(overlayPath.c_str()), reinterpret_cast<void*>(id), size);
+        s_overlayFiles.emplace(id, OverlayFileData{file.bundlePath, mod.bundle, nullptr});
+        claim_overlay_path(claims, file.discPath, mod);
+        files.push_back(make_overlay_file(file.discPath, id, file.size));
     }
+}
+
+// Aurora resolves duplicate paths later-entry-wins, so registration order (SlotMap iteration is
+// index order, and freed indices are reused).
+std::vector<std::pair<uint64_t, const RuntimeOverlaySlot*>> sorted_runtime_slots(
+    const LoadedMod& mod) {
+    std::vector<std::pair<uint64_t, const RuntimeOverlaySlot*>> slots;
+    s_runtimeOverlays.for_each([&](uint64_t handle, const auto& entry) {
+        if (entry.owner == &mod) {
+            slots.emplace_back(handle, &entry.value);
+        }
+    });
+    std::ranges::sort(slots, {}, [](const auto& slot) { return slot.second->order; });
+    return slots;
 }
 
 void append_runtime_overlays(std::vector<AuroraOverlayFile>& files, LoadedMod& mod,
     std::unordered_map<std::string, const LoadedMod*>& claims) {
-    // Aurora resolves duplicate paths later-entry-wins, so emit in registration order (SlotMap
-    // iteration is index order, and freed indices are reused).
-    std::vector<const RuntimeOverlaySlot*> slots;
-    s_runtimeOverlays.for_each([&](uint64_t, const auto& entry) {
-        if (entry.owner == &mod) {
-            slots.push_back(&entry.value);
+    for (const auto& [handle, slot] : sorted_runtime_slots(mod)) {
+        claim_overlay_path(claims, slot->discPath, mod);
+        if (!slot->aliasOf.empty()) {
+            files.push_back(AuroraOverlayFile{
+                .fileName = strdup(slot->discPath.c_str()),
+                .userData = nullptr,
+                .size = slot->size,
+                .kind = AURORA_OVERLAY_FILE_BASE_ALIAS,
+                .baseEntryNum = slot->baseEntryNum,
+            });
+            continue;
         }
-    });
-    std::ranges::sort(slots, {}, &RuntimeOverlaySlot::order);
 
-    for (const auto* slot : slots) {
         const auto id = s_nextOverlayId++;
-
         if (slot->buffer != nullptr) {
             s_overlayFiles.emplace(id, OverlayFileData{{}, nullptr, slot->buffer});
         } else {
             s_overlayFiles.emplace(id, OverlayFileData{slot->bundlePath, mod.bundle, nullptr});
         }
-        claim_overlay_path(claims, slot->discPath, mod);
-        files.emplace_back(strdup(slot->discPath.c_str()), reinterpret_cast<void*>(id), slot->size);
+        files.push_back(make_overlay_file(slot->discPath, id, slot->size));
     }
 }
 
@@ -190,6 +209,7 @@ void overlay_sync_files() {
     }
 
     s_overlaysDirty = false;
+    ++s_syncCount;
 
     std::vector<AuroraOverlayFile> files;
     std::unordered_map<std::string, const LoadedMod*> claims;
@@ -220,6 +240,7 @@ uint64_t overlay_add_file(
                                                            .order = s_nextRuntimeOrder++,
                                                        });
     s_overlaysDirty = true;
+    ++s_registrationGeneration;
     return handle;
 }
 
@@ -233,6 +254,21 @@ uint64_t overlay_add_buffer(LoadedMod& mod, std::string discPath, std::vector<u8
                  .order = s_nextRuntimeOrder++,
              });
     s_overlaysDirty = true;
+    ++s_registrationGeneration;
+    return handle;
+}
+
+uint64_t overlay_add_alias(
+    LoadedMod& mod, std::string discPath, std::string aliasOf, int32_t baseEntryNum, size_t size) {
+    const auto handle = s_runtimeOverlays.emplace(mod, RuntimeOverlaySlot{
+                                                           .discPath = std::move(discPath),
+                                                           .aliasOf = std::move(aliasOf),
+                                                           .baseEntryNum = baseEntryNum,
+                                                           .size = size,
+                                                           .order = s_nextRuntimeOrder++,
+                                                       });
+    s_overlaysDirty = true;
+    ++s_registrationGeneration;
     return handle;
 }
 
@@ -241,12 +277,14 @@ bool overlay_remove(LoadedMod& mod, uint64_t handle) {
         return false;
     }
     s_overlaysDirty = true;
+    ++s_registrationGeneration;
     return true;
 }
 
 void overlay_remove_mod(LoadedMod& mod) {
     if (s_runtimeOverlays.erase_all(mod) != 0) {
         s_overlaysDirty = true;
+        ++s_registrationGeneration;
     }
 }
 
@@ -308,6 +346,34 @@ ModResult overlay_add_buffer(ModContext* context, const char* discPath, const vo
     return MOD_OK;
 }
 
+ModResult overlay_add_base_alias(ModContext* context, const char* discPath,
+    const char* sourceDiscPath, OverlayHandle* outHandle) {
+    if (outHandle != nullptr) {
+        *outHandle = 0;
+    }
+    auto* mod = mod_from_context(context);
+    if (mod == nullptr || discPath == nullptr || !utils::is_valid_disc_path(discPath) ||
+        sourceDiscPath == nullptr || !utils::is_valid_disc_path(sourceDiscPath))
+    {
+        return MOD_INVALID_ARGUMENT;
+    }
+
+    const s32 baseEntryNum = aurora_dvd_base_entry_num(sourceDiscPath);
+    const int64_t size = aurora_dvd_base_file_size(baseEntryNum);
+    if (baseEntryNum < 0 || size < 0) {
+        Log.error("[{}] overlay add_base_alias failed: '{}' is not a file on the disc",
+            mod->metadata.id, sourceDiscPath);
+        return MOD_UNAVAILABLE;
+    }
+
+    const auto handle = overlay_add_alias(
+        *mod, discPath, sourceDiscPath, baseEntryNum, static_cast<size_t>(size));
+    if (outHandle != nullptr) {
+        *outHandle = handle;
+    }
+    return MOD_OK;
+}
+
 ModResult overlay_remove(ModContext* context, OverlayHandle handle) {
     auto* mod = mod_from_context(context);
     if (mod == nullptr || handle == 0) {
@@ -325,9 +391,51 @@ constexpr OverlayService s_overlayService{
     .add_file = overlay_add_file,
     .add_buffer = overlay_add_buffer,
     .remove = overlay_remove,
+    .add_base_alias = overlay_add_base_alias,
 };
 
 }  // namespace
+
+std::vector<StaticOverlayInfo> overlay_static_entries(LoadedMod& mod) {
+    std::vector<StaticOverlayInfo> entries;
+    for (const auto& file : mod.bundle->getFileNames()) {
+        if (!file.starts_with("overlay/")) {
+            continue;
+        }
+
+        auto overlayPath = file.substr("overlay/"s.size());
+        assert(!overlayPath.starts_with('/'));
+        overlayPath.insert(0, "/");
+
+        const auto size = mod.bundle->getFileSize(file);
+        entries.push_back({.discPath = std::move(overlayPath), .bundlePath = file, .size = size});
+    }
+    return entries;
+}
+
+std::vector<RuntimeOverlayInfo> overlay_runtime_entries(const LoadedMod& mod) {
+    std::vector<RuntimeOverlayInfo> entries;
+    for (const auto& [handle, slot] : sorted_runtime_slots(mod)) {
+        entries.push_back({
+            .handle = handle,
+            .discPath = slot->discPath,
+            .bundlePath = slot->bundlePath,
+            .buffer = slot->buffer,
+            .aliasOf = slot->aliasOf,
+            .baseEntryNum = slot->baseEntryNum,
+            .size = slot->size,
+        });
+    }
+    return entries;
+}
+
+uint64_t overlay_registrations_generation() {
+    return s_registrationGeneration;
+}
+
+uint64_t overlay_sync_count() {
+    return s_syncCount;
+}
 
 constinit const ServiceModule g_overlayModule{
     .id = OVERLAY_SERVICE_ID,
