@@ -21,15 +21,26 @@ std::atomic<u64> JKRArchive::sArcOverlayGeneration{0};
 
 namespace {
 
+std::atomic<u64> s_liveOverlayBuffers{0};
+std::atomic<u64> s_totalOverlayBuffers{0};
+
 void* alloc_overlay_buffer(u32 size) {
 #if _WIN32
-    return _aligned_malloc(size, alignof(std::max_align_t));
+    void* data = _aligned_malloc(size, alignof(std::max_align_t));
 #else
-    return std::malloc(size);
+    void* data = std::malloc(size);
 #endif
+    if (data != nullptr) {
+        s_liveOverlayBuffers.fetch_add(1, std::memory_order_relaxed);
+        s_totalOverlayBuffers.fetch_add(1, std::memory_order_relaxed);
+    }
+    return data;
 }
 
 void free_overlay_buffer(void* data) {
+    if (data != nullptr) {
+        s_liveOverlayBuffers.fetch_sub(1, std::memory_order_relaxed);
+    }
 #if _WIN32
     _aligned_free(data);
 #else
@@ -445,21 +456,59 @@ void* JKRArchive::getOverlayData(SDIFileEntry* entry, u32* outSize) {
     return data;
 }
 
+// Reads into the caller's buffer, so copy-style fetches never leave an owned copy behind.
 bool JKRArchive::copyOverlayData(void* buffer, u32 bufferSize, SDIFileEntry* entry, u32* outSize) {
-    u32 overlaySize;
-    const void* overlayData = getOverlayData(entry, &overlaySize);
-    if (overlayData == nullptr) {
+    if (entry == nullptr) {
         return false;
     }
 
-    const u32 copySize = overlaySize < bufferSize ? overlaySize : bufferSize;
-    if (copySize != 0) {
-        memcpy(buffer, overlayData, copySize);
+    u32 copySize = 0;
+    u32 activeSize;
+    if (const void* activeData = getActiveOverlayData(entry, &activeSize)) {
+        copySize = activeSize < bufferSize ? activeSize : bufferSize;
+        if (copySize != 0) {
+            memcpy(buffer, activeData, copySize);
+        }
+    } else {
+        std::string path;
+        if (!getOverlayPath(entry, path)) {
+            return false;
+        }
+
+        DVDFileInfo fileInfo{};
+        if (!DVDOpen(path.c_str(), &fileInfo)) {
+            return false;
+        }
+
+        const u32 logicalSize = fileInfo.length;
+        copySize = logicalSize < bufferSize ? logicalSize : bufferSize;
+        if (copySize > static_cast<u32>(std::numeric_limits<s32>::max())) {
+            DVDClose(&fileInfo);
+            return false;
+        }
+        if (copySize != 0) {
+            const s32 status = DVDReadPrio(&fileInfo, buffer, static_cast<s32>(copySize), 0, 2);
+            if (status < DVD_RESULT_GOOD || static_cast<u32>(status) != copySize) {
+                DVDClose(&fileInfo);
+                return false;
+            }
+        }
+        DVDClose(&fileInfo);
     }
+
     if (outSize != nullptr) {
         *outSize = copySize;
     }
     return true;
+}
+
+void JKRArchive::getOverlayBufferStats(u64* outLive, u64* outTotal) {
+    if (outLive != nullptr) {
+        *outLive = s_liveOverlayBuffers.load(std::memory_order_relaxed);
+    }
+    if (outTotal != nullptr) {
+        *outTotal = s_totalOverlayBuffers.load(std::memory_order_relaxed);
+    }
 }
 
 bool JKRArchive::getOverlayResourceSize(const void* data, u32* outSize) const {

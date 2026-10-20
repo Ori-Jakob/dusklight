@@ -218,6 +218,8 @@ public:
     void* getOverlayData(SDIFileEntry* entry, u32* outSize);
     bool getOverlayFileSize(SDIFileEntry* entry, u32* outSize) const;
     static void notifyOverlayFilesChanged();
+    // Entry overlay copies held by mounted archives, and the number made since boot.
+    static void getOverlayBufferStats(u64* outLive, u64* outTotal);
 
 protected:
     void** mFileData;
