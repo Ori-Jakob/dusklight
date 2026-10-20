@@ -50,6 +50,9 @@ Everything else is optional but recommended.
 icon (1:1), and a banner (~3.5:1, minimum 800px width). If omitted, `res/icon.png` and `res/banner.png` are used
 automatically when present.
 
+Keys Dusklight does not know are kept: other mods can read the whole file through
+[ModsService](#modsservice-modssvcmodsh), so a mod may declare things for them there.
+
 Simply create a zip file with a `mod.json`, and rename it to `.dusk`. That's it!
 
 ---
@@ -632,6 +635,21 @@ stays in memory until the file is re-read: sometimes a scene reload, and in the 
 Dusklight reloads core archive files during scene transitions so modifications to Link, Midna or other globally-loaded
 data get refreshed without a full restart.
 
+**Base aliases (OverlayService 1.1):** `add_base_alias` serves a disc file, exactly as it is on the disc, under another
+path. Overlays of the source path (another mod's replacement archive, say) do not apply, and nothing is copied: the
+data streams from the disc. Mount the alias of an archive to get a vanilla copy whose entry overlays live under the
+alias's own directory:
+
+```cpp
+if (SERVICE_HAS(svc_overlay, OverlayService, add_base_alias)) {
+    svc_overlay->add_base_alias(mod_ctx, "/res/Object/my/Kmdl.arc", "/res/Object/Kmdl.arc", &handle);
+    // Entries of that mount come from /res/Object/my/Kmdl/<root>/... when overlaid there.
+}
+```
+
+`MOD_UNAVAILABLE` means the disc has no file at the source path. Like other overlays, the alias exists from the next
+frame on.
+
 See [Asset Overlays](#asset-overlays) for priority and conflict handling.
 
 ### TextureService ([`mods/svc/texture.h`](../sdk/include/mods/svc/texture.h))
@@ -675,6 +693,50 @@ a registered file are picked up automatically. Files are decoded lazily on first
 at registration. Registrations follow your mod's lifecycle.
 
 See [Asset Overlays](#asset-overlays) for priority and conflict handling.
+
+### ModsService ([`mods/svc/mods.h`](../sdk/include/mods/svc/mods.h))
+
+What the player has installed, for mods that build on other mods' content (Twili-Together uses it to show a player's
+installed looks to other players). Native mods only; script mods cannot reach it.
+
+- `list_mods`: every active mod in load order, with its `mod.json` exactly as loaded (unknown keys included).
+- `list_overrides`: what one active mod replaces: its `overlay/` files, `textures/` files and runtime
+  OverlayService/TextureService registrations. Each entry has a stable `id`, its kind (whole disc file, archive entry
+  with the `archive_path` it belongs to, or texture with its key), `size`, `runtime`, and `wins`, which says that no
+  other active override of the same path (case-insensitive) or texture key beats it.
+- `hash_override` (SHA-256) and `read_override` return the override's bytes: the file, buffer or aliased disc file, or
+  the texture's `.dds`/`.png` or raw texels. Hashes are computed on first request and kept until the owner reloads.
+- `read_base_disc_file` reads a file as it is on the disc, under every overlay.
+- `get_mod_var_string` / `get_mod_var_int` read another mod's setting, only for settings Dusklight lists as shareable
+  (for now the cosmetics mod's colors and Midna hair palette). Anything else, including every other `mod.*` setting,
+  is `MOD_UNAVAILABLE`, as is a var of a mod that is not active.
+- `generation` changes whenever the active mods or any override changes; `watch` calls back at the end of such a
+  frame.
+- `game_id` and `disc_revision` name the loaded disc.
+
+```cpp
+IMPORT_OPTIONAL_SERVICE(ModsService, svc_mods);
+
+bool print_override(void*, const ModOverride* o) {
+    if (o->kind == MOD_OVR_ARC_ENTRY && o->wins) {
+        uint8_t sha[32];
+        svc_mods->hash_override(mod_ctx, "com.example.look", o->id, sha);
+    }
+    return true;  // false stops the listing
+}
+svc_mods->list_overrides(mod_ctx, "com.example.look", print_override, nullptr);
+
+ModBuffer vanilla = MOD_BUFFER_INIT;
+if (svc_mods->read_base_disc_file(mod_ctx, "/res/Object/Kmdl.arc", &vanilla) == MOD_OK) {
+    // vanilla.data, vanilla.size
+    svc_mods->free_buffer(mod_ctx, &vanilla);
+}
+```
+
+Listing, the var getters and `watch` run on the game thread. `hash_override`, `read_override`, `read_base_disc_file`
+and `free_buffer` may run on any thread, so large reads can stay off the game thread; buffers still held when your
+mod goes away are reclaimed with a warning. `debug_texture_source` (which replacement the renderer would apply to a
+`GXTexObj`) and `debug_overlay_stats` (archive entry overlay copies in memory, overlay set rebuilds) exist for tests.
 
 ### ConfigService ([`mods/svc/config.h`](../sdk/include/mods/svc/config.h))
 
