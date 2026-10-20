@@ -705,7 +705,8 @@ installed looks to other players). Native mods only; script mods cannot reach it
   with the `archive_path` it belongs to, or texture with its key), `size`, `runtime`, and `wins`, which says that no
   other active override of the same path (case-insensitive) or texture key beats it.
 - `hash_override` (SHA-256) and `read_override` return the override's bytes: the file, buffer or aliased disc file, or
-  the texture's `.dds`/`.png` or raw texels. Hashes are computed on first request and kept until the owner reloads.
+  the texture's `.dds`/`.png` or raw texels, as of the last `list_overrides` call. Hashes are computed on first request
+  and kept until the owner reloads.
 - `read_base_disc_file` reads a file as it is on the disc, under every overlay.
 - `get_mod_var_string` / `get_mod_var_int` read another mod's setting, only for settings Dusklight lists as shareable
   (for now the cosmetics mod's colors and Midna hair palette). Anything else, including every other `mod.*` setting,

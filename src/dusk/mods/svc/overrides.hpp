@@ -61,8 +61,10 @@ struct TextureOverrideInfo {
     uint32_t gxFormat = 0;
 };
 
-// The mod's live texture replacements: textures/ files first, then runtime registrations.
-std::vector<TextureOverrideInfo> texture_entries(const LoadedMod& mod);
+// The mod's textures/ replacements; they change only when mods are applied.
+std::vector<TextureOverrideInfo> texture_static_entries(const LoadedMod& mod);
+// The mod's runtime texture registrations in registration order.
+std::vector<TextureOverrideInfo> texture_runtime_entries(const LoadedMod& mod);
 // Bumped whenever a texture replacement is registered, re-registered or removed.
 uint64_t texture_registrations_generation();
 

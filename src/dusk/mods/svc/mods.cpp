@@ -88,7 +88,6 @@ struct OverrideRecord {
     uint64_t id = 0;
     ModOverrideKind kind = MOD_OVR_DISC_FILE;
     bool runtime = false;
-    bool wins = false;
     std::string discPath;
     std::string archivePath;
     std::string aliasOf;
@@ -102,6 +101,8 @@ struct OverrideRecord {
     uint32_t textureGxFormat = 0;
     // Aurora picks the highest priority, then the latest registration.
     std::pair<int32_t, uint64_t> textureRank;
+    // Records with the same key compete: the lowercased disc path or the texture key.
+    std::string winKey;
 
     SourceType source = SourceType::BundleFile;
     std::shared_ptr<ModBundle> bundle;
@@ -112,18 +113,33 @@ struct OverrideRecord {
     std::shared_ptr<HashSlot> hash;
 };
 
+using RecordList = std::vector<OverrideRecord>;
+
 struct Snapshot {
     uint64_t generation = 0;
-    std::vector<OverrideRecord> records;
+    uint64_t syncCount = 0;
+    // Keeps the lists that records point into alive.
+    std::vector<std::shared_ptr<const RecordList>> lists;
+    std::vector<const OverrideRecord*> records;
+    std::vector<bool> wins;
     std::unordered_map<uint64_t, size_t> byId;
 };
 
 // Published snapshot; the pointer is guarded, the snapshot itself is immutable.
 std::mutex s_snapshotMutex;
 std::shared_ptr<const Snapshot> s_snapshot;
-bool s_used = false;
 
-// Game thread only: stable ids and cached hashes by source identity.
+// Game thread only. A mod's overlay/ and textures/ records, kept until it reloads or mods are
+// applied again.
+struct StaticRecords {
+    std::shared_ptr<ModBundle> bundle;
+    std::shared_ptr<const RecordList> records;
+    uint64_t lifecycle = 0;
+    bool seen = false;
+};
+std::unordered_map<const ModBundle*, StaticRecords> s_staticRecords;
+
+// Game thread only: stable ids and cached hashes of runtime registrations.
 struct Identity {
     uint64_t id = 0;
     std::shared_ptr<HashSlot> hash;
@@ -166,9 +182,11 @@ std::string lowercase(std::string_view text) {
     return out;
 }
 
-// The archive an entry overlay path belongs to: the nearest "<dir>.arc" the file table has.
-std::string find_archive(
-    const std::string& discPath, std::unordered_map<std::string, bool>& known) {
+// By lowercased path: whether the file table or a runtime overlay has that archive.
+using ArchiveLookup = std::unordered_map<std::string, bool>;
+
+// The archive an entry overlay path belongs to: the nearest "<dir>.arc" that exists.
+std::string find_archive(const std::string& discPath, ArchiveLookup& known) {
     for (auto slash = discPath.rfind('/'); slash != std::string::npos && slash > 0;
          slash = discPath.rfind('/', slash - 1))
     {
@@ -220,12 +238,12 @@ std::string texture_key_string(const TextureKey& key) {
         key.height, key.gx_format, key.has_tlut);
 }
 
-OverrideRecord disc_record(const LoadedMod& mod, std::string discPath,
-    std::unordered_map<std::string, bool>& archives) {
+OverrideRecord disc_record(const LoadedMod& mod, std::string discPath, ArchiveLookup& archives) {
     OverrideRecord record;
     record.modId = mod.metadata.id;
     record.archivePath = find_archive(discPath, archives);
     record.kind = record.archivePath.empty() ? MOD_OVR_DISC_FILE : MOD_OVR_ARC_ENTRY;
+    record.winKey = lowercase(discPath);
     record.discPath = std::move(discPath);
     return record;
 }
@@ -237,6 +255,7 @@ OverrideRecord texture_record(const LoadedMod& mod, const TextureOverrideInfo& i
     record.runtime = info.handle != 0;
     record.textureKey = to_texture_key(info.key);
     record.textureRank = {info.priority, info.registrationId};
+    record.winKey = texture_key_string(record.textureKey);
     if (info.bundle != nullptr) {
         record.source = SourceType::BundleFile;
         record.bundle = info.bundle;
@@ -256,28 +275,62 @@ OverrideRecord texture_record(const LoadedMod& mod, const TextureOverrideInfo& i
     return record;
 }
 
-void collect_mod(LoadedMod& mod, std::vector<OverrideRecord>& records,
-    std::unordered_map<std::string, bool>& archives) {
+std::string static_name(const OverrideRecord& record) {
+    return (record.kind == MOD_OVR_TEXTURE ? "t:" : "o:") + record.bundlePath;
+}
+
+// Ids and cached hashes carry over from the same bundle's previous records.
+std::shared_ptr<const RecordList> collect_static(
+    LoadedMod& mod, const RecordList* previous, ArchiveLookup& archives) {
+    std::unordered_map<std::string, const OverrideRecord*> old;
+    if (previous != nullptr) {
+        for (const auto& record : *previous) {
+            old.emplace(static_name(record), &record);
+        }
+    }
+    const auto identify = [&](OverrideRecord& record) {
+        if (const auto it = old.find(static_name(record)); it != old.end()) {
+            record.id = it->second->id;
+            record.hash = it->second->hash;
+        } else {
+            record.id = s_nextOverrideId++;
+            record.hash = std::make_shared<HashSlot>();
+        }
+    };
+
+    auto records = std::make_shared<RecordList>();
     for (auto& file : overlay_static_entries(mod)) {
         auto record = disc_record(mod, std::move(file.discPath), archives);
         record.source = SourceType::BundleFile;
         record.bundle = mod.bundle;
-        record.bundlePath = file.bundlePath;
+        record.bundlePath = std::move(file.bundlePath);
         record.size = file.size;
-        assign_identity(record, mod.bundle.get(), "o:" + file.bundlePath);
-        records.push_back(std::move(record));
+        identify(record);
+        records->push_back(std::move(record));
     }
-
-    const auto textures = texture_entries(mod);
-    for (const auto& info : textures) {
-        if (info.handle == 0) {
-            auto record = texture_record(mod, info);
-            assign_identity(record, info.bundle.get(), "t:" + info.bundlePath);
-            records.push_back(std::move(record));
-        }
+    for (const auto& info : texture_static_entries(mod)) {
+        auto record = texture_record(mod, info);
+        identify(record);
+        records->push_back(std::move(record));
     }
+    return records;
+}
 
-    for (auto& entry : overlay_runtime_entries(mod)) {
+std::shared_ptr<const RecordList> static_records(LoadedMod& mod, ArchiveLookup& archives) {
+    auto& cached = s_staticRecords[mod.bundle.get()];
+    cached.seen = true;
+    if (cached.records == nullptr || cached.lifecycle != s_lifecycleGeneration) {
+        cached.records = collect_static(mod, cached.records.get(), archives);
+        cached.bundle = mod.bundle;
+        cached.lifecycle = s_lifecycleGeneration;
+    }
+    return cached.records;
+}
+
+std::shared_ptr<const RecordList> runtime_records(
+    const LoadedMod& mod, std::vector<RuntimeOverlayInfo> overlays, ArchiveLookup& archives) {
+    auto records = std::make_shared<RecordList>();
+    for (auto& entry : overlays) {
         auto record = disc_record(mod, std::move(entry.discPath), archives);
         record.runtime = true;
         record.size = entry.size;
@@ -294,84 +347,111 @@ void collect_mod(LoadedMod& mod, std::vector<OverrideRecord>& records,
             record.bundlePath = std::move(entry.bundlePath);
         }
         assign_identity(record, &mod, fmt::format("ro:{}", entry.handle));
-        records.push_back(std::move(record));
+        records->push_back(std::move(record));
     }
-
-    for (const auto& info : textures) {
-        if (info.handle != 0) {
-            auto record = texture_record(mod, info);
-            assign_identity(record, &mod, fmt::format("rt:{}", info.handle));
-            records.push_back(std::move(record));
-        }
+    for (const auto& info : texture_runtime_entries(mod)) {
+        auto record = texture_record(mod, info);
+        assign_identity(record, &mod, fmt::format("rt:{}", info.handle));
+        records->push_back(std::move(record));
     }
+    return records;
 }
 
 // Records come in overlay set order, where later claims of a path win.
-void mark_winners(std::vector<OverrideRecord>& records) {
-    std::unordered_map<std::string, size_t> pathWinner;
-    std::unordered_map<std::string, size_t> textureWinner;
-    for (size_t i = 0; i < records.size(); ++i) {
-        const auto& record = records[i];
-        if (record.kind != MOD_OVR_TEXTURE) {
-            pathWinner[lowercase(record.discPath)] = i;
-            continue;
-        }
-        const auto [it, inserted] = textureWinner.try_emplace(texture_key_string(record.textureKey), i);
-        if (!inserted && record.textureRank > records[it->second].textureRank) {
+void mark_winners(Snapshot& snapshot) {
+    std::unordered_map<std::string_view, size_t> winners;
+    winners.reserve(snapshot.records.size());
+    for (size_t i = 0; i < snapshot.records.size(); ++i) {
+        const auto& record = *snapshot.records[i];
+        const auto [it, inserted] = winners.try_emplace(record.winKey, i);
+        if (!inserted && (record.kind != MOD_OVR_TEXTURE ||
+                             record.textureRank > snapshot.records[it->second]->textureRank))
+        {
             it->second = i;
         }
     }
-    for (const auto& winner : pathWinner | std::views::values) {
-        records[winner].wins = true;
-    }
-    for (const auto& winner : textureWinner | std::views::values) {
-        records[winner].wins = true;
+    snapshot.wins.assign(snapshot.records.size(), false);
+    for (const auto winner : winners | std::views::values) {
+        snapshot.wins[winner] = true;
     }
 }
 
-std::shared_ptr<const Snapshot> build_snapshot(uint64_t generation) {
+void add_list(Snapshot& snapshot, std::shared_ptr<const RecordList> list) {
+    for (const auto& record : *list) {
+        snapshot.records.push_back(&record);
+    }
+    snapshot.lists.push_back(std::move(list));
+}
+
+bool is_archive_path(const std::string& path) {
+    return path.size() > 4 && lowercase(std::string_view{path}.substr(path.size() - 4)) == ".arc";
+}
+
+std::shared_ptr<const Snapshot> build_snapshot(uint64_t generation, uint64_t syncCount) {
     auto snapshot = std::make_shared<Snapshot>();
     snapshot->generation = generation;
+    snapshot->syncCount = syncCount;
     for (auto& identity : s_identities | std::views::values) {
         identity.seen = false;
     }
+    for (auto& cached : s_staticRecords | std::views::values) {
+        cached.seen = false;
+    }
 
-    std::unordered_map<std::string, bool> archives;
+    // Runtime overlays reach the file table at the end of the frame; archives they add count now.
+    ArchiveLookup archives;
+    std::vector<std::vector<RuntimeOverlayInfo>> overlays;
     for (auto& mod : ModLoader::instance().active_mods()) {
-        const auto first = snapshot->records.size();
-        try {
-            collect_mod(mod, snapshot->records, archives);
-        } catch (const std::exception& e) {
-            Log.error("[{}] listing overrides failed: {}", mod.metadata.id, e.what());
-            snapshot->records.resize(first);
+        overlays.push_back(overlay_runtime_entries(mod));
+        for (const auto& entry : overlays.back()) {
+            if (is_archive_path(entry.discPath)) {
+                archives[lowercase(entry.discPath)] = true;
+            }
         }
     }
-    mark_winners(snapshot->records);
+
+    size_t modIndex = 0;
+    for (auto& mod : ModLoader::instance().active_mods()) {
+        auto& modOverlays = overlays[modIndex++];
+        try {
+            auto staticList = static_records(mod, archives);
+            auto runtimeList = runtime_records(mod, std::move(modOverlays), archives);
+            add_list(*snapshot, std::move(staticList));
+            add_list(*snapshot, std::move(runtimeList));
+        } catch (const std::exception& e) {
+            Log.error("[{}] listing overrides failed: {}", mod.metadata.id, e.what());
+        }
+    }
+    mark_winners(*snapshot);
 
     std::erase_if(s_identities, [](const auto& item) { return !item.second.seen; });
+    std::erase_if(s_staticRecords, [](const auto& item) { return !item.second.seen; });
+    snapshot->byId.reserve(snapshot->records.size());
     for (size_t i = 0; i < snapshot->records.size(); ++i) {
-        snapshot->byId.emplace(snapshot->records[i].id, i);
+        snapshot->byId.emplace(snapshot->records[i]->id, i);
     }
     return snapshot;
 }
 
-// Game thread: rebuilds when anything changed since the last build.
+// Game thread: rebuilds when the overrides or the file table changed since the last build.
 std::shared_ptr<const Snapshot> fresh_snapshot() {
-    s_used = true;
     const auto generation = current_generation();
+    const auto syncCount = overlay_sync_count();
     {
         std::lock_guard lock{s_snapshotMutex};
-        if (s_snapshot != nullptr && s_snapshot->generation == generation) {
+        if (s_snapshot != nullptr && s_snapshot->generation == generation &&
+            s_snapshot->syncCount == syncCount)
+        {
             return s_snapshot;
         }
     }
-    auto snapshot = build_snapshot(generation);
+    auto snapshot = build_snapshot(generation, syncCount);
     std::lock_guard lock{s_snapshotMutex};
     s_snapshot = snapshot;
     return snapshot;
 }
 
-// Any thread: the last published snapshot (the game thread refreshes it every frame).
+// Any thread: the overrides as of the last listing.
 std::shared_ptr<const Snapshot> published_snapshot() {
     std::lock_guard lock{s_snapshotMutex};
     return s_snapshot;
@@ -383,10 +463,10 @@ const OverrideRecord* find_record(
         return nullptr;
     }
     const auto it = snapshot->byId.find(id);
-    if (it == snapshot->byId.end() || snapshot->records[it->second].modId != modId) {
+    if (it == snapshot->byId.end() || snapshot->records[it->second]->modId != modId) {
         return nullptr;
     }
-    return &snapshot->records[it->second];
+    return snapshot->records[it->second];
 }
 
 bool read_base_file(int32_t entryNum, std::vector<u8>& out) {
@@ -443,7 +523,6 @@ bool valid_buffer(const ModBuffer* buffer) {
 }
 
 uint64_t mods_generation(ModContext*) {
-    s_used = true;
     return current_generation();
 }
 
@@ -488,7 +567,8 @@ ModResult mods_list_overrides(
 
     const auto snapshot = fresh_snapshot();
     const auto cstr = [](const std::string& text) { return text.empty() ? nullptr : text.c_str(); };
-    for (const auto& record : snapshot->records) {
+    for (size_t i = 0; i < snapshot->records.size(); ++i) {
+        const auto& record = *snapshot->records[i];
         if (record.modId != modId) {
             continue;
         }
@@ -497,7 +577,7 @@ ModResult mods_list_overrides(
             .id = record.id,
             .kind = record.kind,
             .runtime = record.runtime,
-            .wins = record.wins,
+            .wins = snapshot->wins[i],
             .disc_path = cstr(record.discPath),
             .archive_path = cstr(record.archivePath),
             .alias_of = cstr(record.aliasOf),
@@ -651,7 +731,6 @@ ModResult mods_watch(ModContext* context, ModsChangedFn fn, void* userData, uint
     if (mod == nullptr || fn == nullptr || outHandle == nullptr) {
         return MOD_INVALID_ARGUMENT;
     }
-    s_used = true;
     *outHandle = s_watchers.emplace(*mod, Watcher{
                                               .fn = fn,
                                               .userData = userData,
@@ -766,6 +845,7 @@ void notify_watchers() {
 
 void mods_mod_detached(LoadedMod& mod) {
     s_watchers.erase_all(mod);
+    s_staticRecords.erase(mod.bundle.get());
     size_t leaked = 0;
     {
         std::lock_guard lock{s_bufferMutex};
@@ -792,21 +872,14 @@ constinit const ServiceModule g_modsModule{
         },
     .modDetached = mods_mod_detached,
     .lifecycleApplied = [] { ++s_lifecycleGeneration; },
-    .frameEnd =
-        [] {
-            if (!s_used) {
-                return;
-            }
-            // Keeps off-thread reads current with the overrides as they are now.
-            fresh_snapshot();
-            notify_watchers();
-        },
+    .frameEnd = notify_watchers,
     .shutdown =
         [] {
             {
                 std::lock_guard lock{s_snapshotMutex};
                 s_snapshot.reset();
             }
+            s_staticRecords.clear();
             s_identities.clear();
             std::lock_guard lock{s_bufferMutex};
             s_buffers.clear();

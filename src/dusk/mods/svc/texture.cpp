@@ -458,7 +458,7 @@ constexpr TextureService s_textureService{
 
 }  // namespace
 
-std::vector<TextureOverrideInfo> texture_entries(const LoadedMod& mod) {
+std::vector<TextureOverrideInfo> texture_static_entries(const LoadedMod& mod) {
     std::vector<TextureOverrideInfo> entries;
     const auto it = s_modTextures.find(&mod);
     if (it == s_modTextures.end()) {
@@ -480,6 +480,16 @@ std::vector<TextureOverrideInfo> texture_entries(const LoadedMod& mod) {
             .bundlePath = keepalive->bundlePath,
         });
     }
+    return entries;
+}
+
+std::vector<TextureOverrideInfo> texture_runtime_entries(const LoadedMod& mod) {
+    std::vector<TextureOverrideInfo> entries;
+    const auto it = s_modTextures.find(&mod);
+    if (it == s_modTextures.end()) {
+        return entries;
+    }
+    const auto& record = it->second;
     for (const auto& entry : record.runtime) {
         TextureOverrideInfo info{
             .handle = entry.handle,

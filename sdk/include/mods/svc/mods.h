@@ -125,7 +125,8 @@ typedef struct ModsService {
         ModContext* ctx, const char* mod_id, ModOverrideFn fn, void* user_data);
 
     /* SHA-256 of what read_override returns. Computed on first request and cached until the
-     * owner reloads. MOD_UNAVAILABLE if the override is gone. */
+     * owner reloads. This and read_override see the overrides as of the last list_overrides
+     * call: MOD_UNAVAILABLE if the override was gone by then. */
     ModResult (*hash_override)(
         ModContext* ctx, const char* mod_id, uint64_t id, uint8_t out_sha256[32]);
 
