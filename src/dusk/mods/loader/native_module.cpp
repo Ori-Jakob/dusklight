@@ -4,6 +4,10 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <Windows.h>
+#else
+#include <cerrno>
+#include <signal.h>
+#include <unistd.h>
 #endif
 
 namespace {
@@ -75,5 +79,27 @@ NativeModule::~NativeModule() {
 
 void* NativeModule::LookupSymbol(const char* name) const {
     return pl_dlsym(handle, name);
+}
+
+unsigned long current_process_id() {
+#if defined(_WIN32)
+    return GetCurrentProcessId();
+#else
+    return static_cast<unsigned long>(getpid());
+#endif
+}
+
+bool process_running(unsigned long pid) {
+#if defined(_WIN32)
+    HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, static_cast<DWORD>(pid));
+    if (process == nullptr) {
+        return GetLastError() == ERROR_ACCESS_DENIED;
+    }
+    const bool running = WaitForSingleObject(process, 0) == WAIT_TIMEOUT;
+    CloseHandle(process);
+    return running;
+#else
+    return kill(static_cast<pid_t>(pid), 0) == 0 || errno == EPERM;
+#endif
 }
 }  // namespace dusk::mods::loader

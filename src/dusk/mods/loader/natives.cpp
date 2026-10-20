@@ -1,5 +1,6 @@
 #include "natives.hpp"
 
+#include "depgraph.hpp"
 #include "loader.hpp"
 #include "native_module.hpp"
 
@@ -587,7 +588,18 @@ bool ModLoader::ensure_native_loaded(LoadedMod& mod) {
     if (mod.native || mod.nativeStatus == NativeModStatus::None) {
         return true;
     }
-    return load_native_if_present(mod);
+    if (!load_native_if_present(mod)) {
+        return false;
+    }
+    // A failed first load left the manifest info without the library's imports and exports.
+    if (mod.native) {
+        auto info = build_manifest_info(mod.native->parsed);
+        if (info != mod.manifestInfo) {
+            mod.manifestInfo = std::move(info);
+            loader::sort_mods(m_mods);
+        }
+    }
+    return true;
 }
 
 ModManifestInfo build_manifest_info(const ModMetaParsed& parsed) {

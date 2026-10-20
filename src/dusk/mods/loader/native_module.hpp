@@ -30,4 +30,7 @@ private:
     void* handle;
 };
 
+unsigned long current_process_id();
+bool process_running(unsigned long pid);
+
 }

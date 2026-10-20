@@ -30,6 +30,7 @@
 #include <fmt/format.h>
 
 #include <algorithm>
+#include <charconv>
 #include <chrono>
 #include <filesystem>
 #include <string>
@@ -68,6 +69,26 @@ LoadedMod::FileIdentity file_identity(const fs::path& path) {
         return {};
     }
     return {.size = size, .modified = modified, .valid = true};
+}
+
+// Removes stale libs from previous sessions (see load_native). Each process extracts into
+// <cache>/<pid>, so libs of another running instance on the same user dir are kept.
+void remove_stale_cache_dirs(const fs::path& cacheRoot) {
+    std::vector<fs::path> stale;
+    std::error_code ec;
+    for (fs::directory_iterator it{cacheRoot, ec}, end; !ec && it != end; it.increment(ec)) {
+        const std::string name = borealis::io::fs_path_to_string(it->path().filename());
+        unsigned long pid = 0;
+        const auto [last, error] = std::from_chars(name.data(), name.data() + name.size(), pid);
+        const bool isPid = error == std::errc{} && last == name.data() + name.size();
+        if (isPid && pid != loader::current_process_id() && loader::process_running(pid)) {
+            continue;
+        }
+        stale.push_back(it->path());
+    }
+    for (const auto& path : stale) {
+        fs::remove_all(path, ec);
+    }
 }
 
 }  // namespace
@@ -356,11 +377,8 @@ void ModLoader::init() {
     if (m_cacheDir.empty()) {
         m_cacheDir = m_searchDirs.front().path / ".cache";
     }
-
-    std::error_code ec;
-
-    // Stale libs from previous sessions (see load_native).
-    fs::remove_all(m_cacheDir, ec);
+    remove_stale_cache_dirs(m_cacheDir);
+    m_cacheDir /= std::to_string(loader::current_process_id());
 
     const auto packages = scan_packages(m_searchDirs);
     for (const auto& package : packages) {
