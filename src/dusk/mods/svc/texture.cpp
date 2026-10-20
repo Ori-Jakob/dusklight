@@ -1,3 +1,4 @@
+#include "overrides.hpp"
 #include "registry.hpp"
 
 #include <borealis/log.hpp>
@@ -79,6 +80,7 @@ struct ModTextureRecord {
 // run inside ModLoader::tick), in the loader's sync/deactivate paths, or at shutdown.
 std::unordered_map<const LoadedMod*, ModTextureRecord> s_modTextures;
 uint64_t s_nextTextureHandle = 1;
+uint64_t s_registrationGeneration = 0;
 
 // Position in m_mods (dependency-sorted load order) + 1; later-loaded mods win. The user
 // texture_replacements directory uses kUserTextureReplacementPriority, below any mod.
@@ -189,6 +191,7 @@ void register_static_textures(LoadedMod& mod, ModTextureRecord& record) {
     }
 
     record.staticRegistered = true;
+    ++s_registrationGeneration;
     if (!record.staticGroup.registrations.empty()) {
         Log.info("[{}] registered {} texture replacement(s).", mod.metadata.id,
             record.staticGroup.registrations.size());
@@ -196,6 +199,7 @@ void register_static_textures(LoadedMod& mod, ModTextureRecord& record) {
 }
 
 void register_runtime_entry(RuntimeTextureEntry& entry, int32_t priority) {
+    ++s_registrationGeneration;
     if (entry.isVirtual) {
         entry.registration = aurora::texture::register_virtual_replacement(
             entry.keepalive->bundlePath,
@@ -215,6 +219,7 @@ void register_runtime_entry(RuntimeTextureEntry& entry, int32_t priority) {
 }
 
 void unregister_record(ModTextureRecord& record) {
+    ++s_registrationGeneration;
     aurora::texture::unregister_replacements(record.staticGroup);
     record.staticGroup.registrations.clear();
     record.staticKeepalives.clear();
@@ -321,6 +326,7 @@ bool texture_unregister(LoadedMod& mod, uint64_t handle) {
     }
     aurora::texture::unregister_replacement(entry->registration);
     runtime.erase(entry);
+    ++s_registrationGeneration;
     return true;
 }
 
@@ -451,6 +457,55 @@ constexpr TextureService s_textureService{
 };
 
 }  // namespace
+
+std::vector<TextureOverrideInfo> texture_entries(const LoadedMod& mod) {
+    std::vector<TextureOverrideInfo> entries;
+    const auto it = s_modTextures.find(&mod);
+    if (it == s_modTextures.end()) {
+        return entries;
+    }
+    const auto& record = it->second;
+    // Registrations and keepalives are pushed together.
+    for (size_t i = 0; i < record.staticGroup.registrations.size() &&
+                       i < record.staticKeepalives.size();
+         ++i)
+    {
+        const auto& registration = record.staticGroup.registrations[i];
+        const auto& keepalive = record.staticKeepalives[i];
+        entries.push_back({
+            .key = registration.key,
+            .registrationId = registration.id,
+            .priority = record.appliedPriority,
+            .bundle = keepalive->bundle,
+            .bundlePath = keepalive->bundlePath,
+        });
+    }
+    for (const auto& entry : record.runtime) {
+        TextureOverrideInfo info{
+            .handle = entry.handle,
+            .key = entry.registration.key,
+            .registrationId = entry.registration.id,
+            .priority = record.appliedPriority,
+        };
+        if (entry.isVirtual) {
+            info.bundle = entry.keepalive->bundle;
+            info.bundlePath = entry.keepalive->bundlePath;
+        } else {
+            info.keepalive = entry.keepalive;
+            info.raw = entry.keepalive->ownedData;
+            info.width = entry.width;
+            info.height = entry.height;
+            info.mipCount = entry.mipCount;
+            info.gxFormat = entry.gxFormat;
+        }
+        entries.push_back(std::move(info));
+    }
+    return entries;
+}
+
+uint64_t texture_registrations_generation() {
+    return s_registrationGeneration;
+}
 
 constinit const ServiceModule g_textureModule{
     .id = TEXTURE_SERVICE_ID,
