@@ -218,7 +218,7 @@ public:
     void* getOverlayData(SDIFileEntry* entry, u32* outSize);
     bool getOverlayFileSize(SDIFileEntry* entry, u32* outSize) const;
     static void notifyOverlayFilesChanged();
-    // Entry overlay copies held by mounted archives, and the number made since boot.
+    // Entry overlay buffers held by mounted archives, and the number made since boot.
     static void getOverlayBufferStats(u64* outLive, u64* outTotal);
 
 protected:
@@ -234,6 +234,15 @@ protected:
     // That way, any pointers to old overlay data remain valid even when the overlay changed.
     std::unordered_map<void*, ArcOverlayResource> mArcOverlayResources;
     mutable std::unordered_map<u32, void*> mActiveArcOverlayResources;
+
+    struct ArcOverlayCopy {
+        void* data;
+        u32 size;
+    };
+
+    // Sources for copy-style fetches; never handed out, so a generation change frees them.
+    mutable std::unordered_map<u32, ArcOverlayCopy> mArcOverlayCopies;
+    mutable u64 mArcOverlayCopiesGeneration = 0;
     mutable std::string mArcOverlaysPath;
     mutable std::unordered_map<u32, std::string> mIdxToPathMap;
     mutable bool mArcOverlaysPathResolved = false;
@@ -242,6 +251,8 @@ protected:
     void buildIndexToPathMap(u32 dirIndex, const std::string& currentPath) const;
     bool getOverlayPath(SDIFileEntry* entry, std::string& path) const;
     void* getActiveOverlayData(SDIFileEntry* entry, u32* outSize) const;
+    const void* getOverlayCopy(SDIFileEntry* entry, u32* outSize) const;
+    void freeOverlayCopies() const;
     bool copyOverlayData(void* buffer, u32 bufferSize, SDIFileEntry* entry, u32* outSize);
     bool getOverlayResourceSize(const void* data, u32* outSize) const;
     bool removeOverlayResource(void* resource, bool freeResource);

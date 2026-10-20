@@ -48,6 +48,38 @@ void free_overlay_buffer(void* data) {
 #endif
 }
 
+void* read_overlay_buffer(const std::string& path, u32* outSize) {
+    constexpr u32 alignmentMask = 0x1f;
+    DVDFileInfo fileInfo{};
+    if (!DVDOpen(path.c_str(), &fileInfo)) {
+        return nullptr;
+    }
+
+    const u32 logicalSize = fileInfo.length;
+    if (logicalSize > static_cast<u32>(std::numeric_limits<s32>::max()) - alignmentMask) {
+        DVDClose(&fileInfo);
+        return nullptr;
+    }
+
+    const u32 readSize = ALIGN_NEXT(logicalSize, 0x20);
+    const u32 allocationSize = readSize == 0 ? 1 : readSize;
+    void* data = alloc_overlay_buffer(allocationSize);
+    if (data == nullptr) {
+        DVDClose(&fileInfo);
+        return nullptr;
+    }
+
+    const s32 status = DVDReadPrio(&fileInfo, data, readSize, 0, 2);
+    DVDClose(&fileInfo);
+    if (status < DVD_RESULT_GOOD || static_cast<u32>(status) != logicalSize) {
+        free_overlay_buffer(data);
+        return nullptr;
+    }
+
+    *outSize = logicalSize;
+    return data;
+}
+
 }  // namespace
 #endif
 
@@ -415,31 +447,10 @@ void* JKRArchive::getOverlayData(SDIFileEntry* entry, u32* outSize) {
         return nullptr;
     }
 
-    constexpr u32 alignmentMask = 0x1f;
     const u64 generation = sArcOverlayGeneration.load(std::memory_order_acquire);
-    DVDFileInfo fileInfo{};
-    if (!DVDOpen(path.c_str(), &fileInfo)) {
-        return nullptr;
-    }
-
-    const u32 logicalSize = fileInfo.length;
-    if (logicalSize > static_cast<u32>(std::numeric_limits<s32>::max()) - alignmentMask) {
-        DVDClose(&fileInfo);
-        return nullptr;
-    }
-
-    const u32 readSize = ALIGN_NEXT(logicalSize, 0x20);
-    const u32 allocationSize = readSize == 0 ? 1 : readSize;
-    void* data = alloc_overlay_buffer(allocationSize);
+    u32 logicalSize;
+    void* data = read_overlay_buffer(path, &logicalSize);
     if (data == nullptr) {
-        DVDClose(&fileInfo);
-        return nullptr;
-    }
-
-    const s32 status = DVDReadPrio(&fileInfo, data, readSize, 0, 2);
-    DVDClose(&fileInfo);
-    if (status < DVD_RESULT_GOOD || static_cast<u32>(status) != logicalSize) {
-        free_overlay_buffer(data);
         return nullptr;
     }
 
@@ -456,46 +467,60 @@ void* JKRArchive::getOverlayData(SDIFileEntry* entry, u32* outSize) {
     return data;
 }
 
-// Reads into the caller's buffer, so copy-style fetches never leave an owned copy behind.
+const void* JKRArchive::getOverlayCopy(SDIFileEntry* entry, u32* outSize) const {
+    const u64 generation = sArcOverlayGeneration.load(std::memory_order_acquire);
+    if (mArcOverlayCopiesGeneration != generation) {
+        freeOverlayCopies();
+        mArcOverlayCopiesGeneration = generation;
+        return nullptr;
+    }
+
+    const auto copyIt = mArcOverlayCopies.find(entry->index);
+    if (copyIt == mArcOverlayCopies.end()) {
+        return nullptr;
+    }
+    if (outSize != nullptr) {
+        *outSize = copyIt->second.size;
+    }
+    return copyIt->second.data;
+}
+
+void JKRArchive::freeOverlayCopies() const {
+    for (const auto& copy : mArcOverlayCopies | std::views::values) {
+        free_overlay_buffer(copy.data);
+    }
+    mArcOverlayCopies.clear();
+}
+
+// Copy-style fetches keep one copy per entry for the current generation instead of a resource.
 bool JKRArchive::copyOverlayData(void* buffer, u32 bufferSize, SDIFileEntry* entry, u32* outSize) {
     if (entry == nullptr) {
         return false;
     }
 
-    u32 copySize = 0;
-    u32 activeSize;
-    if (const void* activeData = getActiveOverlayData(entry, &activeSize)) {
-        copySize = activeSize < bufferSize ? activeSize : bufferSize;
-        if (copySize != 0) {
-            memcpy(buffer, activeData, copySize);
-        }
-    } else {
+    u32 overlaySize = 0;
+    const void* overlayData = getActiveOverlayData(entry, &overlaySize);
+    if (overlayData == nullptr) {
+        overlayData = getOverlayCopy(entry, &overlaySize);
+    }
+    if (overlayData == nullptr) {
         std::string path;
         if (!getOverlayPath(entry, path)) {
             return false;
         }
 
-        DVDFileInfo fileInfo{};
-        if (!DVDOpen(path.c_str(), &fileInfo)) {
+        void* data = read_overlay_buffer(path, &overlaySize);
+        if (data == nullptr) {
             return false;
         }
-
-        const u32 logicalSize = fileInfo.length;
-        copySize = logicalSize < bufferSize ? logicalSize : bufferSize;
-        if (copySize > static_cast<u32>(std::numeric_limits<s32>::max())) {
-            DVDClose(&fileInfo);
-            return false;
-        }
-        if (copySize != 0) {
-            const s32 status = DVDReadPrio(&fileInfo, buffer, static_cast<s32>(copySize), 0, 2);
-            if (status < DVD_RESULT_GOOD || static_cast<u32>(status) != copySize) {
-                DVDClose(&fileInfo);
-                return false;
-            }
-        }
-        DVDClose(&fileInfo);
+        mArcOverlayCopies[entry->index] = ArcOverlayCopy{.data = data, .size = overlaySize};
+        overlayData = data;
     }
 
+    const u32 copySize = overlaySize < bufferSize ? overlaySize : bufferSize;
+    if (copySize != 0) {
+        memcpy(buffer, overlayData, copySize);
+    }
     if (outSize != nullptr) {
         *outSize = copySize;
     }
@@ -528,10 +553,12 @@ bool JKRArchive::getOverlayFileSize(SDIFileEntry* entry, u32* outSize) const {
         return false;
     }
 
-    u32 activeSize;
-    if (getActiveOverlayData(entry, &activeSize) != nullptr) {
+    u32 cachedSize;
+    if (getActiveOverlayData(entry, &cachedSize) != nullptr ||
+        getOverlayCopy(entry, &cachedSize) != nullptr)
+    {
         if (outSize != nullptr) {
-            *outSize = activeSize;
+            *outSize = cachedSize;
         }
         return true;
     }
@@ -580,6 +607,7 @@ bool JKRArchive::removeOverlayResource(void* resource, bool freeResource) {
 }
 
 void JKRArchive::removeAllOverlayResources() {
+    freeOverlayCopies();
     mActiveArcOverlayResources.clear();
     for (const auto& key : mArcOverlayResources | std::views::keys) {
         free_overlay_buffer(key);
