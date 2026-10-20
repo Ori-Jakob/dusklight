@@ -10,3 +10,6 @@
 [submodule "mods/cosmetics"]
 	path = mods/cosmetics
 	url = https://github.com/TwilitRealm/dusklight-cosmetics
+[submodule "mods/twili_together"]
+	path = mods/twili_together
+	url = https://github.com/Ori-Jakob/dusklight-twili-together
