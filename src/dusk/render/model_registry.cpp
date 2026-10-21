@@ -1,5 +1,6 @@
 #include "dusk/render/model_registry.hpp"
 
+#include "dusk/main.h"
 #include "dusk/render/hints.hpp"
 #include "dusk/render/render_bridge.hpp"
 
@@ -15,12 +16,14 @@
 #include <aurora/gfx.hpp>
 #include <aurora/render.hpp>
 #include <borealis/log.hpp>
+#include <dolphin/gx/GXCommandList.h>
 #include <fmt/format.h>
 
 #include <algorithm>
 #include <array>
 #include <cstdint>
 #include <deque>
+#include <span>
 #include <string_view>
 #include <thread>
 #include <tuple>
@@ -38,12 +41,50 @@ constexpr u32 kNoFrame = UINT32_MAX;
 constexpr u32 kSerialLimit = UINT32_MAX;
 constexpr size_t kDrawCacheSize = 256;
 constexpr u32 kCpuDeformed = AURORA_OBJ_CPU_DEFORMED;
+constexpr u32 kSkinInPlaceFlag = 0x100;
+constexpr size_t kArrayBaseBytes = 16;
+constexpr size_t kArraySlots = GX_VA_TEX7 - GX_VA_POS + 1;
+
+struct ImmutableArray {
+    GXAttr attr = GX_VA_POS;
+    const void* data = nullptr;
+    u32 size = 0;
+    bool operator==(const ImmutableArray&) const = default;
+};
+
+struct ArrayRelease {
+    u32 generation = 0;
+    std::vector<ImmutableArray> arrays;
+};
+
+// Hints of the current aurora frame may not have reached the decoder yet
+struct SentCount {
+    u64 total = 0;
+    u64 beforeFrame = 0;
+    u32 frame = kNoFrame;
+
+    void add(u32 now, u64 n) noexcept {
+        if (frame != now) {
+            beforeFrame = total;
+            frame = now;
+        }
+        total += n;
+    }
+
+    u64 settled(u32 now) const noexcept { return frame == now ? beforeFrame : total; }
+};
 
 struct DataInfo {
     u32 generation = 0;
     std::vector<MaterialTag> materials;
     std::vector<std::string> names;
     std::string archive;
+    std::vector<ImmutableArray> arrays;
+    std::string arrayArchive;
+    const JKRHeap* heap = nullptr;
+    u32 declaredFrame = kNoFrame;
+    bool declared = false;
+    bool verified = false;
 };
 
 struct ModelEntry {
@@ -58,7 +99,7 @@ struct ModelEntry {
     u32 factsFrame = kNoFrame;
     ShapeFacts facts;
     const J3DModelData* data = nullptr;
-    const DataInfo* info = nullptr;
+    DataInfo* info = nullptr;
 };
 
 enum class Warning : u8 {
@@ -92,6 +133,140 @@ ShapeFacts model_facts(J3DModel* model, const J3DModelData* data) noexcept {
     facts.deformData = model->mDeformData != nullptr;
     facts.localPositions = model->getVertexBuffer()->getCurrentVtxPos() != data->getVtxPosArray();
     return facts;
+}
+
+std::vector<ImmutableArray> select_immutable(
+    std::span<const ImmutableArray> slots, bool keepPosNrm) {
+    std::vector<ImmutableArray> arrays;
+    for (const ImmutableArray& slot : slots) {
+        if (slot.data == nullptr) {
+            continue;
+        }
+        if (slot.size == 0 || std::ranges::any_of(arrays,
+                                  [&slot](const ImmutableArray& a) { return a.data == slot.data; }))
+        {
+            return {};
+        }
+        arrays.push_back(slot);
+    }
+    if (!keepPosNrm) {
+        std::erase_if(arrays,
+            [](const ImmutableArray& a) { return a.attr == GX_VA_POS || a.attr == GX_VA_NRM; });
+    }
+    return arrays;
+}
+
+// An indexed slot with no bytes reads whatever aurora pushes after it, so the data keeps streaming
+bool reads_missing_slot(const GXVtxDescList* desc, std::span<const ImmutableArray> slots) {
+    if (desc == nullptr) {
+        return true;
+    }
+    for (; desc->attr != GX_VA_NULL; ++desc) {
+        if (desc->attr == GX_VA_NBT) {
+            if (desc->type != GX_NONE) {
+                return true;
+            }
+            continue;
+        }
+        if (desc->attr < GX_VA_POS || desc->attr > GX_VA_TEX7 ||
+            (desc->type != GX_INDEX8 && desc->type != GX_INDEX16))
+        {
+            continue;
+        }
+        const ImmutableArray& slot = slots[desc->attr - GX_VA_POS];
+        if (slot.data == nullptr || slot.size == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+const void* vertex_array(const J3DVertexData& vtx, GXAttr attr) noexcept {
+    switch (attr) {
+    case GX_VA_POS:
+        return vtx.getVtxPosArray();
+    case GX_VA_NRM:
+        return vtx.getVtxNrmArray();
+    case GX_VA_CLR0:
+    case GX_VA_CLR1:
+        return vtx.getVtxColorArray(static_cast<u8>(attr - GX_VA_CLR0));
+    default:
+        return vtx.getVtxTexCoordArray(static_cast<u8>(attr - GX_VA_TEX0));
+    }
+}
+
+std::array<ImmutableArray, kArraySlots> empty_slots() noexcept {
+    std::array<ImmutableArray, kArraySlots> slots;
+    for (size_t i = 0; i < kArraySlots; ++i) {
+        slots[i].attr = static_cast<GXAttr>(GX_VA_POS + i);
+    }
+    return slots;
+}
+
+std::vector<ImmutableArray> model_immutable_arrays(const J3DModelData* data) {
+    // J3DModelData exposes its vertex data only through a non-const accessor
+    const J3DVertexData& vtx = const_cast<J3DModelData*>(data)->getVertexData();
+    const GXVtxAttrFmtList* fmt = vtx.getVtxAttrFmtList();
+    // NBT shapes put the NBT array in the normal slot with the normal size
+    if (fmt == nullptr || vtx.getVtxNBTArray() != nullptr) {
+        return {};
+    }
+    auto slots = empty_slots();
+    // Same pointers and byte sizes J3DShape::makeVtxArrayCmd bakes into every shape's array bases
+    for (; fmt->attr != GX_VA_NULL; ++fmt) {
+        if (fmt->attr == GX_VA_NBT) {
+            return {};
+        }
+        if (fmt->attr < GX_VA_POS || fmt->attr > GX_VA_TEX7) {
+            continue;
+        }
+        const void* ptr = vertex_array(vtx, fmt->attr);
+        slots[fmt->attr - GX_VA_POS] = {
+            fmt->attr, ptr, ptr != nullptr ? vtx.getVtxArrByteSize(fmt->attr) : 0};
+    }
+    for (u16 i = 0; i < data->getShapeNum(); ++i) {
+        J3DShape* shape = data->getShapeNodePointer(i);
+        if (shape == nullptr || reads_missing_slot(shape->getVtxDesc(), slots)) {
+            return {};
+        }
+    }
+    // setSkinDeform rewrites these positions and normals in place
+    return select_immutable(
+        slots, !(data->checkFlag(kSkinInPlaceFlag) && data->getWEvlpMtxNum() != 0));
+}
+
+bool vcd_declares(J3DShape* shape, const ImmutableArray& a) noexcept {
+    const auto* begin = static_cast<const u8*>(shape->getVcdVatCmd());
+    if (begin == nullptr) {
+        return false;
+    }
+    const u16 command = GX_AURORA_LOAD_ARRAYBASE + (a.attr - GX_VA_POS);
+    const u64 address = reinterpret_cast<uintptr_t>(a.data);
+    std::array<u8, kArrayBaseBytes> encoded{};
+    encoded[0] = GX_AURORA;
+    encoded[1] = static_cast<u8>(command >> 8);
+    encoded[2] = static_cast<u8>(command);
+    for (size_t i = 0; i < 8; ++i) {
+        encoded[3 + i] = static_cast<u8>(address >> (56 - 8 * i));
+    }
+    for (size_t i = 0; i < 4; ++i) {
+        encoded[11 + i] = static_cast<u8>(a.size >> (24 - 8 * i));
+    }
+    encoded[15] = 1;
+    const u8* end = begin + J3DShape::kVcdVatDLSize;
+    return std::search(begin, end, encoded.begin(), encoded.end()) != end;
+}
+
+void send_declaration(const DataInfo& info) noexcept {
+    for (const ImmutableArray& a : info.arrays) {
+        GXAuroraSetArrayImmutable(a.data, a.size, GX_TRUE, info.generation);
+    }
+}
+
+void send_release(const ArrayRelease& r) noexcept {
+    for (const ImmutableArray& a : r.arrays) {
+        GXAuroraReleaseArrayImmutable(a.data, r.generation);
+    }
 }
 
 bool is_billboard_shape(J3DShape* shape) noexcept {
@@ -172,11 +347,12 @@ public:
         return create_data(data);
     }
 
-    void load_data(const J3DModelData* data, const char* archive) {
+    void load_data(const J3DModelData* data, const char* archive, const JKRHeap* heap) {
         DataInfo& info = known_data(data);
         info.archive.clear();
         info.names.clear();
         info.materials.clear();
+        track_arrays(data, model_immutable_arrays(data), archive, heap);
         // Most actor MAxx names are never applied by the game; the six BG-object actors are M9-W6's
         if (!is_room_archive(archive)) {
             return;
@@ -269,10 +445,6 @@ public:
 
     bool begin_shape(const J3DShapePacket* packet, u32 frame) noexcept {
         roll(frame);
-        if (m_suppression > 0) {
-            ++m_current.suppressedShapes;
-            return false;
-        }
         J3DModel* model = packet->getModel();
         J3DShape* shape = packet->getShape();
         ModelEntry& entry = drawn_model(model);
@@ -283,6 +455,12 @@ public:
                 entry.info = &known_data(data);
             }
             stamp_frame(entry, frame, model_facts(model, data), data->checkBBoardFlag());
+        }
+        // Ahead of the suppression test, since shadow images draw a model before the main pass
+        declare_arrays(*entry.info, entry.facts, shape, frame);
+        if (m_suppression > 0) {
+            ++m_current.suppressedShapes;
+            return false;
         }
 
         ShapeInputs in = base_inputs(entry);
@@ -355,11 +533,12 @@ public:
             }
             m_depth = 0;
         }
-        if (!m_quiet && m_frame != kNoFrame && m_logUntil != 0 && m_frame <= m_logUntil) {
+        if (array_log(m_frame)) {
             RegistryLog.info("render.objects log: frame {} objects {} suppressed {} nested {} "
-                             "cpu_deformed {} billboard {}",
+                             "cpu_deformed {} billboard {} arrays declared {} released {}",
                 m_current.frame, m_current.objects, m_current.suppressedShapes, m_current.nested,
-                m_current.cpuDeformed, m_current.billboards);
+                m_current.cpuDeformed, m_current.billboards, m_current.declaredArrays,
+                m_current.releasedArrays);
         }
         m_last = m_current;
         m_current = RegistryStats{.frame = frame};
@@ -402,6 +581,129 @@ public:
             RegistryLog.warn("render registry: called off the main thread; tags may race");
         }
     }
+
+    void track_arrays(const J3DModelData* data, std::vector<ImmutableArray> arrays,
+        const char* archive, const JKRHeap* heap) {
+        DataInfo& info = known_data(data);
+        info.arrays = std::move(arrays);
+        info.verified = false;
+        if (info.arrays.empty() || heap == nullptr) {
+            info.arrays.clear();
+            return;
+        }
+        info.heap = heap;
+        info.arrayArchive = archive != nullptr ? archive : "";
+        m_heapData[heap].push_back(m_dataIndex.find(data)->second);
+    }
+
+    bool array_log(u32 frame) const noexcept {
+        return !m_quiet && frame != kNoFrame && m_logUntil != 0 && frame <= m_logUntil;
+    }
+
+    bool take_declaration(DataInfo& info, u32 frame) noexcept {
+        if (info.arrays.empty() || info.declaredFrame == frame) {
+            return false;
+        }
+        roll(frame);
+        info.declaredFrame = frame;
+        info.declared = true;
+        const auto count = static_cast<u32>(info.arrays.size());
+        m_current.declaredArrays += count;
+        m_declares.add(frame, count);
+        return true;
+    }
+
+    ArrayRelease take_release(DataInfo& info, u32 frame) {
+        ArrayRelease release;
+        if (info.declared) {
+            // Count a release from logic in the frame whose FIFO carries it
+            roll(frame);
+            release = {info.generation, std::move(info.arrays)};
+            const auto count = static_cast<u32>(release.arrays.size());
+            m_current.releasedArrays += count;
+            m_releases.add(frame, count);
+            if (array_log(frame)) {
+                RegistryLog.info("render.arrays: frame {} release {} generation {} arrays {} "
+                                 "first 0x{:x}",
+                    frame, info.arrayArchive, release.generation, count,
+                    count != 0 ? reinterpret_cast<uintptr_t>(release.arrays.front().data) : 0);
+            }
+        }
+        // The data never declares again once its arrays were taken
+        info.arrays.clear();
+        info.heap = nullptr;
+        info.declared = false;
+        info.declaredFrame = kNoFrame;
+        return release;
+    }
+
+    ArrayRelease release_data(const J3DModelData* data, u32 frame) {
+        const auto it = m_dataIndex.find(data);
+        if (it == m_dataIndex.end() || !m_data[it->second].declared) {
+            return {};
+        }
+        return take_release(m_data[it->second], frame);
+    }
+
+    std::vector<ArrayRelease> release_heap(const JKRHeap* heap, u32 frame) {
+        std::vector<ArrayRelease> releases;
+        const auto it = m_heapData.find(heap);
+        if (it == m_heapData.end()) {
+            return releases;
+        }
+        const std::vector<u32> indices = std::move(it->second);
+        m_heapData.erase(it);
+        for (const u32 index : indices) {
+            DataInfo& info = m_data[index];
+            if (info.heap != heap) {
+                continue;
+            }
+            ArrayRelease release = take_release(info, frame);
+            if (!release.arrays.empty()) {
+                releases.push_back(std::move(release));
+            }
+        }
+        return releases;
+    }
+
+    void declare_arrays(DataInfo& info, const ShapeFacts& facts, J3DShape* shape, u32 frame) {
+        if (info.arrays.empty()) {
+            return;
+        }
+        // A deform setup flag can alias model-data arrays, so CPU deformers stop declaring for good
+        if (facts.skinPosCpu || facts.deformData) {
+            send_release(take_release(info, frame));
+            return;
+        }
+        if (info.declaredFrame == frame) {
+            return;
+        }
+        if (!info.verified) {
+            info.verified = true;
+            ++m_vcdChecks;
+            if (!std::ranges::all_of(info.arrays,
+                    [shape](const ImmutableArray& a) { return vcd_declares(shape, a); }))
+            {
+                ++m_vcdMisses;
+                info.arrays.clear();
+                return;
+            }
+            if (array_log(frame)) {
+                RegistryLog.info("render.arrays: frame {} declare {} generation {} arrays {} "
+                                 "first 0x{:x}",
+                    frame, info.arrayArchive, info.generation, info.arrays.size(),
+                    reinterpret_cast<uintptr_t>(info.arrays.front().data));
+            }
+        }
+        if (take_declaration(info, frame)) {
+            send_declaration(info);
+        }
+    }
+
+    const SentCount& declares() const noexcept { return m_declares; }
+    const SentCount& releases() const noexcept { return m_releases; }
+    u32 vcd_checks() const noexcept { return m_vcdChecks; }
+    u32 vcd_misses() const noexcept { return m_vcdMisses; }
 
 private:
     ModelEntry& model_slot(const J3DModel* model) {
@@ -477,6 +779,11 @@ private:
     absl::flat_hash_map<const J3DModel*, u32> m_modelIndex;
     std::deque<DataInfo> m_data;
     absl::flat_hash_map<const J3DModelData*, u32> m_dataIndex;
+    absl::flat_hash_map<const JKRHeap*, std::vector<u32>> m_heapData;
+    SentCount m_declares;
+    SentCount m_releases;
+    u32 m_vcdChecks = 0;
+    u32 m_vcdMisses = 0;
     u32 m_nextSerial = 1;
     u32 m_nextGeneration = 1;
     std::array<std::pair<const J3DModel*, ModelEntry*>, kDrawCacheSize> m_drawCache{};
@@ -496,7 +803,8 @@ private:
 
 // A function-local registry is ready for models constructed during static initialization
 Registry& live() noexcept {
-    static Registry registry;
+    // Never destroyed, since static destructors free archives after function-local statics die
+    static Registry& registry = *new Registry;
     return registry;
 }
 
@@ -506,6 +814,14 @@ const J3DModel* fake_model(uintptr_t address) noexcept {
 
 const J3DModelData* fake_data(uintptr_t address) noexcept {
     return reinterpret_cast<const J3DModelData*>(address);
+}
+
+const JKRHeap* fake_heap(uintptr_t address) noexcept {
+    return reinterpret_cast<const JKRHeap*>(address);
+}
+
+const void* fake_array(uintptr_t address) noexcept {
+    return reinterpret_cast<const void*>(address);
 }
 
 void append_problem(std::string& problems, std::string_view problem) {
@@ -800,6 +1116,149 @@ std::string test_aurora_agrees() {
     return problems;
 }
 
+std::string test_immutable_select() {
+    std::string problems;
+    auto slots = empty_slots();
+    slots[GX_VA_POS - GX_VA_POS] = {GX_VA_POS, fake_array(0x1000), 120};
+    slots[GX_VA_NRM - GX_VA_POS] = {GX_VA_NRM, fake_array(0x2000), 60};
+    slots[GX_VA_TEX0 - GX_VA_POS] = {GX_VA_TEX0, fake_array(0x3000), 32};
+    const std::vector<ImmutableArray> all = select_immutable(slots, true);
+    if (all.size() != 3 || all[0] != slots[0] || all[2] != slots[GX_VA_TEX0 - GX_VA_POS]) {
+        append_problem(problems, fmt::format("{} arrays from three filled slots", all.size()));
+    }
+    const std::vector<ImmutableArray> skinned = select_immutable(slots, false);
+    if (skinned.size() != 1 || skinned[0].attr != GX_VA_TEX0) {
+        append_problem(problems, "POS or NRM kept under in-place skinning");
+    }
+    auto repeated = slots;
+    repeated[GX_VA_TEX1 - GX_VA_POS] = {GX_VA_TEX1, fake_array(0x3000), 32};
+    if (!select_immutable(repeated, true).empty()) {
+        append_problem(problems, "a repeated pointer is declared");
+    }
+    auto sizeless = slots;
+    sizeless[GX_VA_CLR0 - GX_VA_POS] = {GX_VA_CLR0, fake_array(0x4000), 0};
+    if (!select_immutable(sizeless, true).empty()) {
+        append_problem(problems, "a slot without bytes is declared");
+    }
+
+    const std::array<GXVtxDescList, 3> direct{
+        {{GX_VA_POS, GX_INDEX16}, {GX_VA_CLR0, GX_DIRECT}, {GX_VA_NULL, GX_NONE}}};
+    if (reads_missing_slot(direct.data(), slots)) {
+        append_problem(problems, "a direct attribute over an empty slot counts as missing");
+    }
+    const std::array<GXVtxDescList, 2> indexed{{{GX_VA_TEX1, GX_INDEX8}, {GX_VA_NULL, GX_NONE}}};
+    if (!reads_missing_slot(indexed.data(), slots)) {
+        append_problem(problems, "an indexed empty slot is not missing");
+    }
+    const std::array<GXVtxDescList, 2> nbt{{{GX_VA_NBT, GX_INDEX16}, {GX_VA_NULL, GX_NONE}}};
+    if (!reads_missing_slot(nbt.data(), slots) || !reads_missing_slot(nullptr, slots)) {
+        append_problem(problems, "an NBT shape or a missing descriptor list is accepted");
+    }
+    return problems;
+}
+
+std::string test_array_lifecycle() {
+    std::string problems;
+    Registry registry(true);
+    const JKRHeap* heapA = fake_heap(0x10000);
+    const JKRHeap* heapB = fake_heap(0x20000);
+    const J3DModelData* first = fake_data(0x210);
+    const J3DModelData* idle = fake_data(0x220);
+    const J3DModelData* reused = fake_data(0x230);
+    const J3DModelData* rebuilt = fake_data(0x240);
+    const std::vector<ImmutableArray> arrays{
+        {GX_VA_POS, fake_array(0x5000), 96}, {GX_VA_TEX0, fake_array(0x6000), 48}};
+    const std::vector<ImmutableArray> single{{GX_VA_POS, fake_array(0x7000), 24}};
+    for (const J3DModelData* data : {first, idle, reused, rebuilt}) {
+        registry.create_data(data);
+    }
+    registry.track_arrays(first, arrays, "arcA", heapA);
+    registry.track_arrays(idle, single, "arcA", heapA);
+    registry.track_arrays(reused, single, "arcB", heapB);
+    registry.track_arrays(rebuilt, single, "arcB", heapB);
+    DataInfo& a = registry.known_data(first);
+    DataInfo& b = registry.known_data(idle);
+    DataInfo& c = registry.known_data(reused);
+
+    if (!registry.take_declaration(a, 1) || registry.take_declaration(a, 1) ||
+        !registry.take_declaration(c, 1) || registry.current().declaredArrays != 3)
+    {
+        append_problem(problems, "a frame declares other than once per data");
+    }
+    if (registry.declares().settled(1) != 0 || registry.declares().total != 3) {
+        append_problem(problems, "the frame's own declarations count as settled");
+    }
+    if (!registry.take_declaration(a, 2) || registry.declares().settled(2) != 3) {
+        append_problem(problems, "the next frame does not declare again");
+    }
+
+    const std::vector<ArrayRelease> released = registry.release_heap(heapA, 2);
+    if (released.size() != 1 || released[0].generation != a.generation ||
+        released[0].arrays != arrays || registry.current().releasedArrays != 2)
+    {
+        append_problem(problems, "the heap release does not return the declared arrays");
+    }
+    if (!b.arrays.empty() || !a.arrays.empty() || a.heap != nullptr) {
+        append_problem(problems, "released data keeps its arrays");
+    }
+    if (!registry.release_heap(heapA, 3).empty() || registry.take_declaration(a, 3)) {
+        append_problem(problems, "a destroyed heap releases again or its data declares again");
+    }
+
+    const u32 oldGeneration = c.generation;
+    const ArrayRelease reuse = registry.release_data(reused, 3);
+    registry.create_data(reused);
+    if (reuse.generation != oldGeneration || reuse.arrays != single ||
+        registry.known_data(reused).generation <= oldGeneration)
+    {
+        append_problem(problems, "an address reuse does not release the old generation");
+    }
+
+    registry.take_declaration(registry.known_data(rebuilt), 3);
+    registry.create_data(rebuilt);
+    const u32 frame = registry.frame();
+    if (!registry.release_heap(heapB, 4).empty() || registry.frame() != frame) {
+        append_problem(problems, "a rebuilt data is still released with its old heap");
+    }
+    if (!registry.release_data(fake_data(0x990), 9).arrays.empty() || registry.frame() != frame) {
+        append_problem(problems, "unknown data releases or rolls the frame");
+    }
+
+    const J3DModelData* heapless = fake_data(0x250);
+    registry.create_data(heapless);
+    registry.track_arrays(heapless, arrays, "arcC", nullptr);
+    if (!registry.known_data(heapless).arrays.empty()) {
+        append_problem(problems, "data without a heap keeps arrays it could never release");
+    }
+    return problems;
+}
+
+std::string test_array_hints_agree() {
+    std::string problems;
+    const Registry& registry = live();
+    const u32 now = aurora::gfx::current_frame();
+    const auto agree = [&](u16 id, const SentCount& sent, std::string_view name) {
+        const auto counters = aurora::render::hint_counters(id);
+        const u64 seen = counters.decoded + counters.skipped;
+        if (seen < sent.settled(now) || seen > sent.total) {
+            append_problem(
+                problems, fmt::format("aurora saw {} {} hints, dusk sent {} ({} settled)", seen,
+                              name, sent.total, sent.settled(now)));
+        }
+        if (counters.malformed != 0 || counters.late != 0) {
+            append_problem(problems,
+                fmt::format("{} malformed {} late {}", name, counters.malformed, counters.late));
+        }
+    };
+    agree(GX_AURORA_SET_ARRAY_IMMUTABLE, registry.declares(), "set");
+    agree(GX_AURORA_RELEASE_ARRAY_IMMUTABLE, registry.releases(), "release");
+    if (registry.vcd_misses() != 0) {
+        append_problem(problems, fmt::format("{} of {} model data failed the array base check",
+                                     registry.vcd_misses(), registry.vcd_checks()));
+    }
+    return problems;
+}
+
 }  // namespace
 
 void on_model_initialized(const J3DModel* model) noexcept {
@@ -811,13 +1270,27 @@ void on_model_initialized(const J3DModel* model) noexcept {
 void on_model_data_created(const J3DModelData* data) noexcept {
     Registry& registry = live();
     registry.check_thread();
+    // A reused address means the old data died without its heap release
+    send_release(registry.release_data(data, aurora::gfx::current_frame()));
     registry.create_data(data);
 }
 
-void on_model_loaded(const J3DModelData* data, const char* archive) noexcept {
+void on_model_loaded(const J3DModelData* data, const char* archive, const JKRHeap* heap) noexcept {
     Registry& registry = live();
     registry.check_thread();
-    registry.load_data(data, archive);
+    registry.load_data(data, archive, heap);
+}
+
+void on_resource_heap_destroyed(const JKRHeap* heap) noexcept {
+    // aurora has shut down when static destructors free the remaining archives
+    if (dusk::IsShuttingDown) {
+        return;
+    }
+    Registry& registry = live();
+    registry.check_thread();
+    for (const ArrayRelease& release : registry.release_heap(heap, aurora::gfx::current_frame())) {
+        send_release(release);
+    }
 }
 
 void declare_room_model(const J3DModel* model, int roomNo, int part) noexcept {
@@ -930,6 +1403,12 @@ std::vector<std::string> registry_report() {
     lines.push_back(fmt::format("render.objects: registry models {} model data {} tagged {} "
                                 "leaked {}",
         registry.models().size(), registry.data().size(), tagged, registry.leaked()));
+    const auto immutable = std::ranges::count_if(
+        registry.data(), [](const DataInfo& info) { return !info.arrays.empty(); });
+    lines.push_back(
+        fmt::format("render.objects: immutable data {} sent {} released {} vcd checks {} misses {}",
+            immutable, registry.declares().total, registry.releases().total, registry.vcd_checks(),
+            registry.vcd_misses()));
 
     std::vector<std::tuple<int, int, u64, u32>> rooms;
     for (const ModelEntry& entry : registry.models()) {
@@ -994,13 +1473,21 @@ void registry_self_test(SelfTestReport& report) {
     check("registry.compose_flags", test_compose_flags());
     check("registry.material_bound", test_material_bound());
     check("registry.nesting", test_nesting());
+    check("registry.immutable_select", test_immutable_select());
+    check("registry.array_lifecycle", test_array_lifecycle());
     check("registry.live_untouched",
         live().snapshot() == before ? std::string{} : "the live registry changed during the suite");
     if (!hints_active()) {
         report.skipped.push_back("registry.aurora_agrees: hints are off or no painter yet");
+        report.skipped.push_back("registry.array_hints_agree: hints are off or no painter yet");
         return;
     }
     check("registry.aurora_agrees", test_aurora_agrees());
+    if (live().vcd_checks() == 0) {
+        report.skipped.push_back("registry.array_hints_agree: no model data has declared arrays");
+        return;
+    }
+    check("registry.array_hints_agree", test_array_hints_agree());
 }
 
 }  // namespace dusk::render

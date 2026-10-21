@@ -45,6 +45,10 @@ dRes_info_c::~dRes_info_c() {
     } else if (mArchive != NULL) {
         deleteArchiveRes();
         if (mDataHeap != NULL) {
+#if TARGET_PC
+            // Model data and its vertex arrays die with this heap and the unmount below
+            dusk::render::on_resource_heap_destroyed(mDataHeap);
+#endif
             mDoExt_destroySolidHeap(mDataHeap);
             mDataHeap = NULL;
             mArchive->unmount();
@@ -538,7 +542,9 @@ int dRes_info_c::loadResource() {
 
 #if TARGET_PC
                 if (res != NULL && dusk::render::is_model_resource(nodeType)) {
-                    dusk::render::on_model_loaded(static_cast<J3DModelData*>(res), mArchiveName);
+                    // The current heap owns this data, nested pack archives included
+                    dusk::render::on_model_loaded(
+                        static_cast<J3DModelData*>(res), mArchiveName, JKRHeap::getCurrentHeap());
                 }
 #endif
                 JUT_ASSERT(1092, fileIndex < countFile);

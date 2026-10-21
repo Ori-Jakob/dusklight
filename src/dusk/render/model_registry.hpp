@@ -11,6 +11,7 @@
 class J3DModel;
 class J3DModelData;
 class J3DShapePacket;
+class JKRHeap;
 
 namespace dusk::render {
 
@@ -68,11 +69,14 @@ struct RegistryStats {
     u32 nested = 0;
     u32 cpuDeformed = 0;
     u32 billboards = 0;
+    u32 declaredArrays = 0;
+    u32 releasedArrays = 0;
 };
 
 void on_model_initialized(const J3DModel* model) noexcept;
 void on_model_data_created(const J3DModelData* data) noexcept;
-void on_model_loaded(const J3DModelData* data, const char* archive) noexcept;
+void on_model_loaded(const J3DModelData* data, const char* archive, const JKRHeap* heap) noexcept;
+void on_resource_heap_destroyed(const JKRHeap* heap) noexcept;
 void declare_room_model(const J3DModel* model, int roomNo, int part) noexcept;
 void declare_model(const J3DModel* model, u32 categories, u32 flags) noexcept;
 void mark_model_teleport(const J3DModel* model) noexcept;
