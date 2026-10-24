@@ -1000,9 +1000,6 @@ int game_main(int argc, char* argv[]) {
     }
 
     borealis::sentry::shutdown();
-    borealis::log::shutdown();
-    fflush(stdout);
-    fflush(stderr);
 
     mDoMch_Destroy();
 
@@ -1017,6 +1014,10 @@ int game_main(int argc, char* argv[]) {
     dusk::texture_replacements::shutdown();
     dusk::config::shutdown();
     aurora_shutdown();
+    // Aurora logs its shutdown stats, so the file has to outlive it
+    borealis::log::shutdown();
+    fflush(stdout);
+    fflush(stderr);
 
     return dusk::input_replay::exit_code();
 }
