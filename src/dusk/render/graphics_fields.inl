@@ -2,6 +2,7 @@
     X(textureMaterials, textureMaterials)                                                          \
     X(stochasticTiling, stochasticTiling)                                                          \
     X(legacyMatMaps, legacyMatMaps)                                                                \
+    X(generateMissingMips, generateMissingMips)                                                    \
     X(pbr, pbr)                                                                                    \
     X(legacyBlend, legacyBlend)                                                                    \
     X(exposure, exposure)                                                                          \

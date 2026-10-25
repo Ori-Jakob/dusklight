@@ -2,6 +2,7 @@
 
 #include <borealis/log.hpp>
 #include "dusk/mods/loader/loader.hpp"
+#include "dusk/texture_replacements.hpp"
 #include "dusk/utilities.hpp"
 #include "mods/svc/texture.h"
 
@@ -180,7 +181,8 @@ void register_static_textures(LoadedMod& mod, ModTextureRecord& record) {
         auto keepalive = std::make_shared<TextureKeepalive>(mod.bundle, path);
         const auto registration = aurora::texture::register_virtual_replacement(path,
             {.read = texture_read_cb, .userData = keepalive.get()},
-            {.priority = record.appliedPriority});
+            {.priority = record.appliedPriority,
+                .noGeneratedMipDirs = dusk::texture_replacements::kNoGeneratedMipDirs});
         if (registration.id == 0) {
             continue;
         }

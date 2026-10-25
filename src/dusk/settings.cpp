@@ -182,6 +182,7 @@ UserSettings g_userSettings = {
         .textureMaterials {"graphics.textureMaterials", true},
         .stochasticTiling {"graphics.stochasticTiling", false},
         .legacyMatMaps {"graphics.legacyMatMaps", false},
+        .generateMissingMips {"graphics.generateMissingMips", false},
         .pbr {"graphics.pbr", false},
         .legacyBlend {"graphics.legacyBlend", 0.0f},
         .exposure {"graphics.exposure", GraphicsExposure::MatchLegacy},
@@ -476,6 +477,7 @@ void registerSettings() {
     RegisterGraphics(g_userSettings.graphics.textureMaterials);
     RegisterGraphics(g_userSettings.graphics.stochasticTiling);
     RegisterGraphics(g_userSettings.graphics.legacyMatMaps);
+    RegisterGraphics(g_userSettings.graphics.generateMissingMips);
     RegisterGraphics(g_userSettings.graphics.pbr);
     RegisterGraphics(g_userSettings.graphics.legacyBlend);
     RegisterGraphics(g_userSettings.graphics.exposure);

@@ -46,7 +46,8 @@ const Rml::String kBloomBrightnessHelpText =
 const Rml::String kDepthOfFieldHelpText =
     "Configure the post-processing depth-of-field effect. Classic uses the original "
     "depth-of-field pass; Dusklight uses a higher-quality depth-of-field pass.";
-const Rml::String kTextureReplacementHelpText = "Enable installed texture replacements.";
+const Rml::String kTextureReplacementHelpText =
+    "Enable installed texture replacements and the material data that comes with them.";
 
 constexpr std::array kSectionTitles{
     "Preset",
@@ -68,7 +69,7 @@ constexpr std::array kSectionTitles{
 static_assert(kSectionTitles.size() == static_cast<size_t>(GraphicsSection::Advanced) + 1);
 
 constexpr std::array<size_t, kSectionTitles.size()> kSectionRowCounts{
-    3, 6, 4, 5, 3, 2, 3, 6, 11, 10, 5, 2, 3, 6, 4};
+    3, 7, 4, 5, 3, 2, 3, 6, 11, 10, 5, 2, 3, 6, 4};
 
 constexpr std::array kMovedKeys{
     std::string_view{"game.enableTextureReplacements"},
@@ -483,7 +484,7 @@ bool open_renderer_window() {
 using S = GraphicsSection;
 using F = ar::Feature;
 
-constexpr std::array<GraphicsRow, 73> kRows{{
+constexpr std::array<GraphicsRow, 74> kRows{{
     {{S::Preset, "Graphics Preset", "graphics.preset", "M2", false},
         [](RowContext& ctx, const GraphicsRowInfo& info) { preset_row(ctx, info); }},
     {{S::Preset, "Recommended", nullptr, "M2", false},
@@ -523,8 +524,8 @@ constexpr std::array<GraphicsRow, 73> kRows{{
         [](RowContext& ctx, const GraphicsRowInfo& info) {
             bool_row(ctx, info, graphics().textureMaterials,
                 {
-                    .help = "Use material data such as normal, roughness and height maps from "
-                            "texture packs.",
+                    .help = "Apply texture material data from Dusklight and texture packs, such "
+                            "as which ground textures use stochastic tiling.",
                     .gate = toggle_gate<F::TextureMaterials>(),
                     .clamped = [] { return clamped().textureMaterials; },
                 });
@@ -533,18 +534,34 @@ constexpr std::array<GraphicsRow, 73> kRows{{
         [](RowContext& ctx, const GraphicsRowInfo& info) {
             bool_row(ctx, info, graphics().stochasticTiling,
                 {
-                    .help = "Break up visible repetition on tiling ground textures.",
+                    .help = "Break up visible repetition on tiling ground textures. Needs "
+                            "Texture Materials.",
                     .gate = toggle_gate<F::StochasticTiling>(),
-                    .clamped = [] { return clamped().stochasticTiling; },
+                    .clamped =
+                        [] { return clamped().textureMaterials && clamped().stochasticTiling; },
+                    .isDisabled = [] { return !graphics().textureMaterials.getValue(); },
                 });
         }},
-    {{S::Materials, "Original .mat Maps", "graphics.legacyMatMaps", "M6", false},
+    {{S::Materials, "Original .mat Maps", "graphics.legacyMatMaps", "M9", false},
         [](RowContext& ctx, const GraphicsRowInfo& info) {
             bool_row(ctx, info, graphics().legacyMatMaps,
                 {
-                    .help = "Use the normal maps from older .mat texture packs.",
+                    .help = "Use the normal maps from older .mat texture packs. Needs Texture "
+                            "Materials.",
                     .gate = toggle_gate<F::LegacyMatMaps>(),
-                    .clamped = [] { return clamped().legacyMatMaps; },
+                    .clamped = [] { return clamped().textureMaterials && clamped().legacyMatMaps; },
+                    .isDisabled = [] { return !graphics().textureMaterials.getValue(); },
+                });
+        }},
+    {{S::Materials, "Generate Missing Mipmaps", "graphics.generateMissingMips", "M6", true},
+        [](RowContext& ctx, const GraphicsRowInfo& info) {
+            bool_row(ctx, info, graphics().generateMissingMips,
+                {
+                    .help = "Create the smaller texture levels that original textures and some "
+                            "texture-pack textures leave out, so distant surfaces shimmer less. "
+                            "Menus and other 2D art keep their original look.",
+                    .gate = kAlwaysGate,
+                    .clamped = [] { return clamped().generateMissingMips; },
                 });
         }},
     {{S::Materials, "PBR Lighting", "graphics.pbr", "M9", true},
@@ -1212,8 +1229,8 @@ bool is_graphics_key(const char* key) {
 
 std::string test_rows_count() {
     std::string problems;
-    if (kRowInfos.size() != 73) {
-        append_item(problems, fmt::format("{} rows, expected 73", kRowInfos.size()));
+    if (kRowInfos.size() != 74) {
+        append_item(problems, fmt::format("{} rows, expected 74", kRowInfos.size()));
     }
     std::array<size_t, kSectionTitles.size()> counts{};
     size_t previous = 0;
@@ -1244,8 +1261,8 @@ std::string test_rows_cover_every_key() {
     DUSK_GRAPHICS_FIELDS(DUSK_EXPECTED_KEY)
 #undef DUSK_EXPECTED_KEY
     std::string problems;
-    if (expected.size() != 62) {
-        append_item(problems, fmt::format("{} graphics keys, expected 62", expected.size()));
+    if (expected.size() != 63) {
+        append_item(problems, fmt::format("{} graphics keys, expected 63", expected.size()));
     }
     for (const auto key : expected) {
         const auto count = std::ranges::count_if(kRowInfos,
@@ -1309,8 +1326,8 @@ std::string test_rows_preset_flags() {
             append_item(problems, fmt::format("{} flag does not match {}", row.label, row.key));
         }
     }
-    if (flagged != 26) {
-        append_item(problems, fmt::format("{} rows are preset-controlled, expected 26", flagged));
+    if (flagged != 27) {
+        append_item(problems, fmt::format("{} rows are preset-controlled, expected 27", flagged));
     }
     return problems;
 }

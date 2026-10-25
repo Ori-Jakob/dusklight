@@ -16,6 +16,7 @@ namespace ar = aurora::render;
 
 #define DUSK_PRESET_FIELDS(X)                                                                      \
     X(stochasticTiling)                                                                            \
+    X(generateMissingMips)                                                                         \
     X(taa)                                                                                         \
     X(ao)                                                                                          \
     X(pbr)                                                                                         \
@@ -59,11 +60,12 @@ DUSK_PRESET_FIELDS(DUSK_CHECK_PRESET_FIELD)
 #define DUSK_PRESET_KEY(member) std::string_view{"graphics." #member},
 constexpr std::array kPresetKeys{DUSK_PRESET_FIELDS(DUSK_PRESET_KEY)};
 #undef DUSK_PRESET_KEY
-static_assert(kPresetKeys.size() == 26);
+static_assert(kPresetKeys.size() == 27);
 
 constexpr std::array<PresetValues, 5> kPresets{{
     {
         .stochasticTiling = false,
+        .generateMissingMips = false,
         .taa = false,
         .ao = GraphicsQuality::Off,
         .pbr = false,
@@ -92,6 +94,7 @@ constexpr std::array<PresetValues, 5> kPresets{{
     },
     {
         .stochasticTiling = true,
+        .generateMissingMips = true,
         .taa = true,
         .ao = GraphicsQuality::Low,
         .pbr = false,
@@ -120,6 +123,7 @@ constexpr std::array<PresetValues, 5> kPresets{{
     },
     {
         .stochasticTiling = true,
+        .generateMissingMips = true,
         .taa = true,
         .ao = GraphicsQuality::Medium,
         .pbr = true,
@@ -148,6 +152,7 @@ constexpr std::array<PresetValues, 5> kPresets{{
     },
     {
         .stochasticTiling = true,
+        .generateMissingMips = true,
         .taa = true,
         .ao = GraphicsQuality::High,
         .pbr = true,
@@ -176,6 +181,7 @@ constexpr std::array<PresetValues, 5> kPresets{{
     },
     {
         .stochasticTiling = true,
+        .generateMissingMips = true,
         .taa = true,
         .ao = GraphicsQuality::High,
         .pbr = true,
@@ -236,6 +242,14 @@ GraphicsPreset detect_from(const PresetValues& values, GraphicsPreset base, bool
         return GraphicsPreset::Custom;
     }
     return is_base_preset(base) && values == preset_values(base) ? base : GraphicsPreset::Custom;
+}
+
+// A config saved before the key existed would otherwise read as Custom on its own preset
+std::optional<bool> seeded_generate_missing_mips(GraphicsPreset savedPreset, bool saved) noexcept {
+    if (saved) {
+        return std::nullopt;
+    }
+    return preset_values(savedPreset).generateMissingMips;
 }
 
 template <typename T>
@@ -315,8 +329,9 @@ struct ExpectedPresetRow {
 };
 
 // Written per key, unlike kPresets, so a slip in either table shows up as a mismatch
-constexpr std::array<ExpectedPresetRow, 26> kExpectedPresetTable{{
+constexpr std::array<ExpectedPresetRow, 27> kExpectedPresetTable{{
     {"graphics.stochasticTiling", {"false", "true", "true", "true", "true"}},
+    {"graphics.generateMissingMips", {"false", "true", "true", "true", "true"}},
     {"graphics.taa", {"false", "true", "true", "true", "true"}},
     {"graphics.ao", {"Off", "Low", "Medium", "High", "High"}},
     {"graphics.pbr", {"false", "false", "true", "true", "true"}},
@@ -468,6 +483,36 @@ std::string test_presets_reference() {
     return problems;
 }
 
+std::string test_presets_seed_missing_key() {
+    const bool unset = getSettings().graphics.generateMissingMips.getDefaultValue();
+    std::string problems;
+    const auto expect = [&](GraphicsPreset base, PresetValues loaded, bool expected,
+                            GraphicsPreset expectedPreset) {
+        loaded.generateMissingMips = unset;
+        const std::optional<bool> seeded = seeded_generate_missing_mips(base, false);
+        if (!seeded.has_value()) {
+            append_item(problems, fmt::format("a {} config is not seeded", preset_name(base)));
+            return;
+        }
+        loaded.generateMissingMips = *seeded;
+        const GraphicsPreset detected = detect_from(loaded, base, false, GraphicsStaticWorld::Off);
+        if (*seeded != expected || detected != expectedPreset) {
+            append_item(problems, fmt::format("a {} config loads as {} with the key {}",
+                                      preset_name(base), preset_name(detected), *seeded));
+        }
+    };
+    expect(GraphicsPreset::High, preset_values(GraphicsPreset::High), true, GraphicsPreset::High);
+    expect(GraphicsPreset::Original, preset_values(GraphicsPreset::Original), false,
+        GraphicsPreset::Original);
+    PresetValues customHigh = preset_values(GraphicsPreset::High);
+    customHigh.ao = GraphicsQuality::Low;
+    expect(GraphicsPreset::High, customHigh, true, GraphicsPreset::Custom);
+    if (seeded_generate_missing_mips(GraphicsPreset::High, true).has_value()) {
+        append_item(problems, "a saved key is seeded again");
+    }
+    return problems;
+}
+
 std::string test_reasons_complete() {
     constexpr std::array kHardReasons{
         ar::Reason::NeedsCore,
@@ -612,6 +657,17 @@ void reset_to_preset() {
     }
     DUSK_GRAPHICS_FIELDS(DUSK_RESET_FIELD)
 #undef DUSK_RESET_FIELD
+}
+
+std::optional<bool> seed_generate_missing_mips() {
+    auto& graphics = getSettings().graphics;
+    const std::optional<bool> seeded = seeded_generate_missing_mips(
+        graphics.preset.getValueForSave(), graphics.generateMissingMips.hasPersistedValue());
+    if (seeded.has_value()) {
+        // A launch override stays on top, as it would over a loaded value
+        graphics.generateMissingMips.setValue(*seeded, false);
+    }
+    return seeded;
 }
 
 GraphicsPreset base_preset() {
@@ -920,6 +976,7 @@ void settings_self_test(SelfTestReport& report) {
     check("presets.recommend", test_presets_recommend());
     check("presets.experimental_custom", test_presets_experimental_custom());
     check("presets.reference", test_presets_reference());
+    check("presets.seed_missing_key", test_presets_seed_missing_key());
     check("reasons.complete", test_reasons_complete());
     check("status.locked", test_status_locked());
     check("status.pending", test_status_pending());

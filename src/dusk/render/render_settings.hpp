@@ -7,6 +7,7 @@
 #include <aurora/render.hpp>
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -15,6 +16,7 @@ namespace dusk::render {
 
 struct PresetValues {
     bool stochasticTiling;
+    bool generateMissingMips;
     bool taa;
     GraphicsQuality ao;
     bool pbr;
@@ -67,6 +69,7 @@ const PresetValues& preset_values(GraphicsPreset preset) noexcept;
 PresetValues read_preset_values(SettingsSource source = SettingsSource::Current);
 void apply_preset(GraphicsPreset preset);
 void reset_to_preset();
+std::optional<bool> seed_generate_missing_mips();
 GraphicsPreset base_preset();
 GraphicsPreset detect_preset();
 std::string preset_display_name();

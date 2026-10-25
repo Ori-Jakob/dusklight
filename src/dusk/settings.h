@@ -506,6 +506,7 @@ struct UserSettings {
         ConfigVar<bool> textureMaterials;
         ConfigVar<bool> stochasticTiling;
         ConfigVar<bool> legacyMatMaps;
+        ConfigVar<bool> generateMissingMips;
         ConfigVar<bool> pbr;
         ConfigVar<float> legacyBlend;
         ConfigVar<GraphicsExposure> exposure;

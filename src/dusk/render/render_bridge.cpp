@@ -148,8 +148,8 @@ static_assert([] {
 #define DUSK_COUNT_FIELD(member, field) +1
 constexpr size_t kFieldCount = 1 DUSK_GRAPHICS_FIELDS(DUSK_COUNT_FIELD);
 #undef DUSK_COUNT_FIELD
-// aurora's Settings has 62 members counting preset, and each needs exactly one key
-constexpr size_t kAuroraSettingsMembers = 62;
+// aurora's Settings has 63 members counting preset, and each needs exactly one key
+constexpr size_t kAuroraSettingsMembers = 63;
 
 uint64_t s_generation = 0;
 uint64_t s_pushedGeneration = 0;
@@ -465,6 +465,10 @@ DUSK_GRAPHICS_ENUMS(DUSK_DEFINE_CONVERSIONS)
 #undef DUSK_DEFINE_CONVERSIONS
 
 void initialize() {
+    if (const auto seeded = seed_generate_missing_mips()) {
+        RenderLog.info("Seeded graphics.generateMissingMips {} from preset {}", *seeded,
+            preset_name(getSettings().graphics.preset.getValueForSave()));
+    }
     present();
     load_texture_materials();
     size_t supported = 0;
