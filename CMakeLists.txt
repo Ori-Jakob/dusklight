@@ -500,6 +500,14 @@ if (NOT APPLE)
             "$<TARGET_FILE_DIR:dusklight>/res"
         COMMENT "Copying resources"
     )
+    add_custom_target(dusklight_data ALL
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/res/materials"
+            "$<TARGET_FILE_DIR:dusklight>/res/materials"
+        COMMENT "Copying material manifests"
+        VERBATIM
+    )
+    add_dependencies(dusklight_data dusklight)
 endif ()
 
 if (WIN32)
