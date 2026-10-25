@@ -235,11 +235,7 @@ std::vector<ImmutableArray> model_immutable_arrays(const J3DModelData* data) {
         slots, !(data->checkFlag(kSkinInPlaceFlag) && data->getWEvlpMtxNum() != 0));
 }
 
-bool vcd_declares(J3DShape* shape, const ImmutableArray& a) noexcept {
-    const auto* begin = static_cast<const u8*>(shape->getVcdVatCmd());
-    if (begin == nullptr) {
-        return false;
-    }
+bool vcd_contains(std::span<const u8> vcd, const ImmutableArray& a) noexcept {
     const u16 command = GX_AURORA_LOAD_ARRAYBASE + (a.attr - GX_VA_POS);
     const u64 address = reinterpret_cast<uintptr_t>(a.data);
     std::array<u8, kArrayBaseBytes> encoded{};
@@ -253,8 +249,15 @@ bool vcd_declares(J3DShape* shape, const ImmutableArray& a) noexcept {
         encoded[11 + i] = static_cast<u8>(a.size >> (24 - 8 * i));
     }
     encoded[15] = 1;
-    const u8* end = begin + J3DShape::kVcdVatDLSize;
-    return std::search(begin, end, encoded.begin(), encoded.end()) != end;
+    return std::search(vcd.begin(), vcd.end(), encoded.begin(), encoded.end()) != vcd.end();
+}
+
+bool vcd_declares(J3DShape* shape, const ImmutableArray& a) noexcept {
+    const auto* begin = static_cast<const u8*>(shape->getVcdVatCmd());
+    if (begin == nullptr) {
+        return false;
+    }
+    return vcd_contains({begin, J3DShape::kVcdVatDLSize}, a);
 }
 
 void send_declaration(const DataInfo& info) noexcept {
@@ -808,6 +811,19 @@ Registry& live() noexcept {
     return registry;
 }
 
+// The suite may run before the current frame draws anything, so the last frame's draws count too
+bool drawn_arrays_unchecked(
+    const std::deque<ModelEntry>& models, u32 frame, u32 lastFrame, u32 vcdChecks) noexcept {
+    if (vcdChecks != 0) {
+        return false;
+    }
+    return std::ranges::any_of(models, [frame, lastFrame](const ModelEntry& entry) {
+        return entry.lastDrawFrame != kNoFrame &&
+               (entry.lastDrawFrame == frame || entry.lastDrawFrame == lastFrame) &&
+               entry.info != nullptr && !entry.info->arrays.empty();
+    });
+}
+
 const J3DModel* fake_model(uintptr_t address) noexcept {
     return reinterpret_cast<const J3DModel*>(address);
 }
@@ -1150,9 +1166,29 @@ std::string test_immutable_select() {
     if (!reads_missing_slot(indexed.data(), slots)) {
         append_problem(problems, "an indexed empty slot is not missing");
     }
+    const std::array<GXVtxDescList, 2> wide{{{GX_VA_CLR1, GX_INDEX16}, {GX_VA_NULL, GX_NONE}}};
+    if (!reads_missing_slot(wide.data(), slots)) {
+        append_problem(problems, "an INDEX16 empty slot is not missing");
+    }
     const std::array<GXVtxDescList, 2> nbt{{{GX_VA_NBT, GX_INDEX16}, {GX_VA_NULL, GX_NONE}}};
     if (!reads_missing_slot(nbt.data(), slots) || !reads_missing_slot(nullptr, slots)) {
         append_problem(problems, "an NBT shape or a missing descriptor list is accepted");
+    }
+
+    // POS and NRM bases, each followed by its stride, as GDSetArraySized writes them
+    constexpr std::array<u8, 48> vcd{0x50, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10,
+        0x00, 0x00, 0x00, 0x00, 0x78, 0x01, 0x08, 0xB0, 0x00, 0x00, 0x00, 0x0C, 0x50, 0x00, 0x11,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x20, 0x00, 0x00, 0x00, 0x00, 0x3C, 0x01, 0x08, 0xB1,
+        0x00, 0x00, 0x00, 0x0C, 0x00, 0x00, 0x00, 0x00};
+    const ImmutableArray& nrm = slots[GX_VA_NRM - GX_VA_POS];
+    if (!vcd_contains(vcd, nrm)) {
+        append_problem(problems, "a written array base is not found");
+    }
+    if (vcd_contains(vcd, {GX_VA_NRM, fake_array(0x2008), nrm.size}) ||
+        vcd_contains(vcd, {GX_VA_NRM, nrm.data, 48}) ||
+        vcd_contains(vcd, {GX_VA_POS, nrm.data, nrm.size}))
+    {
+        append_problem(problems, "an array base with another address, size or attribute matches");
     }
     return problems;
 }
@@ -1229,6 +1265,44 @@ std::string test_array_lifecycle() {
     registry.track_arrays(heapless, arrays, "arcC", nullptr);
     if (!registry.known_data(heapless).arrays.empty()) {
         append_problem(problems, "data without a heap keeps arrays it could never release");
+    }
+
+    const J3DModelData* late = fake_data(0x260);
+    registry.create_data(late);
+    registry.track_arrays(late, single, "arcD", fake_heap(0x30000));
+    registry.take_declaration(registry.known_data(late), 5);
+    const u64 before = registry.releases().total;
+    registry.release_data(late, 6);
+    if (registry.frame() != 6 || registry.current().releasedArrays != single.size() ||
+        registry.releases().settled(6) != before ||
+        registry.releases().settled(7) != before + single.size())
+    {
+        append_problem(problems, "a release in a later frame counts before its frame rolls");
+    }
+    return problems;
+}
+
+std::string test_array_check_gate() {
+    std::string problems;
+    DataInfo withArrays;
+    withArrays.arrays = {{GX_VA_POS, fake_array(0x8000), 24}};
+    DataInfo withoutArrays;
+    const auto gate = [](u32 drawn, DataInfo* info, u32 lastFrame, u32 vcdChecks) {
+        const std::deque<ModelEntry> models{ModelEntry{.lastDrawFrame = drawn, .info = info}};
+        return drawn_arrays_unchecked(models, 7, lastFrame, vcdChecks);
+    };
+    const std::array<std::tuple<std::string_view, bool, bool>, 6> cases{{
+        {"drawn this frame unchecked", gate(7, &withArrays, 6, 0), true},
+        {"drawn this frame checked", gate(7, &withArrays, 6, 1), false},
+        {"drawn last frame", gate(6, &withArrays, 6, 0), true},
+        {"drawn two frames ago", gate(5, &withArrays, 6, 0), false},
+        {"never drawn", gate(kNoFrame, &withArrays, kNoFrame, 0), false},
+        {"data without arrays", gate(7, &withoutArrays, 6, 0), false},
+    }};
+    for (const auto& [name, got, expected] : cases) {
+        if (got != expected) {
+            append_problem(problems, fmt::format("{} gives {}", name, got));
+        }
     }
     return problems;
 }
@@ -1475,6 +1549,7 @@ void registry_self_test(SelfTestReport& report) {
     check("registry.nesting", test_nesting());
     check("registry.immutable_select", test_immutable_select());
     check("registry.array_lifecycle", test_array_lifecycle());
+    check("registry.array_check_gate", test_array_check_gate());
     check("registry.live_untouched",
         live().snapshot() == before ? std::string{} : "the live registry changed during the suite");
     if (!hints_active()) {
@@ -1483,7 +1558,15 @@ void registry_self_test(SelfTestReport& report) {
         return;
     }
     check("registry.aurora_agrees", test_aurora_agrees());
-    if (live().vcd_checks() == 0) {
+    const Registry& registry = live();
+    if (drawn_arrays_unchecked(
+            registry.models(), registry.frame(), registry.last().frame, registry.vcd_checks()))
+    {
+        report.failed.push_back(
+            "registry.array_hints_agree: model data drawn with arrays was never checked");
+        return;
+    }
+    if (registry.vcd_checks() == 0) {
         report.skipped.push_back("registry.array_hints_agree: no model data has declared arrays");
         return;
     }
