@@ -194,6 +194,8 @@ GfxAttachmentSemantic gfx_attachment_semantic(aurora::gfx::ColorAttachmentSemant
         return GFX_ATTACHMENT_NORMAL;
     case aurora::gfx::ColorAttachmentSemantic::Auxiliary:
         return GFX_ATTACHMENT_AUXILIARY;
+    case aurora::gfx::ColorAttachmentSemantic::DebugId:
+        return GFX_ATTACHMENT_AUXILIARY;
     }
     return GFX_ATTACHMENT_AUXILIARY;
 }

@@ -772,15 +772,15 @@ int game_main(int argc, char* argv[]) {
         launchUILoop();
         borealis::shutdown();
         borealis::sentry::shutdown();
-        borealis::log::shutdown();
-        fflush(stdout);
-        fflush(stderr);
 #if BOREALIS_HAS_DISCORD
         dusk::discord::shutdown();
 #endif
         dusk::ui::shutdown();
         dusk::config::shutdown();
         aurora_shutdown();
+        borealis::log::shutdown();
+        fflush(stdout);
+        fflush(stderr);
         return 0;
     }
 
@@ -902,15 +902,15 @@ int game_main(int argc, char* argv[]) {
             if (!launchUILoop()) {
                 borealis::shutdown();
                 borealis::sentry::shutdown();
-                borealis::log::shutdown();
-                fflush(stdout);
-                fflush(stderr);
 #if BOREALIS_HAS_DISCORD
                 dusk::discord::shutdown();
 #endif
                 dusk::ui::shutdown();
                 dusk::config::shutdown();
                 aurora_shutdown();
+                borealis::log::shutdown();
+                fflush(stdout);
+                fflush(stderr);
                 return 0;
             }
         }
