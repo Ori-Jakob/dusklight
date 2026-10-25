@@ -13,7 +13,7 @@ aurora::texture::ReplacementGroup s_directoryGroup;
 
 void reload() {
     aurora::texture::unregister_replacements(s_directoryGroup);
-    s_directoryGroup.registrations.clear();
+    s_directoryGroup = {};
 
     if (!getSettings().game.enableTextureReplacements) {
         return;
@@ -28,7 +28,7 @@ void reload() {
 
 void shutdown() {
     aurora::texture::unregister_replacements(s_directoryGroup);
-    s_directoryGroup.registrations.clear();
+    s_directoryGroup = {};
 }
 
 }

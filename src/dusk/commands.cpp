@@ -13,6 +13,7 @@
 #include "dusk/render/model_registry.hpp"
 #include "dusk/render/render_bridge.hpp"
 #include "dusk/render/render_settings.hpp"
+#include "dusk/render/texture_materials.hpp"
 #include "dusk/settings.h"
 #include "dusk/ui/settings_graphics.hpp"
 #include "game_clock.h"
@@ -609,6 +610,7 @@ static void RunRenderSelfTest(
     render::lights_self_test(report);
     render::environment_self_test(report);
     render::cuts_self_test(report);
+    render::texture_materials_self_test(report);
     for (const auto& failure : report.failed) {
         TraceError(state, output, "FAIL " + failure);
     }
@@ -1510,6 +1512,11 @@ void runCommand(std::string_view cmdLine, CommandState& state, const CommandOutp
         return;
     }
 
+    if (cmd == "render.materials") {
+        RunRenderTable(&render::texture_materials_command, args, state, output);
+        return;
+    }
+
     if (cmd == "help") {
         output("@<ref>  =  @<procId> | @found | @link");
         output("");
@@ -1538,6 +1545,9 @@ void runCommand(std::string_view cmdLine, CommandState& state, const CommandOutp
         output("render.hints [reset|ids]                    Hint counts, camera cuts, scene epoch");
         output("render.lights [list|slots|check|counts]     Renderer scene lights");
         output("render.lights log <n>                       Log the next n light lists");
+        output("render.materials [layers|reload]            Texture material layers and usage");
+        output("render.materials check [key ...]            Check shipped keys and key hits");
+        output("render.materials key <key> | export <name>  Merged entry, or export the merge");
         output("render.objects [log <frames>]               Renderer objects and scopes for the "
                "last frame");
         output("render.preset <name|recommended|reset>      Apply or show the graphics preset");

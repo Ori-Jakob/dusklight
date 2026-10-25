@@ -8,6 +8,7 @@
 #include "dusk/render/graphics_fields.inl"
 #include "dusk/render/hints.hpp"
 #include "dusk/render/render_settings.hpp"
+#include "dusk/render/texture_materials.hpp"
 #include "f_op/f_op_camera_mng.h"
 
 #include <aurora/gfx.hpp>
@@ -465,6 +466,7 @@ DUSK_GRAPHICS_ENUMS(DUSK_DEFINE_CONVERSIONS)
 
 void initialize() {
     present();
+    load_texture_materials();
     size_t supported = 0;
     for (const auto feature : all_features()) {
         if (ar::feature_support(feature).supported) {

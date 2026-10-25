@@ -1578,6 +1578,8 @@ set(DUSK_FILES
         src/dusk/render/render_bridge.hpp
         src/dusk/render/render_settings.cpp
         src/dusk/render/render_settings.hpp
+        src/dusk/render/texture_materials.cpp
+        src/dusk/render/texture_materials.hpp
         src/dusk/scope_guard.hpp
         src/dusk/save_manager.cpp
         src/dusk/save_manager.hpp
