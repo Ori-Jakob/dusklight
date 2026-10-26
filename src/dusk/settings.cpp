@@ -189,7 +189,7 @@ UserSettings g_userSettings = {
         .exposureBias {"graphics.exposureBias", 0.0f},
         .tonemap {"graphics.tonemap", GraphicsTonemap::PbrNeutral},
         .taa {"graphics.taa", false},
-        .taaSharpness {"graphics.taaSharpness", 0.25f},
+        .taaSharpness {"graphics.taaSharpness", 0.35f},
         .ao {"graphics.ao", GraphicsQuality::Off},
         .ssil {"graphics.ssil", false},
         .shadowQuality {"graphics.shadowQuality", GraphicsQuality::Off},

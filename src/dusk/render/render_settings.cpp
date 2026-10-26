@@ -473,7 +473,7 @@ std::string test_presets_reference() {
         }
     });
     const auto& graphics = getSettings().graphics;
-    if (reference_value(graphics.taaSharpness) != 0.25f) {
+    if (reference_value(graphics.taaSharpness) != 0.35f) {
         append_item(problems, fmt::format("graphics.taaSharpness reference is {}",
                                   reference_value(graphics.taaSharpness)));
     }
