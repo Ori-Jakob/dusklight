@@ -132,7 +132,7 @@ fn gtao(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     let pixel_position = reconstruct_view_space_position(pixel_depth, uv);
     let encoded_normal = load_normal(pixel_coordinates);
-    if encoded_normal.a < 0.5 {
+    if encoded_normal.a <= 1.0 / 6.0 {
         textureStore(ambient_occlusion, pixel_coordinates, vec4f(1.0));
         return;
     }

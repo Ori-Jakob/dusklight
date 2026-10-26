@@ -1,10 +1,12 @@
-// Fullscreen composite: multiplies the denoised ambient-occlusion visibility over the scene.
+// Fullscreen composite: multiplies the denoised ambient-occlusion visibility over the scene. With
+// the renderer's fog record, the fog the game added keeps its colour: L * ao + F * (1 - ao).
 //
 // Debug views:
 //   1 = raw AO visibility as grayscale
 //   2 = view-space normals
 //   3 = the preprocessed depth input
 //   4 = depth staircase detector
+//   5 = fog record amount as grayscale, red where the fog colour is locked
 
 struct Uniforms {
     projection: mat4x4f,
@@ -25,6 +27,9 @@ struct Uniforms {
 @group(0) @binding(2) var scene_depth_raw: texture_2d<f32>;
 @group(0) @binding(3) var<uniform> uniforms: Uniforms;
 @group(0) @binding(4) var scene_normals: texture_2d<f32>;
+@group(0) @binding(5) var fog_record: texture_2d<u32>;
+
+const RECEIVER_MIN = 1.0 / 6.0;
 
 struct VertexOutput {
     @builtin(position) position: vec4f,
@@ -87,8 +92,16 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
     let normal_size = vec2i(textureDimensions(scene_normals));
     let normal_pixel = clamp(vec2i(in.uv * vec2f(normal_size)), vec2i(0), normal_size - 1);
     let encoded_normal = textureLoad(scene_normals, normal_pixel, 0);
+    let record_size = vec2i(textureDimensions(fog_record));
+    let record_pixel = clamp(vec2i(in.uv * vec2f(record_size)), vec2i(0), record_size - 1);
+    let record = textureLoad(fog_record, record_pixel, 0);
+    let fog_amount = f32(record.a >> 1u) / 127.0;
     if uniforms.debug_view == 2u {
-        return vec4f(select(vec3f(0.0), encoded_normal.xyz, encoded_normal.a >= 0.5), 1.0);
+        return vec4f(select(vec3f(0.0), encoded_normal.xyz, encoded_normal.a > RECEIVER_MIN), 1.0);
+    }
+    if uniforms.debug_view == 5u {
+        let locked = (record.a & 1u) != 0u;
+        return vec4f(select(vec3f(fog_amount), vec3f(fog_amount, 0.0, 0.0), locked), 1.0);
     }
     if uniforms.debug_view == 3u {
         // Preprocessed depth as an exponential distance gradient (white = near, black = far)
@@ -115,13 +128,16 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
         return vec4f(saturate(ratio_x), saturate(ratio_y), 0.0, 1.0);
     }
 
-    if encoded_normal.a < 0.5 {
-        return vec4f(1.0);
+    if encoded_normal.a <= RECEIVER_MIN {
+        if uniforms.debug_view == 1u {
+            return vec4f(1.0);
+        }
+        return vec4f(0.0, 0.0, 0.0, 1.0);
     }
     let visibility = sample_visibility(in.uv);
     if uniforms.debug_view == 1u {
         return vec4f(visibility, visibility, visibility, 1.0);
     }
     let value = mix(1.0, visibility, uniforms.intensity);
-    return vec4f(value, value, value, 1.0);
+    return vec4f(vec3f(record.rgb) / 255.0 * fog_amount * (1.0 - value), value);
 }

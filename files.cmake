@@ -1556,6 +1556,8 @@ set(DUSK_FILES
         src/dusk/mods/svc/window.hpp
         src/dusk/mods/svc/save.cpp
         src/dusk/mods/svc/save.hpp
+        src/dusk/mods/svc/scene_targets.cpp
+        src/dusk/mods/svc/scene_targets.hpp
         src/dusk/mods/svc/stage.cpp
         src/dusk/mods/svc/stage.hpp
         src/dusk/mouse.cpp
@@ -1572,6 +1574,8 @@ set(DUSK_FILES
         src/dusk/render/lights.hpp
         src/dusk/render/material_tags.cpp
         src/dusk/render/material_tags.hpp
+        src/dusk/render/mod_conflicts.cpp
+        src/dusk/render/mod_conflicts.hpp
         src/dusk/render/model_registry.cpp
         src/dusk/render/model_registry.hpp
         src/dusk/render/render_bridge.cpp

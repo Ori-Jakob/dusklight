@@ -294,6 +294,7 @@ void ModLoader::init_services() {
     {
         svc::register_module(*module);
     }
+    svc::register_module(svc::g_sceneTargetsModule);
 }
 
 bool ModLoader::register_static_service_exports(LoadedMod& mod) {

@@ -20,6 +20,7 @@
 #include "dusk/mods/svc/hook.hpp"
 #include "dusk/mods/svc/registry.hpp"
 #include "dusk/mods/updates.hpp"
+#include "dusk/render/mod_conflicts.hpp"
 #include "dusk/ui/mod_texture_provider.hpp"
 #include "dusk/ui/mods_window.hpp"
 #include "dusk/ui/ui.hpp"
@@ -214,6 +215,11 @@ bool ModLoader::activate_mod(LoadedMod& mod) {
     if (!mod.native && !mod.runtime.has_value()) {
         mod.enabledApplied = true;
         return true;
+    }
+    if (const auto conflict = dusk::render::mod_render_conflict(mod.metadata.id)) {
+        fail_mod(mod, MOD_CONFLICT, *conflict);
+        deactivate_mod(mod);
+        return false;
     }
 
     if (mod.native && !mod.servicesRegistered) {
@@ -1240,6 +1246,10 @@ void ModLoader::tick() {
 
     for (auto& mod : mods()) {
         if (!mod.active || (!mod.native && !mod.runtime.has_value())) {
+            continue;
+        }
+        if (const auto conflict = dusk::render::mod_render_conflict(mod.metadata.id)) {
+            fail_mod(mod, MOD_CONFLICT, *conflict);
             continue;
         }
         try {

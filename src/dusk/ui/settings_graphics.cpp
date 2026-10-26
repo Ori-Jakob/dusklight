@@ -1074,7 +1074,9 @@ constexpr std::array<GraphicsRow, 74> kRows{{
         [](RowContext& ctx, const GraphicsRowInfo& info) {
             bool_row(ctx, info, graphics().taa,
                 {
-                    .help = "Temporal anti-aliasing smooths jagged edges and shimmering.",
+                    .help = "Smooth jagged edges and shimmering by blending each frame with the "
+                            "ones before it. The HUD, menus and most particles are not affected. "
+                            "Its cost grows with Internal Resolution.",
                     .gate = toggle_gate<F::Taa>(),
                     .clamped = [] { return clamped().taa; },
                 });
@@ -1084,7 +1086,7 @@ constexpr std::array<GraphicsRow, 74> kRows{{
             tuner_row(ctx, info,
                 {
                     .option = GraphicsOption::TaaSharpness,
-                    .help = "Sharpening applied after TAA.",
+                    .help = "Sharpen the image after TAA to offset its softening. Needs TAA.",
                     .gate = param_gate<F::Taa>(),
                     .isDisabled = [] { return !graphics().taa.getValue(); },
                 });

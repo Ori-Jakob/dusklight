@@ -10,6 +10,7 @@
 #include "dusk/render/draw_tags.hpp"
 #include "dusk/render/lights.hpp"
 #include "dusk/render/material_tags.hpp"
+#include "dusk/render/mod_conflicts.hpp"
 #include "dusk/render/model_registry.hpp"
 #include "dusk/render/render_bridge.hpp"
 #include "dusk/render/render_settings.hpp"
@@ -611,6 +612,7 @@ static void RunRenderSelfTest(
     render::environment_self_test(report);
     render::cuts_self_test(report);
     render::texture_materials_self_test(report);
+    render::mod_conflicts_self_test(report);
     for (const auto& failure : report.failed) {
         TraceError(state, output, "FAIL " + failure);
     }

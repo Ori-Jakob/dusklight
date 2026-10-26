@@ -1,5 +1,6 @@
 #include "internal.hpp"
 #include "registry.hpp"
+#include "scene_targets.hpp"
 #include "window.hpp"
 
 #include <borealis/log.hpp>
@@ -195,6 +196,11 @@ GfxAttachmentSemantic gfx_attachment_semantic(aurora::gfx::ColorAttachmentSemant
     case aurora::gfx::ColorAttachmentSemantic::Auxiliary:
         return GFX_ATTACHMENT_AUXILIARY;
     case aurora::gfx::ColorAttachmentSemantic::DebugId:
+        return GFX_ATTACHMENT_AUXILIARY;
+    // GfxService keeps upstream's numbering; SceneTargetsService reports these
+    case aurora::gfx::ColorAttachmentSemantic::Motion:
+    case aurora::gfx::ColorAttachmentSemantic::Reactive:
+    case aurora::gfx::ColorAttachmentSemantic::Fog:
         return GFX_ATTACHMENT_AUXILIARY;
     }
     return GFX_ATTACHMENT_AUXILIARY;
@@ -668,7 +674,8 @@ ModResult gfx_unregister_stage_hook(LoadedMod& mod, uint64_t handle) {
     return MOD_OK;
 }
 
-ModResult gfx_resolve_pass(LoadedMod& mod, const GfxResolveDesc& desc, GfxResolvedTargets& out) {
+ModResult gfx_resolve_pass(LoadedMod& mod, const GfxResolveDesc& desc, GfxResolvedTargets& out,
+    bool fog, SceneRecords* records) {
     out = GfxResolvedTargets{.struct_size = sizeof(GfxResolvedTargets)};
     if (aurora::gfx::is_offscreen() && !s_modOffscreenOpen) {
         Log.error(
@@ -683,6 +690,7 @@ ModResult gfx_resolve_pass(LoadedMod& mod, const GfxResolveDesc& desc, GfxResolv
                 .color = desc.color,
                 .depth = desc.depth,
                 .normal = desc.normal != 0,
+                .fog = fog,
             },
             resolved))
     {
@@ -702,6 +710,10 @@ ModResult gfx_resolve_pass(LoadedMod& mod, const GfxResolveDesc& desc, GfxResolv
     out.colorTexture = resolved.colorTexture.Get();
     out.depthTexture = resolved.depthTexture.Get();
     out.normalTexture = resolved.normalTexture.Get();
+    if (records != nullptr) {
+        records->fog = resolved.fog.Get();
+        records->fogTexture = resolved.fogTexture.Get();
+    }
     return MOD_OK;
 }
 
@@ -1338,8 +1350,8 @@ ModResult gfx_unregister_stage_hook_impl(ModContext* context, GfxStageHookHandle
     return gfx_unregister_stage_hook(*mod, handle);
 }
 
-ModResult gfx_resolve_pass_impl(
-    ModContext* context, const GfxResolveDesc* desc, GfxResolvedTargets* outTargets) {
+ModResult resolve_with_records(ModContext* context, const GfxResolveDesc* desc,
+    GfxResolvedTargets* outTargets, const SceneRecordsDesc* recordsDesc, SceneRecords* outRecords) {
     OH_FUCK_SYNC
 
     constexpr size_t v0DescSize = offsetof(GfxResolveDesc, normal);
@@ -1358,6 +1370,17 @@ ModResult gfx_resolve_pass_impl(
     } else {
         return MOD_INVALID_ARGUMENT;
     }
+    if ((recordsDesc == nullptr) != (outRecords == nullptr) ||
+        (recordsDesc != nullptr && (recordsDesc->struct_size < sizeof(SceneRecordsDesc) ||
+                                       outRecords->struct_size < sizeof(SceneRecords))))
+    {
+        return MOD_INVALID_ARGUMENT;
+    }
+    if (outRecords != nullptr) {
+        const uint32_t recordsSize = outRecords->struct_size;
+        *outRecords = SceneRecords{.struct_size = recordsSize};
+    }
+    const bool wantFog = recordsDesc != nullptr && recordsDesc->fog != 0;
 
     auto* mod = mod_from_context(context);
     if (mod == nullptr || desc == nullptr || desc->struct_size < v0DescSize)
@@ -1369,16 +1392,21 @@ ModResult gfx_resolve_pass_impl(
     request.color = desc->color;
     request.depth = desc->depth;
     request.normal = desc->struct_size >= v3DescSize ? desc->normal : 0;
-    if ((!request.color && !request.depth && !request.normal) ||
+    if ((!request.color && !request.depth && !request.normal && !wantFog) ||
         (request.normal && outputSize < v3TargetsSize))
     {
         return MOD_INVALID_ARGUMENT;
     }
 
-    const auto result = gfx_resolve_pass(*mod, request, resolved);
+    const auto result = gfx_resolve_pass(*mod, request, resolved, wantFog, outRecords);
     resolved.struct_size = static_cast<uint32_t>(outputSize);
     std::memcpy(outTargets, &resolved, outputSize);
     return result;
+}
+
+ModResult gfx_resolve_pass_impl(
+    ModContext* context, const GfxResolveDesc* desc, GfxResolvedTargets* outTargets) {
+    return resolve_with_records(context, desc, outTargets, nullptr, nullptr);
 }
 
 ModResult gfx_create_pass_impl(ModContext* context, uint32_t width, uint32_t height) {
@@ -1460,6 +1488,11 @@ constexpr GfxService s_gfxService{
 };
 
 }  // namespace
+
+ModResult gfx_resolve_with_records(ModContext* context, const GfxResolveDesc* desc,
+    GfxResolvedTargets* outTargets, const SceneRecordsDesc* recordsDesc, SceneRecords* outRecords) {
+    return resolve_with_records(context, desc, outTargets, recordsDesc, outRecords);
+}
 
 constinit const ServiceModule g_gfxModule{
     .id = GFX_SERVICE_ID,

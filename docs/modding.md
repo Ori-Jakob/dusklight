@@ -1093,6 +1093,54 @@ To create a `WGPUSurface` manually, `GfxDeviceInfo` holds the `WGPUInstance` and
 `push_present` must be called every frame from a GfxService stage callback. If surface was lost, `push_present` returns
 `MOD_ERROR`. Unregister and re-register the target before trying again.
 
+### SceneTargetsService ([`mods/svc/scene_targets.h`](../sdk/include/mods/svc/scene_targets.h))
+
+**Requires `add_mod(... FEATURES webgpu)`**
+
+While a Graphics feature that needs it is on, such as TAA, the renderer adds a base G-buffer to the scene pass: motion,
+reactive and fog record targets. SceneTargetsService describes those targets and snapshots the fog record. It is
+optional, so import it with `IMPORT_OPTIONAL_SERVICE` and check for null; hosts without it keep the plain GfxService
+path.
+
+```cpp
+IMPORT_OPTIONAL_SERVICE(SceneTargetsService, svc_scene_targets);
+
+SceneTargetsLayout targets = SCENE_TARGETS_LAYOUT_INIT;
+const bool gbuffer = svc_scene_targets != nullptr &&
+                     svc_scene_targets->get_scene_targets(mod_ctx, &targets) == MOD_OK &&
+                     targets.fog != SCENE_TARGET_NONE;
+```
+
+`get_scene_targets` reports the attachment indices of the motion, reactive and fog targets in the scene layout whose key
+it returns (the same key as `GfxRenderTargetLayout.key`), or `SCENE_TARGET_NONE`. GfxService keeps upstream's numbering
+and reports all three as `GFX_ATTACHMENT_AUXILIARY`.
+
+`resolve_pass` is GfxService's `resolve_pass` with one more request: set `SceneRecordsDesc.fog` to snapshot the fog record
+into `SceneRecords.fog` (`RGBA8Uint`). The record is valid from `GFX_STAGE_SCENE_BEGIN` until the first colour draw after
+the scene window, and final at `GFX_STAGE_SCENE_AFTER_OPAQUE`. It is null whenever the scene layout has no fog target:
+the G-buffer is off, the device is in WebGPU compatibility mode, MSAA is on, or an offscreen pass is active. A request
+never turns the G-buffer on.
+
+Fog record decode: rgb is the fog colour × 255, the amount is `(a >> 1) / 127`, and `(a & 1)` means the fog colour is
+locked. The fog the game added to the pixel is `F = rgb / 255 * amount`. An effect that darkens the scene by `k` should
+darken only the unfogged colour and add the fog back: `L * k + F * (1 - k)`. A zero record means no fog contribution.
+
+While the G-buffer is live, the normal snapshot's alpha holds a receiver code (`code / 3`) instead of 0 or 1; treat
+`alpha > 1/6` as "receives screen-space effects" under both. A mod's normal request does not arm the legacy normal
+attachment while the G-buffer is live.
+
+Opaque mod geometry drawn at `GFX_STAGE_SCENE_BEGIN` or `GFX_STAGE_SCENE_AFTER_TERRAIN` on a G-buffer layout should write
+0 to the fog target (or its own fog record), write motion from the mod's own cached previous `proj_from_world` (or 1 to
+the reactive target when it has none), and write normal alpha 0 to opt out of AO.
+
+With TAA on, the scene stages before post-processing are anti-aliased, but mod draws are not jittered. Depth snapshots
+carry the frame's jitter, up to half a pixel.
+
+The host refuses two mods while the Graphics feature that replaces them is on: `dev.twilitrealm.ao_mod` while Graphics >
+Ambient Occlusion is on, and `dev.twilitrealm.shadow_mod` while Graphics > Shadow Quality is on. The mod fails with
+`MOD_CONFLICT` when it activates, or on the next tick after the feature turns on. Turn the feature off, then enable the
+mod again.
+
 ### CameraService ([`mods/svc/camera.h`](../sdk/include/mods/svc/camera.h))
 
 Converts a game view provided by a render callback into WebGPU-convention camera data. Matrix fields are column-major

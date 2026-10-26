@@ -14,6 +14,7 @@
 #include "mods/svc/gfx.h"
 #include "mods/svc/log.h"
 #include "mods/svc/resource.h"
+#include "mods/svc/scene_targets.h"
 #include "mods/svc/ui.h"
 
 #include <algorithm>
@@ -32,6 +33,7 @@ IMPORT_SERVICE(ResourceService, svc_resource);
 IMPORT_SERVICE(UiService, svc_ui);
 IMPORT_SERVICE(GfxService, svc_gfx);
 IMPORT_SERVICE(CameraService, svc_camera);
+IMPORT_OPTIONAL_SERVICE(SceneTargetsService, svc_scene_targets);
 
 namespace {
 
@@ -68,6 +70,9 @@ WGPUBindGroupLayout g_compositeLayout = nullptr;
 WGPUBindGroupLayout g_compositeDebugLayout = nullptr;
 WGPUTexture g_hilbertLut = nullptr;
 WGPUTextureView g_hilbertLutView = nullptr;
+// Bound when the scene has no fog record, so the composite reduces to the plain multiply
+WGPUTexture g_zeroFogRecord = nullptr;
+WGPUTextureView g_zeroFogRecordView = nullptr;
 
 // AO chain targets, recreated when the render size (or halfRes) changes. Old sets are retired
 // for a few frames instead of released immediately: payloads embedding their views may still
@@ -96,6 +101,8 @@ struct RetiredTargets {
 std::vector<RetiredTargets> g_retiredTargets;
 
 bool g_warnedNoDepth = false;
+enum class FogRecordLog : uint8_t { None, InUse, Unavailable };
+FogRecordLog g_fogRecordLog = FogRecordLog::None;
 bool g_loggedChain = false;
 std::atomic g_chainExecuted{false};
 
@@ -138,6 +145,7 @@ struct CompositePayload {
     WGPUTextureView preprocessedDepth;
     WGPUTextureView sceneDepth;  // raw snapshot, for the bypass debug views
     WGPUTextureView normal;
+    WGPUTextureView fogRecord;
     uint32_t uniform_offset;
     uint32_t uniform_size;
     uint32_t debug_view;
@@ -220,13 +228,13 @@ bool build_composite_pipeline(const GfxRenderTargetLayout& targetLayout, bool bl
         return false;
     }
 
-    // Multiply blend
+    // L*ao + F*(1-ao): the shader returns (F*(1-ao), ao), so fog keeps its colour
     WGPUBlendState blendState{
         .color =
             {
                 .operation = WGPUBlendOperation_Add,
-                .srcFactor = WGPUBlendFactor_Dst,
-                .dstFactor = WGPUBlendFactor_Zero,
+                .srcFactor = WGPUBlendFactor_One,
+                .dstFactor = WGPUBlendFactor_SrcAlpha,
             },
         .alpha =
             {
@@ -236,8 +244,10 @@ bool build_composite_pipeline(const GfxRenderTargetLayout& targetLayout, bool bl
             },
     };
     WGPUColorTargetState colorTargets[GFX_MAX_COLOR_ATTACHMENTS];
-    const uint32_t colorTargetCount = gfx_init_color_target_states(
-        &targetLayout, colorTargets, blend ? &blendState : nullptr, WGPUColorWriteMask_All);
+    // EFB alpha is the game's shadow stencil
+    const uint32_t colorTargetCount =
+        gfx_init_color_target_states(&targetLayout, colorTargets, blend ? &blendState : nullptr,
+            WGPUColorWriteMask_Red | WGPUColorWriteMask_Green | WGPUColorWriteMask_Blue);
     WGPUFragmentState fragment = WGPU_FRAGMENT_STATE_INIT;
     fragment.module = module;
     fragment.entryPoint = {"fs_main", WGPU_STRLEN};
@@ -344,6 +354,30 @@ bool build_hilbert_lut() {
     WGPUTexelCopyBufferLayout layout{.offset = 0, .bytesPerRow = 64 * 2, .rowsPerImage = 64};
     WGPUExtent3D extent{64, 64, 1};
     wgpuQueueWriteTexture(g_deviceInfo.queue, &dst, lut, sizeof(lut), &layout, &extent);
+    return true;
+}
+
+bool build_zero_fog_record() {
+    WGPUTextureDescriptor texDesc = WGPU_TEXTURE_DESCRIPTOR_INIT;
+    texDesc.label = {"AO zero fog record", WGPU_STRLEN};
+    texDesc.usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopyDst;
+    texDesc.size = {1, 1, 1};
+    texDesc.format = WGPUTextureFormat_RGBA8Uint;
+    g_zeroFogRecord = wgpuDeviceCreateTexture(g_deviceInfo.device, &texDesc);
+    if (g_zeroFogRecord == nullptr) {
+        return false;
+    }
+    g_zeroFogRecordView = wgpuTextureCreateView(g_zeroFogRecord, nullptr);
+    if (g_zeroFogRecordView == nullptr) {
+        return false;
+    }
+
+    const uint8_t zero[4] = {};
+    WGPUTexelCopyTextureInfo dst = WGPU_TEXEL_COPY_TEXTURE_INFO_INIT;
+    dst.texture = g_zeroFogRecord;
+    WGPUTexelCopyBufferLayout layout{.offset = 0, .bytesPerRow = 4, .rowsPerImage = 1};
+    WGPUExtent3D extent{1, 1, 1};
+    wgpuQueueWriteTexture(g_deviceInfo.queue, &dst, zero, sizeof(zero), &layout, &extent);
     return true;
 }
 
@@ -553,13 +587,15 @@ void on_draw(
         data.debug_view != 0 ? g_compositeDebugPipeline : g_compositePipeline;
     WGPUBindGroupLayout layout = data.debug_view != 0 ? g_compositeDebugLayout : g_compositeLayout;
     if (data.aoFinal == nullptr || data.preprocessedDepth == nullptr ||
-        data.sceneDepth == nullptr || data.normal == nullptr || pipeline == nullptr)
+        data.sceneDepth == nullptr || data.normal == nullptr || data.fogRecord == nullptr ||
+        pipeline == nullptr)
     {
         return;
     }
 
-    WGPUBindGroupEntry entries[5] = {WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT,
-        WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT};
+    WGPUBindGroupEntry entries[6] = {WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT,
+        WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT,
+        WGPU_BIND_GROUP_ENTRY_INIT};
     entries[0].binding = 0;
     entries[0].textureView = data.aoFinal;
     entries[1].binding = 1;
@@ -572,9 +608,11 @@ void on_draw(
     entries[3].size = data.uniform_size;
     entries[4].binding = 4;
     entries[4].textureView = data.normal;
+    entries[5].binding = 5;
+    entries[5].textureView = data.fogRecord;
     WGPUBindGroupDescriptor bindGroupDesc = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
     bindGroupDesc.layout = layout;
-    bindGroupDesc.entryCount = 5;
+    bindGroupDesc.entryCount = 6;
     bindGroupDesc.entries = entries;
     WGPUBindGroup bindGroup = wgpuDeviceCreateBindGroup(ctx->device, &bindGroupDesc);
     if (bindGroup == nullptr) {
@@ -604,14 +642,29 @@ void on_scene_after_opaque(ModContext*, const GfxStageContext* stageCtx, void*) 
         return;
     }
 
+    // Only the renderer's G-buffer carries a fog record; elsewhere the mod normal still serves AO
+    SceneTargetsLayout sceneTargets = SCENE_TARGETS_LAYOUT_INIT;
+    const bool gbufferLive =
+        svc_scene_targets != nullptr &&
+        svc_scene_targets->get_scene_targets(mod_ctx, &sceneTargets) == MOD_OK &&
+        sceneTargets.fog != SCENE_TARGET_NONE;
+
     GfxResolveDesc resolveDesc = GFX_RESOLVE_DESC_INIT;
     resolveDesc.color = false;
     resolveDesc.depth = true;
     resolveDesc.normal = true;
     GfxResolvedTargets resolved = GFX_RESOLVED_TARGETS_INIT;
-    if (svc_gfx->resolve_pass(mod_ctx, &resolveDesc, &resolved) != MOD_OK ||
-        resolved.depth == nullptr)
-    {
+    SceneRecords records = SCENE_RECORDS_INIT;
+    ModResult resolveResult = MOD_UNAVAILABLE;
+    if (gbufferLive) {
+        SceneRecordsDesc recordsDesc = SCENE_RECORDS_DESC_INIT;
+        recordsDesc.fog = 1;
+        resolveResult = svc_scene_targets->resolve_pass(
+            mod_ctx, &resolveDesc, &resolved, &recordsDesc, &records);
+    } else {
+        resolveResult = svc_gfx->resolve_pass(mod_ctx, &resolveDesc, &resolved);
+    }
+    if (resolveResult != MOD_OK || resolved.depth == nullptr) {
         if (!g_warnedNoDepth) {
             g_warnedNoDepth = true;
             svc_log->warn(mod_ctx, "depth snapshots unavailable; AO disabled");
@@ -622,6 +675,15 @@ void on_scene_after_opaque(ModContext*, const GfxStageContext* stageCtx, void*) 
     // The first request enables normals next frame; unsupported devices keep returning null.
     if (resolved.normal == nullptr) {
         return;
+    }
+
+    const FogRecordLog fogRecordLog =
+        records.fog != nullptr ? FogRecordLog::InUse : FogRecordLog::Unavailable;
+    if (fogRecordLog != g_fogRecordLog) {
+        g_fogRecordLog = fogRecordLog;
+        svc_log->info(mod_ctx, fogRecordLog == FogRecordLog::InUse ?
+                                   "fog record in use" :
+                                   "fog record unavailable, plain multiply");
     }
 
     const bool halfRes = get_bool_option(g_cvarHalfRes, false);
@@ -650,7 +712,7 @@ void on_scene_after_opaque(ModContext*, const GfxStageContext* stageCtx, void*) 
     quality_counts(
         get_int_option(g_cvarQuality, 2), uniforms.slice_count, uniforms.samples_per_slice_side);
     const uint32_t debugMode =
-        static_cast<uint32_t>(std::clamp<int64_t>(get_int_option(g_cvarDebugView, 0), 0, 4));
+        static_cast<uint32_t>(std::clamp<int64_t>(get_int_option(g_cvarDebugView, 0), 0, 5));
     uniforms.debug_view = debugMode;
 
     GfxRange uniformRange{0, 0};
@@ -679,7 +741,8 @@ void on_scene_after_opaque(ModContext*, const GfxStageContext* stageCtx, void*) 
     }
 
     const CompositePayload drawPayload{g_targets.aoFinalView, g_targets.preprocessedDepthAll,
-        resolved.depth, resolved.normal, uniformRange.offset, uniformRange.size, debugMode};
+        resolved.depth, resolved.normal, records.fog != nullptr ? records.fog : g_zeroFogRecordView,
+        uniformRange.offset, uniformRange.size, debugMode};
     svc_gfx->push_draw(mod_ctx, g_drawType, &drawPayload, sizeof(drawPayload));
 }
 
@@ -741,7 +804,7 @@ ModResult build_controls_tab(
     add_toggle(left, "Half Resolution", g_cvarHalfRes,
         "Computes AO at half resolution and upscales; faster, slightly softer.");
 
-    static const char* kDebugOptions[] = {"Off", "AO", "Normals", "Depth", "Staircase"};
+    static const char* kDebugOptions[] = {"Off", "AO", "Normals", "Depth", "Staircase", "Fog"};
     control = UI_CONTROL_DESC_INIT;
     control.kind = UI_CONTROL_SELECT;
     control.label = "Debug View";
@@ -749,11 +812,12 @@ ModResult build_controls_tab(
                        "normals the GTAO pass consumes.<br/>Depth: the preprocessed depth "
                        "as a distance gradient.<br/>Staircase: detects quantized depth - smooth "
                        "depth is near-black with thin triangle edges, quantized depth lights "
-                       "up across surfaces.";
+                       "up across surfaces.<br/>Fog: the renderer's fog amount per pixel, red "
+                       "where its fog colour is locked; black without the renderer's fog record.";
     control.binding = UI_BINDING_CONFIG_VAR;
     control.config_var = g_cvarDebugView;
     control.options = kDebugOptions;
-    control.option_count = 5;
+    control.option_count = 6;
     add_control(left, control);
     return MOD_OK;
 }
@@ -878,6 +942,9 @@ MOD_EXPORT ModResult mod_initialize(ModError* error) {
     if (!build_hilbert_lut()) {
         return mods::set_error(error, MOD_ERROR, "failed to create AO noise LUT");
     }
+    if (!build_zero_fog_record()) {
+        return mods::set_error(error, MOD_ERROR, "failed to create AO fog record");
+    }
 
     GfxComputeTypeDesc computeDesc = GFX_COMPUTE_TYPE_DESC_INIT;
     computeDesc.label = "AO chain";
@@ -956,6 +1023,15 @@ MOD_EXPORT ModResult mod_shutdown(ModError*) {
         wgpuTextureRelease(g_hilbertLut);
         g_hilbertLut = nullptr;
     }
+    if (g_zeroFogRecordView != nullptr) {
+        wgpuTextureViewRelease(g_zeroFogRecordView);
+        g_zeroFogRecordView = nullptr;
+    }
+    if (g_zeroFogRecord != nullptr) {
+        wgpuTextureRelease(g_zeroFogRecord);
+        g_zeroFogRecord = nullptr;
+    }
+    g_fogRecordLog = FogRecordLog::None;
     g_cvarEnabled = g_cvarQuality = g_cvarRadius = g_cvarIntensity = 0;
     g_cvarHalfRes = g_cvarDebugView = 0;
     g_computeType = g_drawType = 0;
