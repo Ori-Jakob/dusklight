@@ -60,6 +60,8 @@
 #include <cstring>
 #include <helpers/string.hpp>
 
+#include "dusk/render/model_registry.hpp"
+
 static const int IRON_BALL_CHAIN_COUNT = 102;
 static const int HS_CHAIN_ANCHOR_COUNT = 4;
 
@@ -19384,11 +19386,18 @@ void daAlink_c::modelCalc(J3DModel* i_model) {
 }
 
 void daAlink_c::basicModelDraw(J3DModel* i_model) {
+#if TARGET_PC
+    // Link's body and every item he wears or holds draw through these two helpers
+    dusk::render::declare_model(i_model, AURORA_CAT_DYNAMIC | AURORA_CAT_PLAYER, 0);
+#endif
     g_env_light.setLightTevColorType_MAJI(i_model, &tevStr);
     mDoExt_modelEntryDL(i_model);
 }
 
 void daAlink_c::modelDraw(J3DModel* i_model, int param_1) {
+#if TARGET_PC
+    dusk::render::declare_model(i_model, AURORA_CAT_DYNAMIC | AURORA_CAT_PLAYER, 0);
+#endif
     g_env_light.setLightTevColorType_MAJI(i_model, &tevStr);
 
     if (param_1 == 0) {
