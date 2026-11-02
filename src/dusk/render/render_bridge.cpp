@@ -135,7 +135,6 @@ constexpr std::array kFeatures{
     ar::Feature::StochasticTiling,
     ar::Feature::LegacyMatMaps,
 };
-static_assert(kFeatures.size() == ar::FeatureCount);
 static_assert([] {
     for (size_t i = 0; i < kFeatures.size(); ++i) {
         if (static_cast<size_t>(kFeatures[i]) != i) {
@@ -360,6 +359,15 @@ std::string test_field_coverage() {
             problems, fmt::format("{} keys, expected {}", keys.size(), kAuroraSettingsMembers));
     }
     return problems;
+}
+
+// A runtime check, so a pointer-only aurora bump that appends a feature still builds
+std::string test_feature_count() {
+    if (all_features().size() == ar::FeatureCount) {
+        return {};
+    }
+    return fmt::format(
+        "{} features mirrored, aurora has {}", all_features().size(), ar::FeatureCount);
 }
 
 std::string test_push_idempotent() {
@@ -598,6 +606,7 @@ void bridge_self_test(SelfTestReport& report) {
     check("bridge.enum_mirror", test_enum_mirror());
     check("bridge.defaults_match_aurora", test_defaults_match_aurora());
     check("bridge.field_coverage", test_field_coverage());
+    check("bridge.features", test_feature_count());
     check("bridge.push_idempotent", test_push_idempotent());
     if (s_latency == 0 && !latch_overdue()) {
         report.skipped.push_back("bridge.latch_latency: no settings change has been latched yet");
