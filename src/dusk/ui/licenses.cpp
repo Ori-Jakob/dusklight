@@ -37,8 +37,8 @@ constexpr std::array<std::string_view, 2> kXessFiles{
 #endif
 
 constexpr std::array kComponents{
-    LicenseComponent{"AMD FidelityFX Super Resolution", "MIT",
-        "The FSR upscaler is a port of FidelityFX Super Resolution 3.1.5.", kFsrFiles},
+    LicenseComponent{
+        "AMD FidelityFX Super Resolution", "MIT", "Temporal upscaling of the 3D scene.", kFsrFiles},
     LicenseComponent{
         "Dawn", "BSD 3-Clause", "The WebGPU implementation that draws the game.", kDawnFiles},
     LicenseComponent{"SDL", "zlib", "Windows, input, audio and file access.", kSdlFiles},
