@@ -111,7 +111,8 @@ constexpr std::array kComponents{
     LicenseComponent{
         "SDL", "zlib, BSD 3-Clause", "Windows, input, audio and file access.", kSdlFiles},
     LicenseComponent{"DirectX Shader Compiler", "NCSA, Microsoft",
-        "Compiles shaders for Direct3D 12 (dxcompiler.dll and dxil.dll).", kDxcFiles},
+        "Compiles shaders for Direct3D 12 (dxcompiler.dll, and dxil.dll from the Windows SDK).",
+        kDxcFiles},
     LicenseComponent{"nod", "MIT or Apache 2.0", "Reads the game disc image.", kNodFiles},
     LicenseComponent{"aurora", "MIT", "The engine layer that runs the game on PC.", kAuroraFiles},
     LicenseComponent{
