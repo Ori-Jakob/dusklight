@@ -540,13 +540,23 @@ Rml::String xess_path_note() {
     return fmt::format("XeSS-SR is running on its {} path.", status.path);
 }
 
+// The row value only has room for the sizes, so the sentence naming them goes in the help
 Rml::String upscaler_sizes_note() {
     const ar::UpscaleStatus status = ar::upscale_status();
     if (upscaler_off() || status.active == ar::Upscaler::Off) {
         return {};
     }
-    return fmt::format("scene {}\xC3\x97{} \xE2\x86\x92 output {}\xC3\x97{}", status.sceneSize[0],
+    return fmt::format("{}\xC3\x97{} \xE2\x86\x92 {}\xC3\x97{}", status.sceneSize[0],
         status.sceneSize[1], status.outputSize[0], status.outputSize[1]);
+}
+
+Rml::String upscaler_sizes_help() {
+    const ar::UpscaleStatus status = ar::upscale_status();
+    if (upscaler_off() || status.active == ar::Upscaler::Off) {
+        return {};
+    }
+    return fmt::format("The scene renders at {}\xC3\x97{} and is rebuilt at {}\xC3\x97{}.",
+        status.sceneSize[0], status.sceneSize[1], status.outputSize[0], status.outputSize[1]);
 }
 
 // The vendor that is actually running names the qualities, so Auto on DLSS shows DLAA
@@ -1229,6 +1239,7 @@ constexpr std::array<GraphicsRow, 76> kRows{{
                     .isDisabled = upscaler_off,
                     .label = upscaler_quality_text,
                     .valueNote = upscaler_sizes_note,
+                    .helpNote = upscaler_sizes_help,
                 });
         }},
     {{S::PostProcessing, "Bloom", "game.bloomMode", "moved", false},
