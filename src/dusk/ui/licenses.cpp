@@ -28,8 +28,9 @@ constexpr std::array<std::string_view, 5> kDawnFiles{
 };
 constexpr std::array<std::string_view, 3> kSdlFiles{
     "sdl3/LICENSE.txt", "sdl3/hidapi-LICENSE-bsd.txt", "sdl3/yuv2rgb-LICENSE.txt"};
-constexpr std::array<std::string_view, 3> kDxcFiles{
-    "dxc/LICENSE.txt", "dxc/ThirdPartyNotices.txt", "dxc/dxil-LICENSE.txt"};
+// A page draws all of its text every frame, so the largest texts get entries of their own
+constexpr std::array<std::string_view, 2> kDxcFiles{"dxc/LICENSE.txt", "dxc/ThirdPartyNotices.txt"};
+constexpr std::array<std::string_view, 1> kDxilFiles{"dxc/dxil-LICENSE.txt"};
 constexpr std::array<std::string_view, 3> kNodFiles{
     "nod/LICENSE-MIT.txt", "nod/LICENSE-APACHE.txt", "nod/dependencies.txt"};
 constexpr std::array<std::string_view, 4> kAuroraFiles{
@@ -110,9 +111,10 @@ constexpr std::array kComponents{
         "The WebGPU implementation that draws the game.", kDawnFiles},
     LicenseComponent{
         "SDL", "zlib, BSD 3-Clause", "Windows, input, audio and file access.", kSdlFiles},
-    LicenseComponent{"DirectX Shader Compiler", "NCSA, Microsoft",
-        "Compiles shaders for Direct3D 12 (dxcompiler.dll, and dxil.dll from the Windows SDK).",
-        kDxcFiles},
+    LicenseComponent{"DirectX Shader Compiler", "NCSA",
+        "Compiles shaders for Direct3D 12 (dxcompiler.dll).", kDxcFiles},
+    LicenseComponent{"DXIL Validator", "Windows SDK terms",
+        "Validates and signs Direct3D 12 shaders (dxil.dll, from the Windows SDK).", kDxilFiles},
     LicenseComponent{"nod", "MIT or Apache 2.0", "Reads the game disc image.", kNodFiles},
     LicenseComponent{"aurora", "MIT", "The engine layer that runs the game on PC.", kAuroraFiles},
     LicenseComponent{
