@@ -1136,6 +1136,16 @@ the reactive target when it has none), and write normal alpha 0 to opt out of AO
 With TAA on, the scene stages before post-processing are anti-aliased, but mod draws are not jittered. Depth snapshots
 carry the frame's jitter, up to half a pixel.
 
+With an upscaler on (Graphics > Upscaler), the frame is split. The scene stages render at the upscaler's scene size, and
+everything from post-processing on renders at the output size, which is still what Internal Resolution and
+`AuroraGetRenderSize` report. `GFX_STAGE_SCENE_*` callbacks see scene-sized targets: the attachment sizes in
+`GfxDrawContext.layout` and the width and height that `resolve_pass` returns are the scene size.
+`GFX_STAGE_FRAME_BEFORE_HUD` and `GFX_STAGE_FRAME_AFTER_HUD` see the output size. Read the size from the layout or the
+resolved targets in every callback instead of keeping one size per frame. Mod scene draws are not jittered and write no
+motion, so they ghost under an upscaler unless they follow the rules above for opaque geometry on a G-buffer layout. The
+jitter note above applies to every upscaler as well. `dev.twilitrealm.ao_mod` is unaffected: it resolves and draws at
+`GFX_STAGE_SCENE_AFTER_OPAQUE`, so its snapshots and its draw share the scene size.
+
 The host refuses two mods while the Graphics feature that replaces them is on: `dev.twilitrealm.ao_mod` while Graphics >
 Ambient Occlusion is on, and `dev.twilitrealm.shadow_mod` while Graphics > Shadow Quality is on. The mod fails with
 `MOD_CONFLICT` when it activates, or on the next tick after the feature turns on. Turn the feature off, then enable the
