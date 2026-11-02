@@ -2369,6 +2369,9 @@ int mDoGph_Painter() {
             GX_DEBUG_GROUP(dComIfGd_drawOpaListDarkBG);
             GX_DEBUG_GROUP(dComIfGd_drawOpaListMiddle);
 
+#if TARGET_PC
+            dusk::render::begin_tag_scope(dusk::render::TagScope::Particle);
+#endif
             if (fapGmHIO_getParticle()) {
                 GX_DEBUG_GROUP(dComIfGp_particle_drawFogPri0_B, &draw_info);
             }
@@ -2385,6 +2388,7 @@ int mDoGph_Painter() {
             #endif
 
 #if TARGET_PC
+            dusk::render::end_tag_scope(dusk::render::TagScope::Particle);
             dusk::render::begin_tag_scope(dusk::render::TagScope::FakeShadow);
 #endif
             GX_DEBUG_GROUP(dComIfGd_drawShadow, camera_p->view.viewMtx);

@@ -85,6 +85,7 @@ struct DataInfo {
     u32 declaredFrame = kNoFrame;
     bool declared = false;
     bool verified = false;
+    bool bgMaxxChecked = false;
 };
 
 struct ModelEntry {
@@ -319,6 +320,28 @@ std::string tag_summary(const std::vector<MaterialTag>& tags) {
     return summary;
 }
 
+bool tag_data(DataInfo& info, const J3DModelData* data, const char* label) {
+    if (!compute_material_tags(data, info.materials)) {
+        return false;
+    }
+    const JUTNameTab* names = data->getMaterialName();
+    info.archive = label;
+    info.names.clear();
+    info.names.reserve(info.materials.size());
+    u32 tagged = 0;
+    for (u16 i = 0; i < info.materials.size(); ++i) {
+        const char* name = names->getName(i);
+        info.names.emplace_back(name != nullptr ? name : "");
+        const MaterialTag& tag = info.materials[i];
+        if (tag.categories != 0 || tag.pendingCategories != 0 || tag.tevPolicy.mask != 0) {
+            ++tagged;
+        }
+    }
+    RegistryLog.debug(
+        "render tags: {} {} tagged materials ({})", label, tagged, tag_summary(info.materials));
+    return true;
+}
+
 // Entries live in deques and the maps hold indices, so cached entry pointers survive every insert
 class Registry {
 public:
@@ -356,7 +379,7 @@ public:
         info.names.clear();
         info.materials.clear();
         track_arrays(data, model_immutable_arrays(data), archive, heap);
-        // Most actor MAxx names are never applied by the game; the six BG-object actors are M9-W6's
+        // Most actor MAxx names are never applied; BG-object actors tag through dKy_bg_MAxx_proc
         if (!is_room_archive(archive)) {
             return;
         }
@@ -366,22 +389,19 @@ public:
                 log_review_name(archive, names->getName(i));
             }
         }
-        if (!compute_material_tags(data, info.materials)) {
+        tag_data(info, data, archive);
+    }
+
+    template <typename Tagger>
+    void note_bg_maxx_data(const J3DModelData* data, u32 frame, Tagger&& tagger) {
+        DataInfo& info = known_data(data);
+        if (std::exchange(info.bgMaxxChecked, true) || !info.materials.empty()) {
             return;
         }
-        info.archive = archive;
-        info.names.reserve(info.materials.size());
-        u32 tagged = 0;
-        for (u16 i = 0; i < info.materials.size(); ++i) {
-            const char* name = names->getName(i);
-            info.names.emplace_back(name != nullptr ? name : "");
-            const MaterialTag& tag = info.materials[i];
-            if (tag.categories != 0 || tag.pendingCategories != 0 || tag.tevPolicy.mask != 0) {
-                ++tagged;
-            }
+        if (tagger(info, data)) {
+            roll(frame);
+            ++m_current.bgMaxxModels;
         }
-        RegistryLog.debug("render tags: {} {} tagged materials ({})", archive, tagged,
-            tag_summary(info.materials));
     }
 
     void declare_room(const J3DModel* model, int roomNo, int part) {
@@ -479,6 +499,10 @@ public:
 
         const ShapeObjectHint hint = compose_shape_object(in);
         GXAuroraBeginObject(hint.id, hint.subId, hint.generation, hint.categories, hint.flags);
+        if (const AuroraTevPolicy* policy = shape_policy(in)) {
+            GXAuroraSetTevPolicy(policy);
+            ++m_current.policyShapes;
+        }
         note_open();
 
         entry.lastDrawFrame = frame;
@@ -538,10 +562,11 @@ public:
         }
         if (array_log(m_frame)) {
             RegistryLog.info("render.objects log: frame {} objects {} suppressed {} nested {} "
-                             "cpu_deformed {} billboard {} arrays declared {} released {}",
+                             "cpu_deformed {} billboard {} arrays declared {} released {} "
+                             "policy {} bg_maxx {}",
                 m_current.frame, m_current.objects, m_current.suppressedShapes, m_current.nested,
                 m_current.cpuDeformed, m_current.billboards, m_current.declaredArrays,
-                m_current.releasedArrays);
+                m_current.releasedArrays, m_current.policyShapes, m_current.bgMaxxModels);
         }
         m_last = m_current;
         m_current = RegistryStats{.frame = frame};
@@ -1015,6 +1040,17 @@ std::string test_compose_tags() {
     if ((compose_shape_object(in).categories & AURORA_CAT_NO_AO) == 0) {
         append_problem(problems, "pending NO_AO missing while pending tags are on");
     }
+    if (shape_policy(in) != nullptr) {
+        append_problem(problems, "MA14 sends a TEV policy");
+    }
+    in.material = &ma00;
+    if (shape_policy(in) != &ma00.tevPolicy) {
+        append_problem(problems, "MA00 does not send its TEV policy");
+    }
+    in.material = nullptr;
+    if (shape_policy(in) != nullptr) {
+        append_problem(problems, "a shape without a material tag sends a TEV policy");
+    }
     return problems;
 }
 
@@ -1104,6 +1140,55 @@ std::string test_nesting() {
     if (registry.leaked() != 1 || registry.depth() != 0 || registry.last().nested != 1) {
         append_problem(problems,
             fmt::format("leaked {} depth {} after the roll", registry.leaked(), registry.depth()));
+    }
+    return problems;
+}
+
+std::string test_bg_maxx() {
+    std::string problems;
+    Registry registry(true);
+    const J3DModelData* object = fake_data(0x310);
+    const J3DModelData* room = fake_data(0x320);
+    const J3DModelData* plain = fake_data(0x330);
+    for (const J3DModelData* data : {object, room, plain}) {
+        registry.create_data(data);
+    }
+    registry.known_data(room).materials = {material_tag_for_name("abcMA00")};
+    u32 calls = 0;
+    const auto tagger = [&calls, plain](DataInfo& info, const J3DModelData* data) {
+        ++calls;
+        if (data == plain) {
+            return false;
+        }
+        info.materials = {material_tag_for_name("abcMA16")};
+        return true;
+    };
+    registry.note_bg_maxx_data(object, 1, tagger);
+    registry.note_bg_maxx_data(object, 1, tagger);
+    registry.note_bg_maxx_data(room, 1, tagger);
+    registry.note_bg_maxx_data(plain, 1, tagger);
+    if (calls != 2 || registry.current().frame != 1 || registry.current().bgMaxxModels != 1) {
+        append_problem(
+            problems, fmt::format("{} tagger calls and {} bg_maxx models in frame {}", calls,
+                          registry.current().bgMaxxModels, registry.current().frame));
+    }
+    if (registry.known_data(room).materials.size() != 1 ||
+        registry.known_data(room).materials[0].tevPolicy.mask != 0x10000u)
+    {
+        append_problem(problems, "a room archive's tags were replaced");
+    }
+    ShapeInputs in;
+    in.material = material_tag_at(registry.known_data(object).materials, 0);
+    const AuroraTevPolicy* policy = shape_policy(in);
+    if (policy == nullptr || policy->mask != 0x08010070u) {
+        append_problem(problems, "a tagged BG-object shape sends no MA16 policy");
+    }
+    registry.create_data(object);
+    registry.note_bg_maxx_data(object, 2, tagger);
+    if (calls != 3 || registry.current().frame != 2 || registry.current().bgMaxxModels != 1 ||
+        registry.last().bgMaxxModels != 1)
+    {
+        append_problem(problems, "a new data generation is not checked again");
     }
     return problems;
 }
@@ -1385,6 +1470,16 @@ void mark_model_teleport(const J3DModel* model) noexcept {
     registry.mark_teleport(model, aurora::gfx::current_frame());
 }
 
+void note_bg_maxx_model(const J3DModel* model) noexcept {
+    if (!hints_active() || model == nullptr || model->mModelData == nullptr) {
+        return;
+    }
+    Registry& registry = live();
+    registry.check_thread();
+    registry.note_bg_maxx_data(model->mModelData, aurora::gfx::current_frame(),
+        [](DataInfo& info, const J3DModelData* data) { return tag_data(info, data, "bg_object"); });
+}
+
 u32 model_serial(const J3DModel* model) noexcept {
     return live().serial_of(model);
 }
@@ -1417,6 +1512,13 @@ ShapeObjectHint compose_shape_object(const ShapeInputs& in) noexcept {
     }
     return {make_object_id(ObjectKind::J3dModel, in.serial), in.shapeIndex, in.generation,
         categories, flags};
+}
+
+const AuroraTevPolicy* shape_policy(const ShapeInputs& in) noexcept {
+    if (in.material == nullptr || in.material->tevPolicy.mask == 0) {
+        return nullptr;
+    }
+    return &in.material->tevPolicy;
 }
 
 void push_object_suppression() noexcept {
@@ -1466,10 +1568,10 @@ std::vector<std::string> registry_report() {
     const RegistryStats& last = registry.last();
     const RegistryStats& current = registry.current();
     std::vector<std::string> lines;
-    lines.push_back(fmt::format(
-        "render.objects: frame {} objects {} static {} non-room static {} suppressed {} nested {}",
+    lines.push_back(fmt::format("render.objects: frame {} objects {} static {} non-room static {} "
+                                "suppressed {} nested {} policy {} bg_maxx {}",
         last.frame, last.objects, last.staticObjects, last.nonRoomStatics, last.suppressedShapes,
-        last.nested));
+        last.nested, last.policyShapes, last.bgMaxxModels));
     lines.push_back(fmt::format("render.objects: current frame {} objects {} (in progress)",
         current.frame, current.objects));
     const auto tagged = std::ranges::count_if(
@@ -1547,6 +1649,7 @@ void registry_self_test(SelfTestReport& report) {
     check("registry.compose_flags", test_compose_flags());
     check("registry.material_bound", test_material_bound());
     check("registry.nesting", test_nesting());
+    check("registry.bg_maxx", test_bg_maxx());
     check("registry.immutable_select", test_immutable_select());
     check("registry.array_lifecycle", test_array_lifecycle());
     check("registry.array_check_gate", test_array_check_gate());

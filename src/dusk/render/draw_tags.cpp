@@ -30,9 +30,20 @@ constexpr std::array<TagScopeDesc, TagScopeCount> kRows{{
     {"shadow_image", 0, 0, AURORA_CAMERA_SHADOW, true},
     {"fake_shadow", kFakeShadowCategories, 0, AURORA_CAMERA_INHERIT},
     {"reflection", 0, 0, AURORA_CAMERA_REFLECTION, true},
+    {"particle", kParticleCategories, 0, AURORA_CAMERA_INHERIT},
 }};
 static_assert(kRows.size() == TagScopeCount);
 static_assert((kFakeShadowCategories & AURORA_CAT_OVERLAY) == 0);
+static_assert([] {
+    for (size_t i = 0; i < kRows.size(); ++i) {
+        if (i != static_cast<size_t>(TagScope::Particle) &&
+            (kRows[i].categories & AURORA_CAT_OVERLAY) != 0)
+        {
+            return false;
+        }
+    }
+    return true;
+}());
 
 struct TagScopeState {
     std::array<u32, TagScopeCount> open{};
@@ -149,6 +160,8 @@ std::string test_scope_table() {
             AURORA_CAT_FAKE_SHADOW | AURORA_CAT_DECAL | AURORA_CAT_NO_CAPTURE, 0,
             AURORA_CAMERA_INHERIT},
         Expected{TagScope::Reflection, "reflection", 0, 0, AURORA_CAMERA_REFLECTION, true},
+        Expected{TagScope::Particle, "particle",
+            AURORA_CAT_PARTICLE | AURORA_CAT_OVERLAY | AURORA_CAT_NO_PBR, 0, AURORA_CAMERA_INHERIT},
     };
     static_assert(kExpected.size() == TagScopeCount);
     std::string problems;
@@ -165,8 +178,13 @@ std::string test_scope_table() {
         if (&tag_scope_desc(static_cast<TagScope>(i)) != &kRows[i]) {
             append_problem(problems, fmt::format("row {} is not found by its scope", i));
         }
-        if ((kRows[i].categories & (AURORA_CAT_OVERLAY | AURORA_CAT_STATIC)) != 0) {
-            append_problem(problems, fmt::format("row {} sets OVERLAY or STATIC", name));
+        if ((kRows[i].categories & AURORA_CAT_STATIC) != 0) {
+            append_problem(problems, fmt::format("row {} sets STATIC", name));
+        }
+        if ((kRows[i].categories & AURORA_CAT_OVERLAY) != 0 &&
+            static_cast<TagScope>(i) != TagScope::Particle)
+        {
+            append_problem(problems, fmt::format("row {} sets OVERLAY", name));
         }
         if ((kRows[i].flags & ~kObjectFlags) != 0) {
             append_problem(problems, fmt::format("row {} has flags outside AURORA_OBJ_*", name));
@@ -255,6 +273,31 @@ std::string test_fake_shadow_categories() {
     }
     if (tag_scope_desc(TagScope::FakeShadow).categories != kFakeShadowCategories) {
         append_problem(problems, "the fake_shadow row does not use kFakeShadowCategories");
+    }
+    return problems;
+}
+
+std::string test_particle_row() {
+    std::string problems;
+    const TagScopeDesc& row = tag_scope_desc(TagScope::Particle);
+    if (kParticleCategories != (AURORA_CAT_PARTICLE | AURORA_CAT_OVERLAY | AURORA_CAT_NO_PBR) ||
+        row.categories != kParticleCategories)
+    {
+        append_problem(problems, "the particle row is not PARTICLE|OVERLAY|NO_PBR");
+    }
+    if (row.flags != 0 || row.role != AURORA_CAMERA_INHERIT || row.suppressObjects) {
+        append_problem(problems, fmt::format("the particle row has flags {} role {} suppression {}",
+                                     row.flags, static_cast<int>(row.role), row.suppressObjects));
+    }
+    for (size_t i = 0; i < TagScopeCount; ++i) {
+        const bool overlay = (kRows[i].categories & AURORA_CAT_OVERLAY) != 0;
+        if (overlay != (static_cast<TagScope>(i) == TagScope::Particle)) {
+            append_problem(problems,
+                fmt::format("row {} {} OVERLAY", kRows[i].name, overlay ? "sets" : "lacks"));
+        }
+    }
+    if ((tag_scope_desc(TagScope::FakeShadow).categories & AURORA_CAT_OVERLAY) != 0) {
+        append_problem(problems, "the fake_shadow row sets OVERLAY");
     }
     return problems;
 }
@@ -414,6 +457,7 @@ void draw_tags_self_test(SelfTestReport& report) {
     check("tags.scope_table", test_scope_table());
     check("tags.scope_balance", test_scope_balance());
     check("tags.fake_shadow_categories", test_fake_shadow_categories());
+    check("tags.particle_row", test_particle_row());
     check("tags.redraw_roles", test_redraw_roles());
     check("tags.shadow_entry_ids", test_shadow_entry_ids());
 }

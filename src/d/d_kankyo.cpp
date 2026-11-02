@@ -39,6 +39,7 @@
 #include "dusk/imgui/ImGuiBloomWindow.hpp"
 
 #include "dusk/render/fog_probe.hpp"
+#include "dusk/render/model_registry.hpp"
 static f32 timeScale = 1.0f;
 #endif
 
@@ -11346,6 +11347,9 @@ static J3DAlphaCompInfo l_alphaCompInfo = {
 };
 
 void dKy_bg_MAxx_proc(void* bg_model_p) {
+#if TARGET_PC
+    dusk::render::note_bg_maxx_model(static_cast<const J3DModel*>(bg_model_p));
+#endif
     dScnKy_env_light_c* kankyo = dKy_getEnvlight();
     J3DModel* model_p = (J3DModel*)bg_model_p;
     J3DModelData* modelData;

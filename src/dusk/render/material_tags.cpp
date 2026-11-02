@@ -89,6 +89,18 @@ constexpr AuroraTevPolicy ma07_policy() noexcept {
     return policy;
 }
 
+constexpr AuroraTevPolicy ma16_policy() noexcept {
+    AuroraTevPolicy policy{};
+    policy.mask = AURORA_TEV_POLICY_BIT(AURORA_TEV_REG_C1, AURORA_TEV_CH_R) |
+                  AURORA_TEV_POLICY_BIT(AURORA_TEV_REG_C1, AURORA_TEV_CH_G) |
+                  AURORA_TEV_POLICY_BIT(AURORA_TEV_REG_C1, AURORA_TEV_CH_B) |
+                  AURORA_TEV_POLICY_BIT(AURORA_TEV_REG_K1, AURORA_TEV_CH_R) |
+                  AURORA_TEV_POLICY_BIT(AURORA_TEV_REG_K3, AURORA_TEV_CH_A);
+    policy.neutral[AURORA_TEV_REG_K1][AURORA_TEV_CH_R] = 255;
+    return policy;
+}
+static_assert(ma16_policy().mask == 0x08010070u);
+
 bool s_pendingTags = false;
 
 // The game reads name[3..6] directly, so anything shorter can never match one of its codes
@@ -176,8 +188,8 @@ std::string test_no_pbr() {
 std::string test_cloud_scroll() {
     std::string problems;
     expect_tags(problems, {{"abcMA00", AURORA_CAT_CLOUD_RECEIVER, 0, ma00_policy().mask},
-                              {"abcMA01", AURORA_CAT_CLOUD_RECEIVER, 0, 0},
-                              {"abcMA16", AURORA_CAT_CLOUD_RECEIVER, 0, 0},
+                              {"abcMA01", AURORA_CAT_CLOUD_RECEIVER, 0, 0x10000u},
+                              {"abcMA16", AURORA_CAT_CLOUD_RECEIVER, 0, 0x08010070u},
                               {"abcXY16", AURORA_CAT_CLOUD_RECEIVER, 0, 0}});
     if (!matches_cloud_scroll("abcMA16") || !matches_k1_writer("abcMA16")) {
         append_problem(problems, "MA16 does not match both predicates");
@@ -218,8 +230,21 @@ std::string test_policy_data() {
             problems, fmt::format("MA07 gives {} policy {}", category_names(ma07.categories),
                           tev_policy_text(ma07.tevPolicy)));
     }
+    const MaterialTag ma01 = material_tag_for_name("abcMA01");
+    if (!same_policy(ma01.tevPolicy, ma00.tevPolicy) || ma01.categories != ma00.categories) {
+        append_problem(
+            problems, fmt::format("MA01 gives {} policy {}", category_names(ma01.categories),
+                          tev_policy_text(ma01.tevPolicy)));
+    }
+    const MaterialTag ma16 = material_tag_for_name("abcMA16");
+    if (ma16.tevPolicy.mask != 0x08010070u || ma16.categories != AURORA_CAT_CLOUD_RECEIVER) {
+        append_problem(
+            problems, fmt::format("MA16 gives {} policy {}", category_names(ma16.categories),
+                          tev_policy_text(ma16.tevPolicy)));
+    }
     if (tev_policy_text(ma00.tevPolicy) != "K1.r=255" ||
-        tev_policy_text(ma07.tevPolicy) != "C0.rgb=0")
+        tev_policy_text(ma07.tevPolicy) != "C0.rgb=0" ||
+        tev_policy_text(ma16.tevPolicy) != "C1.rgb=0 K1.r=255 K3.a=0")
     {
         append_problem(problems, "policy text differs");
     }
@@ -334,10 +359,13 @@ MaterialTag material_tag_for_name(const char* name) noexcept {
     if (matches_cloud_scroll(name)) {
         tag.categories |= kCloudScrollCategories;
     }
-    if (matches_ma_code(name, "00")) {
+    // MA00 and MA01 share the cloud K1 stage (SP1)
+    if (matches_ma_code(name, "00") || matches_ma_code(name, "01")) {
         tag.tevPolicy = ma00_policy();
     } else if (matches_ma_code(name, "07")) {
         tag.tevPolicy = ma07_policy();
+    } else if (matches_ma_code(name, "16")) {
+        tag.tevPolicy = ma16_policy();
     }
     return tag;
 }

@@ -71,6 +71,8 @@ struct RegistryStats {
     u32 billboards = 0;
     u32 declaredArrays = 0;
     u32 releasedArrays = 0;
+    u32 policyShapes = 0;
+    u32 bgMaxxModels = 0;
 };
 
 void on_model_initialized(const J3DModel* model) noexcept;
@@ -80,10 +82,12 @@ void on_resource_heap_destroyed(const JKRHeap* heap) noexcept;
 void declare_room_model(const J3DModel* model, int roomNo, int part) noexcept;
 void declare_model(const J3DModel* model, u32 categories, u32 flags) noexcept;
 void mark_model_teleport(const J3DModel* model) noexcept;
+void note_bg_maxx_model(const J3DModel* model) noexcept;
 u32 model_serial(const J3DModel* model) noexcept;
 u32 data_generation(const J3DModelData* data) noexcept;
 
 ShapeObjectHint compose_shape_object(const ShapeInputs& in) noexcept;
+const AuroraTevPolicy* shape_policy(const ShapeInputs& in) noexcept;
 
 void push_object_suppression() noexcept;
 void pop_object_suppression() noexcept;

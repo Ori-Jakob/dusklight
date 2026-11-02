@@ -25,12 +25,17 @@ enum class TagScope : u8 {
     ShadowImage,
     FakeShadow,
     Reflection,
+    Particle,
 };
 
-inline constexpr size_t TagScopeCount = 10;
+inline constexpr size_t TagScopeCount = 11;
 
 inline constexpr u32 kFakeShadowCategories =
     AURORA_CAT_FAKE_SHADOW | AURORA_CAT_DECAL | AURORA_CAT_NO_CAPTURE;
+
+// The only scope allowed OVERLAY; game shadows never use it (rev3 C3)
+inline constexpr u32 kParticleCategories =
+    AURORA_CAT_PARTICLE | AURORA_CAT_OVERLAY | AURORA_CAT_NO_PBR;
 
 struct TagScopeDesc {
     const char* name;
