@@ -195,6 +195,12 @@
         "value": "arm64",
         "strategy": "external"
       },
+      "cacheVariables": {
+        "AURORA_ENABLE_XESS": {
+          "type": "BOOL",
+          "value": false
+        }
+      },
       "vendor": {
         "microsoft.com/VisualStudioSettings/CMake/1.0": {
           "hostOS": [

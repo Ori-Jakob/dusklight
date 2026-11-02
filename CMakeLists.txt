@@ -622,6 +622,16 @@ endif ()
 
 include(extern/aurora/cmake/AuroraCopyRuntimeDLLs.cmake)
 aurora_copy_runtime_dlls(dusklight)
+if (AURORA_ENABLE_XESS)
+    aurora_copy_xess_runtime(dusklight)
+    target_compile_definitions(dusk_internal PRIVATE DUSK_SHIP_XESS)
+    add_custom_command(TARGET dusklight POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:dusklight>/res/licenses/xess"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${AURORA_XESS_LICENSE_FILES}
+            "$<TARGET_FILE_DIR:dusklight>/res/licenses/xess"
+        COMMENT "Copying XeSS notices"
+    )
+endif ()
 
 if (DUSK_SELECTED_OPT)
     if (CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
@@ -673,9 +683,15 @@ aurora_install_runtime_dlls(dusklight ${CMAKE_INSTALL_PREFIX})
 if (NOT APPLE)
     if (DUSK_PACKAGE_INSTALL)
         install(DIRECTORY ${CMAKE_SOURCE_DIR}/res DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/dusklight)
+        set(DUSK_INSTALL_RES_DIR ${CMAKE_INSTALL_DATAROOTDIR}/dusklight/res)
     else()
         install(DIRECTORY ${CMAKE_SOURCE_DIR}/res DESTINATION ${CMAKE_INSTALL_PREFIX})
+        set(DUSK_INSTALL_RES_DIR ${CMAKE_INSTALL_PREFIX}/res)
     endif()
+    # Intel's licence covers the DLL the install glob ships, so its texts travel with it
+    if (AURORA_ENABLE_XESS)
+        install(FILES ${AURORA_XESS_LICENSE_FILES} DESTINATION ${DUSK_INSTALL_RES_DIR}/licenses/xess)
+    endif ()
 endif ()
 if (CMAKE_BUILD_TYPE STREQUAL Debug OR CMAKE_BUILD_TYPE STREQUAL RelWithDebInfo AND NOT DUSK_PACKAGE_INSTALL)
     set(DEBUG_FILES_LIST "")

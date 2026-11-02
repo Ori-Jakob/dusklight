@@ -31,6 +31,10 @@ constexpr std::array<std::string_view, 6> kFontFiles{
     "fonts/NotoMono-OFL.txt",
     "fonts/MaterialSymbolsRounded-LICENSE.txt",
 };
+#ifdef DUSK_SHIP_XESS
+constexpr std::array<std::string_view, 2> kXessFiles{
+    "xess/LICENSE.txt", "xess/third-party-programs.txt"};
+#endif
 
 constexpr std::array kComponents{
     LicenseComponent{"AMD FidelityFX Super Resolution", "MIT",
@@ -45,6 +49,11 @@ constexpr std::array kComponents{
         "Alegreya SC, Fira Sans, Fira Sans Condensed, Inter, Noto Mono and Material Symbols "
         "Rounded.",
         kFontFiles},
+#ifdef DUSK_SHIP_XESS
+    LicenseComponent{"XeSS-SR", "Intel Simplified Software License",
+        "The XeSS-SR upscaler runtime (libxess.dll), shipped unmodified in binary form.",
+        kXessFiles},
+#endif
 };
 
 std::filesystem::path license_path(std::string_view file) {

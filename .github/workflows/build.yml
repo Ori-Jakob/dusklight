@@ -240,12 +240,14 @@ jobs:
             msvc_arch: amd64
             vcpkg_arch: x64
             artifact_arch: x86_64
+            xess: ON
           - name: MSVC arm64
             runner: windows-latest
             preset: arm64-msvc
             msvc_arch: amd64_arm64
             vcpkg_arch: arm64
             artifact_arch: arm64
+            xess: OFF
           # - name: Clang x86_64
           #   runner: windows-latest
           #   preset: clang
@@ -277,7 +279,7 @@ jobs:
           vcpkg install freetype:${{matrix.vcpkg_arch}}-windows zstd:${{matrix.vcpkg_arch}}-windows
 
       - name: Configure CMake
-        run: cmake --preset x-windows-ci-${{matrix.preset}}
+        run: cmake --preset x-windows-ci-${{matrix.preset}} -DAURORA_ENABLE_XESS=${{matrix.xess}}
 
       - name: Build
         run: cmake --build --preset x-windows-ci-${{matrix.preset}}
