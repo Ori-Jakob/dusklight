@@ -17,12 +17,79 @@
 namespace dusk::ui {
 namespace {
 
-constexpr std::array<std::string_view, 1> kFsrFiles{"fidelityfx-fsr/LICENSE.txt"};
-constexpr std::array<std::string_view, 1> kDawnFiles{"dawn/LICENSE.txt"};
-constexpr std::array<std::string_view, 1> kSdlFiles{"sdl3/LICENSE.txt"};
-constexpr std::array<std::string_view, 2> kDxcFiles{"dxc/LICENSE.txt", "dxc/dxil-LICENSE.txt"};
-constexpr std::array<std::string_view, 2> kNodFiles{
-    "nod/LICENSE-MIT.txt", "nod/LICENSE-APACHE.txt"};
+constexpr std::array<std::string_view, 2> kFsrFiles{
+    "fidelityfx-fsr/LICENSE.txt", "fidelityfx-fsr/RCAS-LICENSE.txt"};
+constexpr std::array<std::string_view, 5> kDawnFiles{
+    "dawn/LICENSE.txt",
+    "dawn/SPIRV-Tools-LICENSE.txt",
+    "dawn/SPIRV-Headers-LICENSE.txt",
+    "dawn/Vulkan-Headers-LICENSE.txt",
+    "dawn/Vulkan-Utility-Libraries-LICENSE.txt",
+};
+constexpr std::array<std::string_view, 3> kSdlFiles{
+    "sdl3/LICENSE.txt", "sdl3/hidapi-LICENSE-bsd.txt", "sdl3/yuv2rgb-LICENSE.txt"};
+constexpr std::array<std::string_view, 3> kDxcFiles{
+    "dxc/LICENSE.txt", "dxc/ThirdPartyNotices.txt", "dxc/dxil-LICENSE.txt"};
+constexpr std::array<std::string_view, 3> kNodFiles{
+    "nod/LICENSE-MIT.txt", "nod/LICENSE-APACHE.txt", "nod/dependencies.txt"};
+constexpr std::array<std::string_view, 4> kAuroraFiles{
+    "aurora/LICENSE.txt",
+    "aurora/hextile-demo-LICENSE.txt",
+    "aurora/bevy-taa-LICENSE.txt",
+    "aurora/catmull-rom-LICENSE.txt",
+};
+constexpr std::array<std::string_view, 1> kBorealisFiles{"borealis/LICENSE.txt"};
+constexpr std::array<std::string_view, 1> kAbseilFiles{"abseil/LICENSE.txt"};
+constexpr std::array<std::string_view, 2> kRmlUiFiles{
+    "rmlui/LICENSE.txt", "rmlui/Containers-LICENSE.txt"};
+constexpr std::array<std::string_view, 2> kImGuiFiles{
+    "imgui/LICENSE.txt", "imgui/ProggyClean-LICENSE.txt"};
+constexpr std::array<std::string_view, 4> kFreetypeFiles{
+    "freetype/LICENSE.txt",
+    "freetype/FTL.txt",
+    "freetype/bdf-README.txt",
+    "freetype/pcf-README.txt",
+};
+constexpr std::array<std::string_view, 1> kFmtFiles{"fmt/LICENSE.txt"};
+constexpr std::array<std::string_view, 1> kPngFiles{"libpng/LICENSE.txt"};
+constexpr std::array<std::string_view, 2> kZlibFiles{
+    "zlib/LICENSE.txt", "zlib/zlib-ng-LICENSE.txt"};
+constexpr std::array<std::string_view, 1> kZstdFiles{"zstd/LICENSE.txt"};
+constexpr std::array<std::string_view, 2> kBzip2BrotliFiles{
+    "bzip2-brotli/bzip2-LICENSE.txt", "bzip2-brotli/brotli-LICENSE.txt"};
+constexpr std::array<std::string_view, 7> kUtilityFiles{
+    "utilities/cxxopts-LICENSE.txt",
+    "utilities/magic_enum-LICENSE.txt",
+    "utilities/miniz-LICENSE.txt",
+    "utilities/nlohmann-json-LICENSE.txt",
+    "utilities/PicoSHA2-LICENSE.txt",
+    "utilities/xxHash-LICENSE.txt",
+    "utilities/yyjson-LICENSE.txt",
+};
+constexpr std::array<std::string_view, 2> kFunchookFiles{
+    "funchook/LICENSE.txt", "funchook/diStorm-LICENSE.txt"};
+constexpr std::array<std::string_view, 7> kSentryFiles{
+    "sentry/LICENSE.txt",
+    "sentry/jsmn-LICENSE.txt",
+    "sentry/Crashpad-LICENSE.txt",
+    "sentry/mini_chromium-LICENSE.txt",
+    "sentry/mpack-LICENSE.txt",
+    "sentry/zlib-LICENSE.txt",
+    "sentry/getopt-LICENSE.txt",
+};
+constexpr std::array<std::string_view, 5> kModFiles{
+    "mods/Luau-LICENSE.txt",
+    "mods/LuaBridge3-LICENSE.txt",
+    "mods/yaml-cpp-LICENSE.txt",
+    "mods/base64pp-LICENSE.txt",
+    "mods/battery-embed-LICENSE.txt",
+};
+constexpr std::array<std::string_view, 4> kPublicDomainFiles{
+    "public-domain/SQLite.txt",
+    "public-domain/Freeverb.txt",
+    "public-domain/bcdec.txt",
+    "public-domain/bc7enc.txt",
+};
 constexpr std::array<std::string_view, 6> kFontFiles{
     "fonts/AlegreyaSC-OFL.txt",
     "fonts/FiraSans-OFL.txt",
@@ -37,14 +104,42 @@ constexpr std::array<std::string_view, 2> kXessFiles{
 #endif
 
 constexpr std::array kComponents{
+    LicenseComponent{"AMD FidelityFX Super Resolution", "MIT",
+        "Temporal upscaling and sharpening of the 3D scene.", kFsrFiles},
+    LicenseComponent{"Dawn", "BSD 3-Clause, Apache 2.0, MIT",
+        "The WebGPU implementation that draws the game.", kDawnFiles},
     LicenseComponent{
-        "AMD FidelityFX Super Resolution", "MIT", "Temporal upscaling of the 3D scene.", kFsrFiles},
-    LicenseComponent{
-        "Dawn", "BSD 3-Clause", "The WebGPU implementation that draws the game.", kDawnFiles},
-    LicenseComponent{"SDL", "zlib", "Windows, input, audio and file access.", kSdlFiles},
+        "SDL", "zlib, BSD 3-Clause", "Windows, input, audio and file access.", kSdlFiles},
     LicenseComponent{"DirectX Shader Compiler", "NCSA, Microsoft",
         "Compiles shaders for Direct3D 12 (dxcompiler.dll and dxil.dll).", kDxcFiles},
     LicenseComponent{"nod", "MIT or Apache 2.0", "Reads the game disc image.", kNodFiles},
+    LicenseComponent{"aurora", "MIT", "The engine layer that runs the game on PC.", kAuroraFiles},
+    LicenseComponent{
+        "borealis", "MIT", "Logging, updates, crash handling and networking.", kBorealisFiles},
+    LicenseComponent{
+        "Abseil", "Apache 2.0", "C++ containers used by the engine and Dawn.", kAbseilFiles},
+    LicenseComponent{"RmlUi", "MIT", "Draws the menus and settings screens.", kRmlUiFiles},
+    LicenseComponent{"Dear ImGui", "MIT", "Draws the debug and developer windows.", kImGuiFiles},
+    LicenseComponent{
+        "FreeType", "FreeType License", "Renders the interface fonts.", kFreetypeFiles},
+    LicenseComponent{"fmt", "MIT", "Formats text and log messages.", kFmtFiles},
+    LicenseComponent{"libpng", "libpng", "Reads and writes PNG images.", kPngFiles},
+    LicenseComponent{"zlib", "zlib", "Compression for PNG images, fonts and archives.", kZlibFiles},
+    LicenseComponent{
+        "Zstandard", "BSD 3-Clause", "Compresses the shader cache and mod data.", kZstdFiles},
+    LicenseComponent{
+        "bzip2 and Brotli", "bzip2, MIT", "Decompress compressed font files.", kBzip2BrotliFiles},
+    LicenseComponent{"Utility libraries", "MIT, BSD 2-Clause",
+        "cxxopts, magic_enum, miniz, nlohmann/json, PicoSHA2, xxHash and yyjson.", kUtilityFiles},
+    LicenseComponent{"funchook and diStorm", "GPL 2.0+ with exception, BSD",
+        "Installs the function hooks that code mods use.", kFunchookFiles},
+    LicenseComponent{"Sentry and Crashpad", "MIT, Apache 2.0, BSD 3-Clause",
+        "Crash reporting in official builds (crashpad_handler.exe).", kSentryFiles},
+    LicenseComponent{"Mod libraries", "MIT, Apache 2.0",
+        "Luau, LuaBridge3, yaml-cpp, base64pp and battery::embed, used by the bundled mods.",
+        kModFiles},
+    LicenseComponent{"Public domain code", "Public domain", "SQLite, Freeverb, bcdec and bc7enc.",
+        kPublicDomainFiles},
     LicenseComponent{"Fonts", "OFL 1.1, Apache 2.0",
         "Alegreya SC, Fira Sans, Fira Sans Condensed, Inter, Noto Mono and Material Symbols "
         "Rounded.",
