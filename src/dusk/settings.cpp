@@ -193,6 +193,8 @@ UserSettings g_userSettings = {
         .upscaler {"graphics.upscaler", GraphicsUpscaler::Off},
         .upscalerQuality {"graphics.upscalerQuality", GraphicsUpscalerQuality::Quality},
         .ao {"graphics.ao", GraphicsQuality::Off},
+        .aoRadius {"graphics.aoRadius", 0.73f},
+        .aoStrength {"graphics.aoStrength", 1.0f},
         .ssil {"graphics.ssil", false},
         .shadowQuality {"graphics.shadowQuality", GraphicsQuality::Off},
         .shadowPages {"graphics.shadowPages", 1024},
@@ -490,6 +492,8 @@ void registerSettings() {
     RegisterGraphics(g_userSettings.graphics.upscaler);
     RegisterGraphics(g_userSettings.graphics.upscalerQuality);
     RegisterGraphics(g_userSettings.graphics.ao);
+    RegisterGraphics(g_userSettings.graphics.aoRadius);
+    RegisterGraphics(g_userSettings.graphics.aoStrength);
     RegisterGraphics(g_userSettings.graphics.ssil);
     RegisterGraphics(g_userSettings.graphics.shadowQuality);
     RegisterGraphics(g_userSettings.graphics.shadowPages);

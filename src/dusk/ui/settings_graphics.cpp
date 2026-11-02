@@ -70,7 +70,7 @@ constexpr std::array kSectionTitles{
 static_assert(kSectionTitles.size() == static_cast<size_t>(GraphicsSection::Advanced) + 1);
 
 constexpr std::array<size_t, kSectionTitles.size()> kSectionRowCounts{
-    3, 7, 4, 5, 3, 2, 3, 6, 11, 10, 5, 4, 3, 6, 4};
+    3, 7, 4, 5, 5, 2, 3, 6, 11, 10, 5, 4, 3, 6, 4};
 
 constexpr std::array kMovedKeys{
     std::string_view{"game.enableTextureReplacements"},
@@ -604,7 +604,7 @@ constexpr RowGate kUpscalerGate{&render::feature_gate<F::Upscaler>,
 constexpr RowGate kUpscalerQualityGate{
     &render::upscaler_quality_gate, nullptr, &render::upscaler_reason_help};
 
-constexpr std::array<GraphicsRow, 76> kRows{{
+constexpr std::array<GraphicsRow, 78> kRows{{
     {{S::Preset, "Graphics Preset", "graphics.preset", "M2", false},
         [](RowContext& ctx, const GraphicsRowInfo& info) { preset_row(ctx, info); }},
     {{S::Preset, "Recommended", nullptr, "M2", false},
@@ -801,10 +801,33 @@ constexpr std::array<GraphicsRow, 76> kRows{{
         [](RowContext& ctx, const GraphicsRowInfo& info) {
             enum_row(ctx, info, graphics().ao,
                 {
-                    .help = "Darken creases and contact areas.",
+                    .help = "Darken creases, corners and the ground where objects touch it, "
+                            "without dimming distant fog. Its cost grows with Internal "
+                            "Resolution. Ultra is sharper but costs much more.",
                     .options = kQualityOptions,
                     .gate = toggle_gate<F::Ao>(),
                     .clamped = [] { return render::from_aurora(clamped().ao); },
+                });
+        }},
+    {{S::AoGi, "AO Radius", "graphics.aoRadius", "M8", false},
+        [](RowContext& ctx, const GraphicsRowInfo& info) {
+            tuner_row(ctx, info,
+                {
+                    .option = GraphicsOption::AoRadius,
+                    .help = "How far the darkening spreads from creases and contact areas.",
+                    .gate = param_gate<F::Ao>(),
+                    .isDisabled = [] { return graphics().ao.getValue() == GraphicsQuality::Off; },
+                });
+        }},
+    {{S::AoGi, "AO Strength", "graphics.aoStrength", "M8", false},
+        [](RowContext& ctx, const GraphicsRowInfo& info) {
+            tuner_row(ctx, info,
+                {
+                    .option = GraphicsOption::AoStrength,
+                    .help = "How dark creases and contact areas get. 0% turns the darkening off "
+                            "but keeps the cost.",
+                    .gate = param_gate<F::Ao>(),
+                    .isDisabled = [] { return graphics().ao.getValue() == GraphicsQuality::Off; },
                 });
         }},
     {{S::AoGi, "Indirect Light", "graphics.ssil", "M11", true},
@@ -1382,8 +1405,8 @@ bool is_graphics_key(const char* key) {
 
 std::string test_rows_count() {
     std::string problems;
-    if (kRowInfos.size() != 76) {
-        append_item(problems, fmt::format("{} rows, expected 76", kRowInfos.size()));
+    if (kRowInfos.size() != 78) {
+        append_item(problems, fmt::format("{} rows, expected 78", kRowInfos.size()));
     }
     std::array<size_t, kSectionTitles.size()> counts{};
     size_t previous = 0;
@@ -1414,8 +1437,8 @@ std::string test_rows_cover_every_key() {
     DUSK_GRAPHICS_FIELDS(DUSK_EXPECTED_KEY)
 #undef DUSK_EXPECTED_KEY
     std::string problems;
-    if (expected.size() != 65) {
-        append_item(problems, fmt::format("{} graphics keys, expected 65", expected.size()));
+    if (expected.size() != 67) {
+        append_item(problems, fmt::format("{} graphics keys, expected 67", expected.size()));
     }
     for (const auto key : expected) {
         const auto count = std::ranges::count_if(kRowInfos,

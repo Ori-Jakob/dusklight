@@ -294,6 +294,12 @@ const GraphicsSetting& GraphicsSetting::of(GraphicsOption option) {
     case GraphicsOption::TaaSharpness:
         return bind_graphics<[]() -> auto& { return getSettings().graphics.taaSharpness; },
             PercentMap>(0, 100, 5, 100, TunerFormat::Percent);
+    case GraphicsOption::AoRadius:
+        return bind_graphics<[]() -> auto& { return getSettings().graphics.aoRadius; }, PercentMap>(
+            25, 150, 1, 100, TunerFormat::Metres);
+    case GraphicsOption::AoStrength:
+        return bind_graphics<[]() -> auto& { return getSettings().graphics.aoStrength; },
+            PercentMap>(0, 150, 5, 100, TunerFormat::Percent);
     case GraphicsOption::DebugView:
         return bind_graphics<[]() -> auto& { return getSettings().graphics.debugView; },
             IntegerMap>(0, 63, 1, 1, TunerFormat::ViewAutoAtMin);
@@ -317,6 +323,8 @@ Rml::String GraphicsSetting::format_value(int value) const {
         return fmt::format("{:+.1f} EV", value / static_cast<double>(scale));
     case TunerFormat::ViewAutoAtMin:
         return value == min ? "Off" : fmt::format("View {}", value);
+    case TunerFormat::Metres:
+        return fmt::format("{:.2f} m", value / static_cast<double>(scale));
     case TunerFormat::Integer:
     case TunerFormat::Custom:
         break;

@@ -545,6 +545,8 @@ struct UserSettings {
         ConfigVar<GraphicsUpscaler> upscaler;
         ConfigVar<GraphicsUpscalerQuality> upscalerQuality;
         ConfigVar<GraphicsQuality> ao;
+        ConfigVar<float> aoRadius;
+        ConfigVar<float> aoStrength;
         ConfigVar<bool> ssil;
         ConfigVar<GraphicsQuality> shadowQuality;
         ConfigVar<int> shadowPages;

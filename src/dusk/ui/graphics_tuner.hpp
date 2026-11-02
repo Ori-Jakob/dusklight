@@ -48,6 +48,7 @@ enum class TunerFormat : u8 {
     Ev,
     Integer,
     ViewAutoAtMin,
+    Metres,
 };
 
 enum class GraphicsOption {
@@ -80,6 +81,8 @@ enum class GraphicsOption {
     TerrainStrength,
     TerrainDistance,
     TaaSharpness,
+    AoRadius,
+    AoStrength,
     DebugView,
 };
 

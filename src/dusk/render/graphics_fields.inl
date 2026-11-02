@@ -13,6 +13,8 @@
     X(upscaler, upscaler)                                                                          \
     X(upscalerQuality, upscalerQuality)                                                            \
     X(ao, ao)                                                                                      \
+    X(aoRadius, aoRadius)                                                                          \
+    X(aoStrength, aoStrength)                                                                      \
     X(ssil, ssil)                                                                                  \
     X(shadowQuality, shadows.quality)                                                              \
     X(shadowPages, shadows.pages)                                                                  \

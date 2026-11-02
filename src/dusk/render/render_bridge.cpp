@@ -160,8 +160,8 @@ static_assert([] {
 #define DUSK_COUNT_FIELD(member, field) +1
 constexpr size_t kFieldCount = 1 DUSK_GRAPHICS_FIELDS(DUSK_COUNT_FIELD);
 #undef DUSK_COUNT_FIELD
-// aurora's Settings has 65 members counting preset, and each needs exactly one key
-constexpr size_t kAuroraSettingsMembers = 65;
+// aurora's Settings has 67 members counting preset, and each needs exactly one key
+constexpr size_t kAuroraSettingsMembers = 67;
 
 uint64_t s_generation = 0;
 uint64_t s_pushedGeneration = 0;

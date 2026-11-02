@@ -1049,7 +1049,9 @@ svc_gfx->get_device_info(mod_ctx, &info);
 
 - `GFX_STAGE_SCENE_BEGIN`: world camera window after camera/projection/light setup
 - `GFX_STAGE_SCENE_AFTER_TERRAIN`: after terrain/shadow lists, before object and translucent lists
-- `GFX_STAGE_SCENE_AFTER_OPAQUE`: after sky/terrain/object opaque lists, before translucent lists
+- `GFX_STAGE_SCENE_AFTER_OPAQUE`: after sky/terrain/object opaque lists, before translucent lists; while Graphics >
+  Ambient Occlusion is on, colour resolved here already includes the renderer's ambient occlusion (applied before fog).
+  The SceneTargetsService fog record still describes the fog in that colour while no other renderer effect changes fog
 - `GFX_STAGE_FRAME_BEFORE_HUD`: 3D scene and wipe are complete, before 2D/HUD lists
 - `GFX_STAGE_FRAME_AFTER_HUD`: full game scene, including HUD
 
@@ -1115,11 +1117,11 @@ const bool gbuffer = svc_scene_targets != nullptr &&
 it returns (the same key as `GfxRenderTargetLayout.key`), or `SCENE_TARGET_NONE`. GfxService keeps upstream's numbering
 and reports all three as `GFX_ATTACHMENT_AUXILIARY`.
 
-`resolve_pass` is GfxService's `resolve_pass` with one more request: set `SceneRecordsDesc.fog` to snapshot the fog record
-into `SceneRecords.fog` (`RGBA8Uint`). The record is valid from `GFX_STAGE_SCENE_BEGIN` until the first colour draw after
-the scene window, and final at `GFX_STAGE_SCENE_AFTER_OPAQUE`. It is null whenever the scene layout has no fog target:
-the G-buffer is off, the device is in WebGPU compatibility mode, MSAA is on, or an offscreen pass is active. A request
-never turns the G-buffer on.
+`resolve_pass` is GfxService's `resolve_pass` with one more request: set `SceneRecordsDesc.fog` to snapshot the fog
+record into `SceneRecords.fog` (`RGBA8Uint`). The record is valid from `GFX_STAGE_SCENE_BEGIN` until the first colour
+draw after the scene window, and final at `GFX_STAGE_SCENE_AFTER_OPAQUE`. It is null whenever the scene layout has no
+fog target: the G-buffer is off, the device is in WebGPU compatibility mode, MSAA is on, or an offscreen pass is active.
+A request never turns the G-buffer on.
 
 Fog record decode: rgb is the fog colour × 255, the amount is `(a >> 1) / 127`, and `(a & 1)` means the fog colour is
 locked. The fog the game added to the pixel is `F = rgb / 255 * amount`. An effect that darkens the scene by `k` should
@@ -1129,9 +1131,9 @@ While the G-buffer is live, the normal snapshot's alpha holds a receiver code (`
 `alpha > 1/6` as "receives screen-space effects" under both. A mod's normal request does not arm the legacy normal
 attachment while the G-buffer is live.
 
-Opaque mod geometry drawn at `GFX_STAGE_SCENE_BEGIN` or `GFX_STAGE_SCENE_AFTER_TERRAIN` on a G-buffer layout should write
-0 to the fog target (or its own fog record), write motion from the mod's own cached previous `proj_from_world` (or 1 to
-the reactive target when it has none), and write normal alpha 0 to opt out of AO.
+Opaque mod geometry drawn at `GFX_STAGE_SCENE_BEGIN` or `GFX_STAGE_SCENE_AFTER_TERRAIN` on a G-buffer layout should
+write 0 to the fog target (or its own fog record), write motion from the mod's own cached previous `proj_from_world` (or
+1 to the reactive target when it has none), and write normal alpha 0 to opt out of AO.
 
 With TAA on, the scene stages before post-processing are anti-aliased, but mod draws are not jittered. Depth snapshots
 carry the frame's jitter, up to half a pixel.
