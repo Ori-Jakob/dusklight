@@ -11,6 +11,7 @@
 #include "dusk/settings.h"
 #include "dusk/ui/format.hpp"
 #include "dusk/ui/menu_bar.hpp"
+#include "licenses.hpp"
 #include "mod_updates.hpp"
 #include "modal.hpp"
 #include "mods_window.hpp"
@@ -78,6 +79,10 @@ const Rml::String kDocumentSource = R"RML(
                     &nbsp;<icon />
                 </button>
             </update-status>
+            <footer-links>
+                <dlss-attribution id="dlss-attribution">NVIDIA DLSS</dlss-attribution>
+                <button id="licenses-link">Licences</button>
+            </footer-links>
         </version-info>
     </content>
 </body>
@@ -876,6 +881,27 @@ Prelaunch::Prelaunch() : Document(kDocumentSource, false, DocumentScope::Prelaun
                 event.StopPropagation();
             }
         });
+    }
+    if (auto* licenses = mDocument->GetElementById("licenses-link")) {
+        const auto open = [this] {
+            mRestartSuppressed = false;
+            auto window = std::make_unique<SettingsWindow>(true);
+            window->show_tab("Licences");
+            push(std::move(window));
+        };
+        listen(licenses, Rml::EventId::Click, [open](Rml::Event& event) {
+            open();
+            event.StopPropagation();
+        });
+        listen(licenses, Rml::EventId::Keydown, [open](Rml::Event& event) {
+            if (map_nav_event(event) == NavCommand::Confirm) {
+                open();
+                event.StopPropagation();
+            }
+        });
+    }
+    if (auto* attribution = mDocument->GetElementById("dlss-attribution")) {
+        attribution->SetClass("shown", dlss_runtime_shipped());
     }
 
     try_apply_mirrored_layout(mDocument);

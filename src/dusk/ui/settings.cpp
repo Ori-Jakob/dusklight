@@ -3,6 +3,7 @@
 #include "bool_button.hpp"
 #include "controller_config.hpp"
 #include "graphics_tuner.hpp"
+#include "licenses.hpp"
 #include "menu_bar.hpp"
 #include "modal.hpp"
 #include "number_button.hpp"
@@ -38,6 +39,7 @@
 #include <SDL3/SDL_filesystem.h>
 
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 
 #if defined(__APPLE__)
@@ -1519,12 +1521,23 @@ SettingsWindow::SettingsWindow(bool prelaunch) : mPrelaunch(prelaunch) {
             "R+D-pad Up stores Link's current position.<br/>"
             "R+D-pad Down teleports Link back to it.");
     });
+
+    add_tab("Licences", [this](Rml::Element* content) {
+        auto& leftPane = add_child<Pane>(content, Pane::Type::Controlled);
+        auto& rightPane = add_child<Pane>(content, Pane::Type::Uncontrolled);
+        build_licenses_tab(leftPane, rightPane);
+    });
 }
 
 void SettingsWindow::update() {
     if (mPrelaunch && top_document() == this) {
         try_push_verification_modal(*this);
         try_push_language_unavailable_modal(*this);
+    }
+    if (mPendingRowFrames > 0) {
+        --mPendingRowFrames;
+        // A freshly built tab is laid out a frame later, so the scroll repeats until it settles
+        try_focus_row();
     }
 
     Window::update();
@@ -1533,6 +1546,61 @@ void SettingsWindow::update() {
 void SettingsWindow::hide(bool close) {
     config::save();
     Window::hide(close);
+}
+
+void SettingsWindow::add_tab(const Rml::String& title, TabBuilder builder) {
+    mTabTitles.push_back(title);
+    Window::add_tab(title, std::move(builder));
+}
+
+bool SettingsWindow::show_tab(std::string_view title) {
+    for (size_t i = 0; i < mTabTitles.size(); ++i) {
+        if (std::ranges::equal(mTabTitles[i], title, [](unsigned char a, unsigned char b) {
+                return std::tolower(a) == std::tolower(b);
+            }))
+        {
+            set_active_tab(static_cast<int>(i));
+            return true;
+        }
+    }
+    return false;
+}
+
+void SettingsWindow::focus_row(std::string_view label) {
+    mPendingRow = Rml::String{label};
+    mPendingRowFrames = 10;
+}
+
+bool SettingsWindow::try_focus_row() {
+    Rml::ElementList keys;
+    mContentRoot->GetElementsByTagName(keys, "key");
+    for (auto* key : keys) {
+        if (key->GetInnerRML() != mPendingRow) {
+            continue;
+        }
+        Rml::Element* row = key->GetParentNode();
+        row->Focus(true);
+        row->ScrollIntoView(Rml::ScrollIntoViewOptions{
+            Rml::ScrollAlignment::Center,
+            Rml::ScrollAlignment::Center,
+            Rml::ScrollBehavior::Instant,
+            Rml::ScrollParentage::Closest,
+        });
+        return true;
+    }
+    return false;
+}
+
+bool open_settings(std::string_view tab, std::string_view row) {
+    auto window = std::make_unique<SettingsWindow>(is_prelaunch_open());
+    if (!tab.empty() && !window->show_tab(tab)) {
+        return false;
+    }
+    if (!row.empty()) {
+        window->focus_row(row);
+    }
+    push_document(std::move(window));
+    return true;
 }
 
 }  // namespace dusk::ui

@@ -16,6 +16,8 @@
 #include "dusk/render/render_settings.hpp"
 #include "dusk/render/texture_materials.hpp"
 #include "dusk/settings.h"
+#include "dusk/ui/licenses.hpp"
+#include "dusk/ui/settings.hpp"
 #include "dusk/ui/settings_graphics.hpp"
 #include "game_clock.h"
 
@@ -506,6 +508,7 @@ static constexpr const char* kRenderGraphDumpFile = "render_graph.json";
 static constexpr const char* kRenderHintsUsage = "Usage: render.hints [reset|ids]";
 static constexpr const char* kRenderObjectsUsage = "Usage: render.objects [log <frames>]";
 static constexpr const char* kRenderTagsUsage = "Usage: render.tags [pending on|off]";
+static constexpr const char* kUiSettingsUsage = "Usage: ui.settings [tab] [row label]";
 
 static const char* YesNo(bool value) {
     return value ? "yes" : "no";
@@ -613,6 +616,7 @@ static void RunRenderSelfTest(
     render::cuts_self_test(report);
     render::texture_materials_self_test(report);
     render::mod_conflicts_self_test(report);
+    ui::licenses_self_test(report);
     for (const auto& failure : report.failed) {
         TraceError(state, output, "FAIL " + failure);
     }
@@ -625,6 +629,27 @@ static void RunRenderSelfTest(
     TraceReply(state, output,
         fmt::format(FMT_STRING("render.selftest: {} passed{}, {} failed"), report.passed, skipped,
             report.failed.size()));
+}
+
+// Opens a Settings tab and row by name, so recordings can show a page without any UI input
+static void RunUiSettings(
+    const std::vector<std::string>& args, CommandState& state, const CommandOutput& output) {
+    const std::string tab = args.size() > 1 ? args[1] : std::string{};
+    std::string row;
+    for (size_t i = 2; i < args.size(); ++i) {
+        if (!row.empty()) {
+            row += ' ';
+        }
+        row += args[i];
+    }
+    if (!ui::open_settings(tab, row)) {
+        TraceError(state, output, fmt::format(FMT_STRING("Error: no Settings tab '{}'"), tab));
+        TraceError(state, output, kUiSettingsUsage);
+        return;
+    }
+    TraceReply(state, output,
+        fmt::format(FMT_STRING("Opened Settings{}{}"), tab.empty() ? "" : " on " + tab,
+            row.empty() ? std::string{} : ", row " + row));
 }
 
 static bool EqualsIgnoreCase(std::string_view a, std::string_view b) {
@@ -1519,6 +1544,10 @@ void runCommand(std::string_view cmdLine, CommandState& state, const CommandOutp
         return;
     }
 
+    if (cmd == "ui.settings") {
+        RunUiSettings(args, state, output);
+        return;
+    }
     if (cmd == "help") {
         output("@<ref>  =  @<procId> | @found | @link");
         output("");
@@ -1571,6 +1600,7 @@ void runCommand(std::string_view cmdLine, CommandState& state, const CommandOutp
         output("tp @<ref> <x> <y> <z> [angle]               Move actor to coords");
         output("tp @<ref> @<ref>                            Move actor to actor");
         output("transform                                   Force transform");
+        output("ui.settings [tab] [row label]               Open Settings on a tab and row");
         output("unfreeze [@<ref>]                           Unfreeze globally, or unfreeze actor");
         output("warp <stage> <point> <room> [layer]         Warp to stage");
         return;

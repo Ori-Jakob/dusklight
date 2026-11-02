@@ -401,6 +401,42 @@ body.mirrored update-status {
     justify-content: flex-start;
 }
 
+footer-links {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--space-md);
+    color: var(--color-prelaunch-muted);
+    font-size: var(--font-size-2xl);
+}
+
+body.mirrored footer-links {
+    justify-content: flex-start;
+}
+
+dlss-attribution {
+    display: none;
+}
+
+dlss-attribution.shown {
+    display: block;
+}
+
+#licenses-link {
+    margin: 0dp;
+    padding: 0dp;
+    border-width: 0dp;
+    background-color: transparent;
+    color: var(--color-prelaunch-muted);
+    cursor: pointer;
+    decorator: var(--menu-button-decorator);
+}
+
+#licenses-link:hover,
+#licenses-link:focus-visible {
+    color: var(--color-ready);
+}
+
 /* Startup animation */
 .intro-item {
     opacity: 0;
