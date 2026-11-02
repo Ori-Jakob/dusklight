@@ -420,6 +420,8 @@ template class ConfigImpl<GraphicsGodRays>;
 template class ConfigImpl<GraphicsTerrainDetail>;
 template class ConfigImpl<GraphicsGrassShadows>;
 template class ConfigImpl<GraphicsStaticWorld>;
+template class ConfigImpl<GraphicsUpscaler>;
+template class ConfigImpl<GraphicsUpscalerQuality>;
 
 void Register(ConfigVarBase& configVar) {
     const std::string_view name = configVar.getName();

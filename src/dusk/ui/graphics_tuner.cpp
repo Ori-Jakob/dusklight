@@ -45,10 +45,14 @@ Rml::String format_internal_resolution(int value) {
     u32 width = 0;
     u32 height = 0;
     AuroraGetRenderSize(&width, &height);
-    if (value <= 0) {
-        return fmt::format("Auto ({}×{})", width, height);
+    Rml::String label = value <= 0 ? fmt::format("Auto ({}×{})", width, height) :
+                                     fmt::format("{}× ({}×{})", value, width, height);
+    // The render size stays the output size, so the upscaler's scene size is shown beside it
+    const aurora::render::UpscaleStatus upscale = aurora::render::upscale_status();
+    if (upscale.active != aurora::render::Upscaler::Off) {
+        label += fmt::format(" · scene {}×{}", upscale.sceneSize[0], upscale.sceneSize[1]);
     }
-    return fmt::format("{}× ({}×{})", value, width, height);
+    return label;
 }
 
 Rml::String format_resampler(int value) {

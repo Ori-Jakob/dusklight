@@ -51,6 +51,8 @@ aurora::render::GodRays to_aurora(GraphicsGodRays value) noexcept;
 aurora::render::TerrainDetail to_aurora(GraphicsTerrainDetail value) noexcept;
 aurora::render::GrassShadows to_aurora(GraphicsGrassShadows value) noexcept;
 aurora::render::StaticWorld to_aurora(GraphicsStaticWorld value) noexcept;
+aurora::render::Upscaler to_aurora(GraphicsUpscaler value) noexcept;
+aurora::render::UpscalerQuality to_aurora(GraphicsUpscalerQuality value) noexcept;
 
 GraphicsPreset from_aurora(aurora::render::Preset value) noexcept;
 GraphicsQuality from_aurora(aurora::render::Quality value) noexcept;
@@ -65,6 +67,8 @@ GraphicsGodRays from_aurora(aurora::render::GodRays value) noexcept;
 GraphicsTerrainDetail from_aurora(aurora::render::TerrainDetail value) noexcept;
 GraphicsGrassShadows from_aurora(aurora::render::GrassShadows value) noexcept;
 GraphicsStaticWorld from_aurora(aurora::render::StaticWorld value) noexcept;
+GraphicsUpscaler from_aurora(aurora::render::Upscaler value) noexcept;
+GraphicsUpscalerQuality from_aurora(aurora::render::UpscalerQuality value) noexcept;
 
 void initialize();
 void present();

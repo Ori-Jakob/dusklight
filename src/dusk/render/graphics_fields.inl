@@ -10,6 +10,8 @@
     X(tonemap, tonemap)                                                                            \
     X(taa, taa)                                                                                    \
     X(taaSharpness, taaSharpness)                                                                  \
+    X(upscaler, upscaler)                                                                          \
+    X(upscalerQuality, upscalerQuality)                                                            \
     X(ao, ao)                                                                                      \
     X(ssil, ssil)                                                                                  \
     X(shadowQuality, shadows.quality)                                                              \

@@ -2,12 +2,16 @@
 
 #include "dusk/render/graphics_fields.inl"
 
+#include <SDL3/SDL_filesystem.h>
 #include <fmt/format.h>
 #include <magic_enum.hpp>
 
 #include <algorithm>
 #include <array>
+#include <filesystem>
+#include <initializer_list>
 #include <optional>
+#include <system_error>
 #include <type_traits>
 
 namespace dusk::render {
@@ -530,6 +534,11 @@ std::string test_reasons_complete() {
         ar::Reason::BindingLimit,
         ar::Reason::BuildDisabled,
         ar::Reason::NotImplemented,
+        ar::Reason::NeedsTextureFormats,
+        ar::Reason::RuntimeMissing,
+        ar::Reason::DriverTooOld,
+        ar::Reason::UnsupportedGpu,
+        ar::Reason::OutputTooLarge,
     };
     std::string problems;
     unsigned named = 0;
@@ -620,6 +629,80 @@ std::string test_status_required() {
 std::string test_status_applying() {
     return expect_status(row_status(kSupported, kSupported, "On", "On", false, true), false,
         "Applying\xE2\x80\xA6", "");
+}
+
+// The vendor loaders look for their runtime beside the executable
+bool runtime_shipped(const char* file) {
+    const char* base = SDL_GetBasePath();
+    std::error_code ec;
+    return base != nullptr && std::filesystem::exists(std::filesystem::path{base} / file, ec);
+}
+
+std::string expect_vendor_reason(
+    GraphicsUpscaler option, std::initializer_list<ar::Reason> allowed) {
+    const ar::FeatureSupport support =
+        ar::feature_support(ar::Feature::Upscaler, static_cast<uint8_t>(option));
+    if (!support.supported && std::ranges::find(allowed, support.reason) != allowed.end()) {
+        return {};
+    }
+    return fmt::format("{} without its runtime reports supported={} reason={}",
+        upscaler_name(option), support.supported, render::reason_name(support.reason));
+}
+
+std::string test_upscaler_option_gate() {
+    std::string problems;
+    // Off and FSR never name a vendor, so these queries cannot start a probe
+    for (const auto option : {GraphicsUpscaler::Off, GraphicsUpscaler::Fsr}) {
+        const ar::FeatureSupport support =
+            ar::feature_support(ar::Feature::Upscaler, static_cast<uint8_t>(option));
+        if (support.reason == ar::Reason::NotImplemented) {
+            append_item(problems, fmt::format("{} is not built", upscaler_name(option)));
+        }
+    }
+    // A shipped runtime is never queried here, so the self-test does not load it
+    if (!runtime_shipped("nvngx_dlss.dll")) {
+        append_item(problems, expect_vendor_reason(GraphicsUpscaler::Dlss,
+                                  {ar::Reason::BuildDisabled, ar::Reason::NeedsD3D12,
+                                      ar::Reason::RuntimeMissing, ar::Reason::Probing}));
+    }
+    if (!runtime_shipped("libxess.dll")) {
+        append_item(problems, expect_vendor_reason(GraphicsUpscaler::Xess,
+                                  {ar::Reason::BuildDisabled, ar::Reason::NeedsD3D12,
+                                      ar::Reason::RuntimeMissing, ar::Reason::Probing}));
+    }
+    for (const auto reason : {ar::Reason::NeedsD3D12, ar::Reason::NativeUnavailable,
+             ar::Reason::NativeDisabledAfterCrash, ar::Reason::BuildDisabled})
+    {
+        const std::string help =
+            upscaler_reason_help(static_cast<uint8_t>(GraphicsUpscaler::Dlss), reason);
+        if (help.empty() || help == reason_help(reason)) {
+            append_item(
+                problems, fmt::format("{} has no upscaler help", render::reason_name(reason)));
+        }
+    }
+    return problems;
+}
+
+std::string test_upscaler_labels() {
+    std::string problems;
+    for (const auto vendor : {ar::Upscaler::Off, ar::Upscaler::Fsr, ar::Upscaler::Dlss,
+             ar::Upscaler::Xess, ar::Upscaler::Auto})
+    {
+        for (unsigned raw = 0;
+            raw <= static_cast<unsigned>(GraphicsUpscalerQuality::UltraPerformance); ++raw)
+        {
+            const auto quality = static_cast<GraphicsUpscalerQuality>(raw);
+            const bool dlaa = upscaler_quality_label(vendor, quality) == "DLAA";
+            const bool expected =
+                vendor == ar::Upscaler::Dlss && quality == GraphicsUpscalerQuality::NativeAa;
+            if (dlaa != expected) {
+                append_item(
+                    problems, fmt::format("{} {} is labelled {}", static_cast<unsigned>(vendor),
+                                  raw, upscaler_quality_label(vendor, quality)));
+            }
+        }
+    }
+    return problems;
 }
 
 }  // namespace
@@ -749,6 +832,8 @@ template GraphicsGodRays reference_value(const config::ConfigVar<GraphicsGodRays
 template GraphicsTerrainDetail reference_value(const config::ConfigVar<GraphicsTerrainDetail>&);
 template GraphicsGrassShadows reference_value(const config::ConfigVar<GraphicsGrassShadows>&);
 template GraphicsStaticWorld reference_value(const config::ConfigVar<GraphicsStaticWorld>&);
+template GraphicsUpscaler reference_value(const config::ConfigVar<GraphicsUpscaler>&);
+template GraphicsUpscalerQuality reference_value(const config::ConfigVar<GraphicsUpscalerQuality>&);
 
 bool is_preset_controlled(std::string_view key) noexcept {
     return key == "graphics.preset" || std::ranges::find(kPresetKeys, key) != kPresetKeys.end();
@@ -781,6 +866,11 @@ bool is_hard_reason(ar::Reason reason) noexcept {
     case ar::Reason::BindingLimit:
     case ar::Reason::BuildDisabled:
     case ar::Reason::NotImplemented:
+    case ar::Reason::NeedsTextureFormats:
+    case ar::Reason::RuntimeMissing:
+    case ar::Reason::DriverTooOld:
+    case ar::Reason::UnsupportedGpu:
+    case ar::Reason::OutputTooLarge:
         return true;
     default:
         return false;
@@ -810,6 +900,14 @@ std::string_view reason_option_label(ar::Reason reason) noexcept {
         return "not in this build";
     case ar::Reason::NotImplemented:
         return "not built yet";
+    case ar::Reason::RuntimeMissing:
+        return "runtime file missing";
+    case ar::Reason::DriverTooOld:
+        return "driver too old";
+    case ar::Reason::UnsupportedGpu:
+        return "not supported on this GPU";
+    case ar::Reason::OutputTooLarge:
+        return "output too large";
     default:
         return is_hard_reason(reason) ? "unavailable" : "";
     }
@@ -865,8 +963,74 @@ std::string_view reason_help(ar::Reason reason) noexcept {
         return "Needs Ambient Occlusion.";
     case ar::Reason::NeedsRt:
         return "Needs an RT Mode other than Off.";
+    case ar::Reason::NeedsTextureFormats:
+        return "Needs storage texture formats that this GPU does not support.";
+    case ar::Reason::RuntimeMissing:
+        return "The upscaler's runtime file is missing from the game folder.";
+    case ar::Reason::DriverTooOld:
+        return "Needs a newer graphics driver. Update your GPU driver to use this.";
+    case ar::Reason::UnsupportedGpu:
+        return "Not supported on this GPU.";
+    case ar::Reason::OutputTooLarge:
+        return "The output resolution is too large for this upscaler. Lower Internal Resolution "
+               "to use it.";
+    case ar::Reason::Probing:
+        return "Checking driver support\xE2\x80\xA6";
     }
     return "";
+}
+
+std::string_view upscaler_name(GraphicsUpscaler upscaler) noexcept {
+    switch (upscaler) {
+    case GraphicsUpscaler::Off:
+        return "Off";
+    case GraphicsUpscaler::Fsr:
+        return "FSR";
+    case GraphicsUpscaler::Dlss:
+        return "DLSS";
+    case GraphicsUpscaler::Xess:
+        return "XeSS-SR";
+    case GraphicsUpscaler::Auto:
+        return "Auto";
+    }
+    return "Unknown";
+}
+
+std::string upscaler_reason_help(uint8_t option, ar::Reason reason) {
+    const std::string_view name = upscaler_name(static_cast<GraphicsUpscaler>(option));
+    switch (reason) {
+    case ar::Reason::NeedsD3D12:
+        return fmt::format("{} needs the Direct3D 12 graphics backend. FSR works with every "
+                           "backend.",
+            name);
+    case ar::Reason::NativeUnavailable:
+        return fmt::format(
+            "{} could not start on this GPU or driver, so FSR is used instead.", name);
+    case ar::Reason::NativeDisabledAfterCrash:
+        return "DLSS and XeSS-SR were turned off after a crash. Select one of them, then choose "
+               "Re-enable to try again.";
+    case ar::Reason::BuildDisabled:
+        return fmt::format("This build of Dusklight does not include {}.", name);
+    default:
+        return std::string{reason_help(reason)};
+    }
+}
+
+std::string_view upscaler_quality_label(
+    ar::Upscaler vendor, GraphicsUpscalerQuality quality) noexcept {
+    switch (quality) {
+    case GraphicsUpscalerQuality::NativeAa:
+        return vendor == ar::Upscaler::Dlss ? "DLAA" : "Native AA";
+    case GraphicsUpscalerQuality::Quality:
+        return "Quality";
+    case GraphicsUpscalerQuality::Balanced:
+        return "Balanced";
+    case GraphicsUpscalerQuality::Performance:
+        return "Performance";
+    case GraphicsUpscalerQuality::UltraPerformance:
+        return "Ultra Performance";
+    }
+    return "Unknown";
 }
 
 ar::FeatureSupport always_gate(uint8_t) noexcept {
@@ -907,6 +1071,11 @@ ar::FeatureSupport native_reenable_gate(uint8_t option) noexcept {
     return support;
 }
 
+// Quality values are not upscaler options, so every one reports the row's support
+ar::FeatureSupport upscaler_quality_gate(uint8_t) noexcept {
+    return ar::feature_support(ar::Feature::Upscaler);
+}
+
 uint8_t game_shadows_option(GraphicsGameShadows value) noexcept {
     switch (value) {
     case GraphicsGameShadows::Keep:
@@ -926,9 +1095,13 @@ bool terrain_ready_gate() noexcept {
 }
 
 RowStatus row_status(ar::FeatureSupport row, ar::FeatureSupport option, std::string_view requested,
-    std::string_view clamped, bool pending, bool notReady) {
+    std::string_view clamped, bool pending, bool notReady, ReasonHelp help,
+    uint8_t requestedOption) {
+    const auto help_for = [help](uint8_t reasonOption, ar::Reason reason) {
+        return help != nullptr ? help(reasonOption, reason) : std::string{reason_help(reason)};
+    };
     if (!row.supported && is_hard_reason(row.reason)) {
-        return {true, std::string{reason_label(row.reason)}, std::string{reason_help(row.reason)}};
+        return {true, std::string{reason_label(row.reason)}, help_for(0, row.reason)};
     }
     // Comes before pending: it follows the shadow settings, not this row, so it cannot flash
     if (option.reason == ar::Reason::RequiredByShadows ||
@@ -942,10 +1115,12 @@ RowStatus row_status(ar::FeatureSupport row, ar::FeatureSupport option, std::str
         return {};
     }
     if (requested != clamped) {
-        const ar::Reason reason =
-            !option.supported ? option.reason : (!row.supported ? row.reason : ar::Reason::None);
-        return {false, fmt::format("{} \xE2\x86\x92 {}", requested, clamped),
-            std::string{reason_help(reason)}};
+        if (!option.supported) {
+            return {false, fmt::format("{} \xE2\x86\x92 {}", requested, clamped),
+                help_for(requestedOption, option.reason)};
+        }
+        const ar::Reason reason = !row.supported ? row.reason : ar::Reason::None;
+        return {false, fmt::format("{} \xE2\x86\x92 {}", requested, clamped), help_for(0, reason)};
     }
     if (notReady) {
         return {false, "Applying\xE2\x80\xA6", {}};
@@ -958,7 +1133,8 @@ RowStatus evaluate_row(const RowGate& gate, uint8_t requestedOption, std::string
     const ar::FeatureSupport row = gate.support(0);
     const ar::FeatureSupport option = requestedOption == 0 ? row : gate.support(requestedOption);
     const bool notReady = gate.ready != nullptr && requestedActive && !gate.ready();
-    return row_status(row, option, requested, clamped, is_pending(), notReady);
+    return row_status(
+        row, option, requested, clamped, is_pending(), notReady, gate.help, requestedOption);
 }
 
 void settings_self_test(SelfTestReport& report) {
@@ -983,6 +1159,8 @@ void settings_self_test(SelfTestReport& report) {
     check("status.arrow", test_status_arrow());
     check("status.required", test_status_required());
     check("status.applying", test_status_applying());
+    check("upscaler.option_gate", test_upscaler_option_gate());
+    check("upscaler.labels", test_upscaler_labels());
 }
 
 }  // namespace dusk::render

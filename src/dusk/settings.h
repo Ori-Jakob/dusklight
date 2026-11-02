@@ -174,6 +174,22 @@ enum class GraphicsStaticWorld : u8 {
     On = 2,
 };
 
+enum class GraphicsUpscaler : u8 {
+    Off = 0,
+    Fsr = 1,
+    Dlss = 2,
+    Xess = 3,
+    Auto = 4,
+};
+
+enum class GraphicsUpscalerQuality : u8 {
+    NativeAa = 0,
+    Quality = 1,
+    Balanced = 2,
+    Performance = 3,
+    UltraPerformance = 4,
+};
+
 namespace config {
 template <>
 struct ConfigEnumRange<BloomMode> {
@@ -324,6 +340,18 @@ template <>
 struct ConfigEnumRange<GraphicsStaticWorld> {
     static constexpr auto min = GraphicsStaticWorld::Off;
     static constexpr auto max = GraphicsStaticWorld::On;
+};
+
+template <>
+struct ConfigEnumRange<GraphicsUpscaler> {
+    static constexpr auto min = GraphicsUpscaler::Off;
+    static constexpr auto max = GraphicsUpscaler::Auto;
+};
+
+template <>
+struct ConfigEnumRange<GraphicsUpscalerQuality> {
+    static constexpr auto min = GraphicsUpscalerQuality::NativeAa;
+    static constexpr auto max = GraphicsUpscalerQuality::UltraPerformance;
 };
 
 template <>
@@ -514,6 +542,8 @@ struct UserSettings {
         ConfigVar<GraphicsTonemap> tonemap;
         ConfigVar<bool> taa;
         ConfigVar<float> taaSharpness;
+        ConfigVar<GraphicsUpscaler> upscaler;
+        ConfigVar<GraphicsUpscalerQuality> upscalerQuality;
         ConfigVar<GraphicsQuality> ao;
         ConfigVar<bool> ssil;
         ConfigVar<GraphicsQuality> shadowQuality;

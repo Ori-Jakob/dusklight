@@ -54,9 +54,12 @@ struct RecommendInput {
     uint64_t vramBytes;
 };
 
+using ReasonHelp = std::string (*)(uint8_t option, aurora::render::Reason reason);
+
 struct RowGate {
     aurora::render::FeatureSupport (*support)(uint8_t option);
     bool (*ready)();
+    ReasonHelp help = nullptr;
 };
 
 struct RowStatus {
@@ -85,6 +88,10 @@ bool is_hard_reason(aurora::render::Reason reason) noexcept;
 std::string_view reason_label(aurora::render::Reason reason) noexcept;
 std::string_view reason_option_label(aurora::render::Reason reason) noexcept;
 std::string_view reason_help(aurora::render::Reason reason) noexcept;
+std::string upscaler_reason_help(uint8_t option, aurora::render::Reason reason);
+std::string_view upscaler_name(GraphicsUpscaler upscaler) noexcept;
+std::string_view upscaler_quality_label(
+    aurora::render::Upscaler vendor, GraphicsUpscalerQuality quality) noexcept;
 
 template <aurora::render::Feature F>
 aurora::render::FeatureSupport feature_gate(uint8_t option) noexcept {
@@ -99,11 +106,13 @@ aurora::render::FeatureSupport not_built_gate(uint8_t option) noexcept;
 aurora::render::FeatureSupport terrain_detail_gate(uint8_t option) noexcept;
 aurora::render::FeatureSupport rt_backend_gate(uint8_t option) noexcept;
 aurora::render::FeatureSupport native_reenable_gate(uint8_t option) noexcept;
+aurora::render::FeatureSupport upscaler_quality_gate(uint8_t option) noexcept;
 uint8_t game_shadows_option(GraphicsGameShadows value) noexcept;
 bool terrain_ready_gate() noexcept;
 
 RowStatus row_status(aurora::render::FeatureSupport row, aurora::render::FeatureSupport option,
-    std::string_view requested, std::string_view clamped, bool pending, bool notReady);
+    std::string_view requested, std::string_view clamped, bool pending, bool notReady,
+    ReasonHelp help = nullptr, uint8_t requestedOption = 0);
 RowStatus evaluate_row(const RowGate& gate, uint8_t requestedOption, std::string_view requested,
     std::string_view clamped, bool requestedActive);
 

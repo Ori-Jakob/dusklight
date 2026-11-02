@@ -190,6 +190,8 @@ UserSettings g_userSettings = {
         .tonemap {"graphics.tonemap", GraphicsTonemap::PbrNeutral},
         .taa {"graphics.taa", false},
         .taaSharpness {"graphics.taaSharpness", 0.35f},
+        .upscaler {"graphics.upscaler", GraphicsUpscaler::Off},
+        .upscalerQuality {"graphics.upscalerQuality", GraphicsUpscalerQuality::Quality},
         .ao {"graphics.ao", GraphicsQuality::Off},
         .ssil {"graphics.ssil", false},
         .shadowQuality {"graphics.shadowQuality", GraphicsQuality::Off},
@@ -485,6 +487,8 @@ void registerSettings() {
     RegisterGraphics(g_userSettings.graphics.tonemap);
     RegisterGraphics(g_userSettings.graphics.taa);
     RegisterGraphics(g_userSettings.graphics.taaSharpness);
+    RegisterGraphics(g_userSettings.graphics.upscaler);
+    RegisterGraphics(g_userSettings.graphics.upscalerQuality);
     RegisterGraphics(g_userSettings.graphics.ao);
     RegisterGraphics(g_userSettings.graphics.ssil);
     RegisterGraphics(g_userSettings.graphics.shadowQuality);

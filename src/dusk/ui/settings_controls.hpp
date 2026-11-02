@@ -50,6 +50,7 @@ struct ConfigEnumProps {
     std::function<Rml::String(E)> optionUnavailableReason;
     std::function<Rml::String()> valueOverride;
     std::function<Rml::String()> helpSuffix;
+    std::function<Rml::String(E)> optionLabel;
 };
 
 struct ActionProps {
@@ -99,28 +100,35 @@ SelectButton& config_enum_select(
     if (!isModified) {
         isModified = [&var] { return var.getValue() != var.getDefaultValue(); };
     }
+    auto label = [options, optionLabel = std::move(props.optionLabel)](E value) {
+        if (optionLabel) {
+            return optionLabel(value);
+        }
+        for (const auto& option : *options) {
+            if (option.value == value) {
+                return Rml::String{option.label};
+            }
+        }
+        return Rml::String{"Unknown"};
+    };
     auto& button = leftPane.add_select_button({
         .key = std::move(props.key),
         .getValue =
-            [&var, options, valueOverride = std::move(props.valueOverride)] {
+            [&var, label, valueOverride = std::move(props.valueOverride)] {
                 if (valueOverride) {
                     if (Rml::String value = valueOverride(); !value.empty()) {
                         return value;
                     }
                 }
-                for (const auto& option : *options) {
-                    if (var.getValue() == option.value) {
-                        return Rml::String{option.label};
-                    }
-                }
-                return Rml::String{"Unknown"};
+                return label(var.getValue());
             },
         .isDisabled = detail::unless_locked(locked, std::move(props.isDisabled)),
         .isModified = std::move(isModified),
         .isLocked = locked,
     });
     leftPane.register_control(button, rightPane,
-        [&var, options, helpText = std::move(props.helpText), onChange = std::move(props.onChange),
+        [&var, options, label, helpText = std::move(props.helpText),
+            onChange = std::move(props.onChange),
             unavailableReason = std::move(props.unavailableReason),
             optionUnavailableReason = std::move(props.optionUnavailableReason),
             helpSuffix = std::move(props.helpSuffix)](Pane& pane) {
@@ -133,7 +141,7 @@ SelectButton& config_enum_select(
             }
             for (const auto& option : *options) {
                 const E value = option.value;
-                Rml::String text = option.label;
+                Rml::String text = label(value);
                 if (optionUnavailableReason) {
                     if (const Rml::String reason = optionUnavailableReason(value); !reason.empty())
                     {

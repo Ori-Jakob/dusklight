@@ -43,7 +43,9 @@ constexpr size_t kMaxLoggedClampKeys = 12;
     X(GraphicsGodRays, GodRays)                                                                    \
     X(GraphicsTerrainDetail, TerrainDetail)                                                        \
     X(GraphicsGrassShadows, GrassShadows)                                                          \
-    X(GraphicsStaticWorld, StaticWorld)
+    X(GraphicsStaticWorld, StaticWorld)                                                            \
+    X(GraphicsUpscaler, Upscaler)                                                                  \
+    X(GraphicsUpscalerQuality, UpscalerQuality)
 
 #define DUSK_MIRROR_TYPE(DuskEnum, AuroraEnum)                                                     \
     static_assert(std::is_same_v<std::underlying_type_t<DuskEnum>, u8>);                           \
@@ -101,6 +103,16 @@ DUSK_MIRROR(GraphicsGrassShadows, ar::GrassShadows, Full);
 DUSK_MIRROR(GraphicsStaticWorld, ar::StaticWorld, Off);
 DUSK_MIRROR(GraphicsStaticWorld, ar::StaticWorld, Validate);
 DUSK_MIRROR(GraphicsStaticWorld, ar::StaticWorld, On);
+DUSK_MIRROR(GraphicsUpscaler, ar::Upscaler, Off);
+DUSK_MIRROR(GraphicsUpscaler, ar::Upscaler, Fsr);
+DUSK_MIRROR(GraphicsUpscaler, ar::Upscaler, Dlss);
+DUSK_MIRROR(GraphicsUpscaler, ar::Upscaler, Xess);
+DUSK_MIRROR(GraphicsUpscaler, ar::Upscaler, Auto);
+DUSK_MIRROR(GraphicsUpscalerQuality, ar::UpscalerQuality, NativeAa);
+DUSK_MIRROR(GraphicsUpscalerQuality, ar::UpscalerQuality, Quality);
+DUSK_MIRROR(GraphicsUpscalerQuality, ar::UpscalerQuality, Balanced);
+DUSK_MIRROR(GraphicsUpscalerQuality, ar::UpscalerQuality, Performance);
+DUSK_MIRROR(GraphicsUpscalerQuality, ar::UpscalerQuality, UltraPerformance);
 
 #undef DUSK_MIRROR
 
@@ -134,6 +146,7 @@ constexpr std::array kFeatures{
     ar::Feature::TextureMaterials,
     ar::Feature::StochasticTiling,
     ar::Feature::LegacyMatMaps,
+    ar::Feature::Upscaler,
 };
 static_assert([] {
     for (size_t i = 0; i < kFeatures.size(); ++i) {
@@ -147,8 +160,8 @@ static_assert([] {
 #define DUSK_COUNT_FIELD(member, field) +1
 constexpr size_t kFieldCount = 1 DUSK_GRAPHICS_FIELDS(DUSK_COUNT_FIELD);
 #undef DUSK_COUNT_FIELD
-// aurora's Settings has 63 members counting preset, and each needs exactly one key
-constexpr size_t kAuroraSettingsMembers = 63;
+// aurora's Settings has 65 members counting preset, and each needs exactly one key
+constexpr size_t kAuroraSettingsMembers = 65;
 
 uint64_t s_generation = 0;
 uint64_t s_pushedGeneration = 0;

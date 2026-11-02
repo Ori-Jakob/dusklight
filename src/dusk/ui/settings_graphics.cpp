@@ -2,6 +2,7 @@
 
 #include "bool_button.hpp"
 #include "graphics_tuner.hpp"
+#include "modal.hpp"
 #include "pane.hpp"
 #include "settings_controls.hpp"
 #include "ui.hpp"
@@ -69,7 +70,7 @@ constexpr std::array kSectionTitles{
 static_assert(kSectionTitles.size() == static_cast<size_t>(GraphicsSection::Advanced) + 1);
 
 constexpr std::array<size_t, kSectionTitles.size()> kSectionRowCounts{
-    3, 7, 4, 5, 3, 2, 3, 6, 11, 10, 5, 2, 3, 6, 4};
+    3, 7, 4, 5, 3, 2, 3, 6, 11, 10, 5, 4, 3, 6, 4};
 
 constexpr std::array kMovedKeys{
     std::string_view{"game.enableTextureReplacements"},
@@ -172,6 +173,22 @@ constexpr std::array<EnumOption<GraphicsStaticWorld>, 3> kStaticWorldOptions{{
     {GraphicsStaticWorld::On, "On"},
 }};
 
+constexpr std::array<EnumOption<GraphicsUpscaler>, 5> kUpscalerOptions{{
+    {GraphicsUpscaler::Off, "Off"},
+    {GraphicsUpscaler::Auto, "Auto"},
+    {GraphicsUpscaler::Fsr, "FSR"},
+    {GraphicsUpscaler::Dlss, "DLSS"},
+    {GraphicsUpscaler::Xess, "XeSS-SR"},
+}};
+
+constexpr std::array<EnumOption<GraphicsUpscalerQuality>, 5> kUpscalerQualityOptions{{
+    {GraphicsUpscalerQuality::NativeAa, "Native AA"},
+    {GraphicsUpscalerQuality::Quality, "Quality"},
+    {GraphicsUpscalerQuality::Balanced, "Balanced"},
+    {GraphicsUpscalerQuality::Performance, "Performance"},
+    {GraphicsUpscalerQuality::UltraPerformance, "Ultra Performance"},
+}};
+
 struct RowContext {
     Window& window;
     Pane& left;
@@ -268,11 +285,23 @@ struct RowState {
         return s.locked ? s.reason : Rml::String{};
     }
 
-    Rml::String value_label() { return status().valueLabel; }
-
-    Rml::String help_suffix() {
+    // A note only fills the value while the row has nothing of its own to say
+    Rml::String value_label(Rml::String (*note)() = nullptr) {
         const RowStatus& s = status();
-        return s.locked ? Rml::String{} : s.reason;
+        if (!s.valueLabel.empty() || note == nullptr) {
+            return s.valueLabel;
+        }
+        return note();
+    }
+
+    Rml::String help_suffix(Rml::String (*note)() = nullptr) {
+        const RowStatus& s = status();
+        Rml::String suffix = s.locked ? Rml::String{} : s.reason;
+        const Rml::String extra = note != nullptr ? note() : Rml::String{};
+        if (extra.empty()) {
+            return suffix;
+        }
+        return suffix.empty() ? extra : suffix + "<br/><br/>" + extra;
     }
 };
 
@@ -281,6 +310,7 @@ struct BoolRowProps {
     RowGate gate;
     bool (*clamped)();
     std::function<bool()> isDisabled;
+    Rml::String (*valueNote)() = nullptr;
 };
 
 void bool_row(
@@ -297,7 +327,7 @@ void bool_row(
             .helpText = props.help,
             .isDisabled = std::move(props.isDisabled),
             .unavailableReason = [state] { return state->unavailable_reason(); },
-            .valueOverride = [state] { return state->value_label(); },
+            .valueOverride = [state, note = props.valueNote] { return state->value_label(note); },
             .isModified = [&var] { return var.getValue() != render::reference_value(var); },
             .helpSuffix = [state] { return state->help_suffix(); },
         });
@@ -311,6 +341,10 @@ struct EnumRowProps {
     E (*clamped)();
     std::function<bool()> isDisabled;
     uint8_t (*option)(E) = &enum_option<E>;
+    Rml::String (*label)(E) = nullptr;
+    void (*onChange)(E) = nullptr;
+    Rml::String (*valueNote)() = nullptr;
+    Rml::String (*helpNote)() = nullptr;
 };
 
 template <typename E>
@@ -318,13 +352,16 @@ void enum_row(RowContext& ctx, const GraphicsRowInfo& info, ConfigVar<E>& var,
     EnumRowProps<std::type_identity_t<E>> props) {
     const auto options = props.options;
     const auto optionOf = props.option;
+    const auto labelOf = props.label;
     const RowGate gate = props.gate;
+    const auto text = [options, labelOf](E value) {
+        return labelOf != nullptr ? labelOf(value) : option_label(options, value);
+    };
     auto state = std::make_shared<RowState>(RowState{
         .gate = gate,
         .option = [&var, optionOf] { return optionOf(var.getValue()); },
-        .requested = [&var, options] { return option_label(options, var.getValue()); },
-        .clamped = [options, clampedValue =
-                                 props.clamped] { return option_label(options, clampedValue()); },
+        .requested = [&var, text] { return text(var.getValue()); },
+        .clamped = [text, clampedValue = props.clamped] { return text(clampedValue()); },
         .active = [&var, optionOf] { return optionOf(var.getValue()) != 0; },
     });
     config_enum_select(ctx.left, ctx.right, var,
@@ -332,6 +369,7 @@ void enum_row(RowContext& ctx, const GraphicsRowInfo& info, ConfigVar<E>& var,
             .key = info.label,
             .helpText = props.help,
             .options = std::vector<EnumOption<E>>(options.begin(), options.end()),
+            .onChange = props.onChange,
             .isDisabled = std::move(props.isDisabled),
             .isModified = [&var] { return var.getValue() != render::reference_value(var); },
             .unavailableReason = [state] { return state->unavailable_reason(); },
@@ -343,8 +381,9 @@ void enum_row(RowContext& ctx, const GraphicsRowInfo& info, ConfigVar<E>& var,
                     }
                     return Rml::String{render::reason_option_label(support.reason)};
                 },
-            .valueOverride = [state] { return state->value_label(); },
-            .helpSuffix = [state] { return state->help_suffix(); },
+            .valueOverride = [state, note = props.valueNote] { return state->value_label(note); },
+            .helpSuffix = [state, note = props.helpNote] { return state->help_suffix(note); },
+            .optionLabel = labelOf,
         });
 }
 
@@ -481,10 +520,81 @@ bool open_renderer_window() {
     return true;
 }
 
+bool upscaler_off() {
+    return graphics().upscaler.getValue() == GraphicsUpscaler::Off;
+}
+
+Rml::String taa_replaced_note() {
+    const ar::UpscaleStatus status = ar::upscale_status();
+    if (status.active == ar::Upscaler::Off || status.displayName.empty()) {
+        return {};
+    }
+    return fmt::format("Replaced by {}", status.displayName);
+}
+
+Rml::String xess_path_note() {
+    const ar::UpscaleStatus status = ar::upscale_status();
+    if (status.active != ar::Upscaler::Xess || status.path.empty()) {
+        return {};
+    }
+    return fmt::format("XeSS-SR is running on its {} path.", status.path);
+}
+
+Rml::String upscaler_sizes_note() {
+    const ar::UpscaleStatus status = ar::upscale_status();
+    if (upscaler_off() || status.active == ar::Upscaler::Off) {
+        return {};
+    }
+    return fmt::format("scene {}\xC3\x97{} \xE2\x86\x92 output {}\xC3\x97{}", status.sceneSize[0],
+        status.sceneSize[1], status.outputSize[0], status.outputSize[1]);
+}
+
+// The vendor that is actually running names the qualities, so Auto on DLSS shows DLAA
+Rml::String upscaler_quality_text(GraphicsUpscalerQuality quality) {
+    return Rml::String{render::upscaler_quality_label(clamped().upscaler, quality)};
+}
+
+void offer_native_reenable(GraphicsUpscaler value) {
+    const GraphicsUpscaler vendor =
+        value == GraphicsUpscaler::Auto ? GraphicsUpscaler::Dlss : value;
+    const ar::FeatureSupport support =
+        ar::feature_support(ar::Feature::Upscaler, enum_option(vendor));
+    if (support.reason != ar::Reason::NativeDisabledAfterCrash) {
+        return;
+    }
+    const auto dismiss = [](Modal& modal) { modal.pop(); };
+    push_document(std::make_unique<Modal>(Modal::Props{
+        .title = "Upscaler Disabled",
+        .bodyText = Rml::String{render::upscaler_reason_help(enum_option(vendor), support.reason)},
+        .actions =
+            {
+                ModalAction{
+                    .label = "Not Now",
+                    .onPressed = dismiss,
+                },
+                ModalAction{
+                    .label = "Re-enable",
+                    .onPressed =
+                        [](Modal& modal) {
+                            ar::reenable_native_upscalers();
+                            modal.pop();
+                        },
+                },
+            },
+        .onDismiss = dismiss,
+        .icon = "warning",
+    }));
+}
+
 using S = GraphicsSection;
 using F = ar::Feature;
 
-constexpr std::array<GraphicsRow, 74> kRows{{
+constexpr RowGate kUpscalerGate{&render::feature_gate<F::Upscaler>,
+    &render::feature_ready_gate<F::Upscaler>, &render::upscaler_reason_help};
+constexpr RowGate kUpscalerQualityGate{
+    &render::upscaler_quality_gate, nullptr, &render::upscaler_reason_help};
+
+constexpr std::array<GraphicsRow, 76> kRows{{
     {{S::Preset, "Graphics Preset", "graphics.preset", "M2", false},
         [](RowContext& ctx, const GraphicsRowInfo& info) { preset_row(ctx, info); }},
     {{S::Preset, "Recommended", nullptr, "M2", false},
@@ -1079,16 +1189,46 @@ constexpr std::array<GraphicsRow, 74> kRows{{
                             "Its cost grows with Internal Resolution.",
                     .gate = toggle_gate<F::Taa>(),
                     .clamped = [] { return clamped().taa; },
+                    .valueNote = taa_replaced_note,
                 });
         }},
-    {{S::AntiAliasing, "TAA Sharpness", "graphics.taaSharpness", "M7", false},
+    {{S::AntiAliasing, "Sharpness", "graphics.taaSharpness", "M7", false},
         [](RowContext& ctx, const GraphicsRowInfo& info) {
             tuner_row(ctx, info,
                 {
                     .option = GraphicsOption::TaaSharpness,
-                    .help = "Sharpen the image after TAA to offset its softening. Needs TAA.",
+                    .help = "Sharpen the resolved image to offset temporal softening. Applies to "
+                            "TAA and every upscaler.",
                     .gate = param_gate<F::Taa>(),
-                    .isDisabled = [] { return !graphics().taa.getValue(); },
+                    .isDisabled = [] { return !graphics().taa.getValue() && upscaler_off(); },
+                });
+        }},
+    {{S::AntiAliasing, "Upscaler", "graphics.upscaler", "M7U", false},
+        [](RowContext& ctx, const GraphicsRowInfo& info) {
+            enum_row(ctx, info, graphics().upscaler,
+                {
+                    .help = "Render the 3D scene at a lower resolution and rebuild it at full "
+                            "resolution with temporal upscaling. The HUD, menus and the game's "
+                            "post effects stay at full resolution. Replaces TAA while on.",
+                    .options = kUpscalerOptions,
+                    .gate = kUpscalerGate,
+                    .clamped = [] { return render::from_aurora(clamped().upscaler); },
+                    .onChange = offer_native_reenable,
+                    .helpNote = xess_path_note,
+                });
+        }},
+    {{S::AntiAliasing, "Upscaler Quality", "graphics.upscalerQuality", "M7U", false},
+        [](RowContext& ctx, const GraphicsRowInfo& info) {
+            enum_row(ctx, info, graphics().upscalerQuality,
+                {
+                    .help = "How far below the output resolution the scene renders. Lower quality "
+                            "runs faster and looks softer.",
+                    .options = kUpscalerQualityOptions,
+                    .gate = kUpscalerQualityGate,
+                    .clamped = [] { return render::from_aurora(clamped().upscalerQuality); },
+                    .isDisabled = upscaler_off,
+                    .label = upscaler_quality_text,
+                    .valueNote = upscaler_sizes_note,
                 });
         }},
     {{S::PostProcessing, "Bloom", "game.bloomMode", "moved", false},
@@ -1231,8 +1371,8 @@ bool is_graphics_key(const char* key) {
 
 std::string test_rows_count() {
     std::string problems;
-    if (kRowInfos.size() != 74) {
-        append_item(problems, fmt::format("{} rows, expected 74", kRowInfos.size()));
+    if (kRowInfos.size() != 76) {
+        append_item(problems, fmt::format("{} rows, expected 76", kRowInfos.size()));
     }
     std::array<size_t, kSectionTitles.size()> counts{};
     size_t previous = 0;
@@ -1263,8 +1403,8 @@ std::string test_rows_cover_every_key() {
     DUSK_GRAPHICS_FIELDS(DUSK_EXPECTED_KEY)
 #undef DUSK_EXPECTED_KEY
     std::string problems;
-    if (expected.size() != 63) {
-        append_item(problems, fmt::format("{} graphics keys, expected 63", expected.size()));
+    if (expected.size() != 65) {
+        append_item(problems, fmt::format("{} graphics keys, expected 65", expected.size()));
     }
     for (const auto key : expected) {
         const auto count = std::ranges::count_if(kRowInfos,
