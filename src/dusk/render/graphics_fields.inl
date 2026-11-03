@@ -65,3 +65,13 @@
     X(meshReplacement, meshReplacement)                                                            \
     X(staticWorld, staticWorld)                                                                    \
     X(debugView, debugView)
+
+// dusk-only keys: the light builder applies them to the LIGHTS hint and aurora never sees them
+#define DUSK_LIGHT_TUNING_FIELDS(X)                                                                \
+    X(lightSunMoon)                                                                                \
+    X(lightKeyRoom)                                                                                \
+    X(lightRoom)                                                                                   \
+    X(lightPoint)                                                                                  \
+    X(lightLantern)                                                                                \
+    X(lightEffect)                                                                                 \
+    X(lightFill)

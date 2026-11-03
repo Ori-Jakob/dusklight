@@ -21,6 +21,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -493,6 +494,97 @@ void water_refraction_row(RowContext& ctx, const GraphicsRowInfo& info) {
     });
 }
 
+struct LightTuningEntry {
+    GraphicsOption option;
+    const char* label;
+    const char* help;
+};
+
+constexpr std::array<LightTuningEntry, 7> kLightTuningEntries{{
+    {GraphicsOption::LightSunMoon, "Sun & Moon", "Sunlight by day and moonlight by night."},
+    {GraphicsOption::LightKeyRoom, "Interior Key Light",
+        "The main light indoors, where there is no sun or moon."},
+    {GraphicsOption::LightRoom, "Room Lights", "The fixed lights a level places, such as lamps."},
+    {GraphicsOption::LightPoint, "Torches & Point Lights",
+        "Torches, fires and other small glowing objects."},
+    {GraphicsOption::LightLantern, "Lantern", "Link's lantern and other lights that follow him."},
+    {GraphicsOption::LightEffect, "Effect & Event Lights",
+        "Brief lights from effects and lightning, and the spotlights of some boss fights."},
+    {GraphicsOption::LightFill, "Camera Fill",
+        "The soft light the game adds from the camera onto Link and other characters. 0% turns "
+        "it off."},
+}};
+
+const Rml::String kLightTuningHelpText =
+    "Adjust the strength of each kind of light. Used by PBR Lighting. Turning a light up makes it "
+    "brighter but it reaches no further. With Exposure on Match Original the overall brightness "
+    "still follows the original game, so these mostly change the balance between lights.";
+
+bool light_tuning_custom() {
+    bool custom = false;
+#define DUSK_LIGHT_CUSTOM(member)                                                                  \
+    custom = custom || graphics().member.getValue() != graphics().member.getDefaultValue();
+    DUSK_LIGHT_TUNING_FIELDS(DUSK_LIGHT_CUSTOM)
+#undef DUSK_LIGHT_CUSTOM
+    return custom;
+}
+
+void reset_light_tuning() {
+#define DUSK_LIGHT_RESET(member) graphics().member.setValue(graphics().member.getDefaultValue());
+    DUSK_LIGHT_TUNING_FIELDS(DUSK_LIGHT_RESET)
+#undef DUSK_LIGHT_RESET
+}
+
+void light_tuning_row(RowContext& ctx, const GraphicsRowInfo& info) {
+    auto state = std::make_shared<RowState>(RowState{.gate = param_gate<ar::Feature::Pbr>()});
+    std::function<bool()> locked = [state] { return !state->unavailable_reason().empty(); };
+    auto& button = ctx.left.add_select_button({
+        .key = info.label,
+        .getValue =
+            [state] {
+                if (Rml::String label = state->value_label(); !label.empty()) {
+                    return label;
+                }
+                return Rml::String{light_tuning_custom() ? "Custom" : "Default"};
+            },
+        .isDisabled = detail::unless_locked(locked, advanced_off),
+        .isModified = light_tuning_custom,
+        .isLocked = locked,
+    });
+    ctx.left.register_control(button, ctx.right, [state, window = &ctx.window](Pane& pane) {
+        pane.clear();
+        if (const Rml::String reason = state->unavailable_reason(); !reason.empty()) {
+            pane.add_rml(compose_help(kLightTuningHelpText, reason));
+            return;
+        }
+        pane.add_rml(kLightTuningHelpText);
+        for (const LightTuningEntry& entry : kLightTuningEntries) {
+            const GraphicsSetting& setting = GraphicsSetting::of(entry.option);
+            pane.add_select_button({
+                                       .key = entry.label,
+                                       .getValue = [&setting] { return setting.text(); },
+                                       .isModified = [&setting] { return setting.isModified(); },
+                                   })
+                .on_pressed([window, &entry] {
+                    window->push(std::make_unique<GraphicsTuner>(GraphicsTunerProps{
+                        .option = entry.option,
+                        .title = entry.label,
+                        .helpText = entry.help,
+                    }));
+                });
+        }
+        pane.add_button({
+                            .text = "Reset Light Tuning",
+                            .isDisabled = [] { return !light_tuning_custom(); },
+                        })
+            .on_pressed([] {
+                mDoAud_seStartMenu(kSoundItemChange);
+                reset_light_tuning();
+                config::save();
+            });
+    });
+}
+
 bool shadow_resolution_unused() {
     // Only Remove stops the game drawing its shadow maps; Auto still draws them outside coverage
     return ar::feature_active(ar::Feature::GameShadowSuppression) &&
@@ -662,15 +754,16 @@ constexpr std::array<GraphicsRow, 78> kRows{{
                     .isDisabled = [] { return !graphics().textureMaterials.getValue(); },
                 });
         }},
-    {{S::Materials, "Original .mat Maps", "graphics.legacyMatMaps", "M9", false},
+    {{S::Materials, "Original .mat Maps", "graphics.legacyMatMaps", "M10", false},
         [](RowContext& ctx, const GraphicsRowInfo& info) {
             bool_row(ctx, info, graphics().legacyMatMaps,
                 {
                     .help = "Use the normal maps from older .mat texture packs. Needs Texture "
-                            "Materials.",
+                            "Materials and PBR Lighting.",
                     .gate = toggle_gate<F::LegacyMatMaps>(),
                     .clamped = [] { return clamped().textureMaterials && clamped().legacyMatMaps; },
-                    .isDisabled = [] { return !graphics().textureMaterials.getValue(); },
+                    .isDisabled =
+                        [] { return !graphics().textureMaterials.getValue() || !clamped().pbr; },
                 });
         }},
     {{S::Materials, "Generate Missing Mipmaps", "graphics.generateMissingMips", "M6", true},
@@ -684,21 +777,25 @@ constexpr std::array<GraphicsRow, 78> kRows{{
                     .clamped = [] { return clamped().generateMissingMips; },
                 });
         }},
-    {{S::Materials, "PBR Lighting", "graphics.pbr", "M9", true},
+    {{S::Materials, "PBR Lighting", "graphics.pbr", "M10", true},
         [](RowContext& ctx, const GraphicsRowInfo& info) {
             bool_row(ctx, info, graphics().pbr,
                 {
-                    .help = "Light the scene with physically based materials and lights.",
+                    .help = "Light the scene with physically based materials and lights. Uses "
+                            "more GPU time and video memory, more so at high Internal Resolution. "
+                            "Until real-time shadows arrive, many of the game's own shadows are "
+                            "not drawn on PBR-lit surfaces.",
                     .gate = toggle_gate<F::Pbr>(),
                     .clamped = [] { return clamped().pbr; },
                 });
         }},
-    {{S::Materials, "PBR Blend", "graphics.legacyBlend", "M9", false},
+    {{S::Materials, "PBR Blend", "graphics.legacyBlend", "M10", false},
         [](RowContext& ctx, const GraphicsRowInfo& info) {
             tuner_row(ctx, info,
                 {
                     .option = GraphicsOption::PbrBlend,
-                    .help = "Blend between PBR lighting and the original look.",
+                    .help = "How much of the PBR lighting to show. 100% is full PBR; 0% shows the "
+                            "original look but keeps most of the cost.",
                     .gate = param_gate<F::Pbr>(),
                     .isDisabled = [] { return !graphics().pbr.getValue(); },
                 });
@@ -712,6 +809,7 @@ constexpr std::array<GraphicsRow, 78> kRows{{
                     .options = kExposureOptions,
                     .gate = param_gate<F::Pbr>(),
                     .clamped = [] { return render::from_aurora(clamped().exposure); },
+                    .isDisabled = [] { return !clamped().pbr; },
                 });
         }},
     {{S::Lighting, "Exposure Bias", "graphics.exposureBias", "M10", false},
@@ -723,7 +821,9 @@ constexpr std::array<GraphicsRow, 78> kRows{{
                     .gate = param_gate<F::Pbr>(),
                     .isDisabled =
                         [] {
-                            return graphics().exposure.getValue() == GraphicsExposure::MatchLegacy;
+                            return graphics().exposure.getValue() ==
+                                       GraphicsExposure::MatchLegacy ||
+                                   !clamped().pbr;
                         },
                 });
         }},
@@ -735,18 +835,11 @@ constexpr std::array<GraphicsRow, 78> kRows{{
                     .options = kTonemapOptions,
                     .gate = param_gate<F::Pbr>(),
                     .clamped = [] { return render::from_aurora(clamped().tonemap); },
+                    .isDisabled = [] { return !clamped().pbr; },
                 });
         }},
     {{S::Lighting, "Light Tuning", nullptr, "M10", false},
-        [](RowContext& ctx, const GraphicsRowInfo& info) {
-            action_row(ctx, info,
-                {
-                    .help = "Adjust the strength of each kind of light.",
-                    .onPressed = [] { return false; },
-                    .gate = param_gate<F::Pbr>(),
-                    .isDisabled = advanced_off,
-                });
-        }},
+        [](RowContext& ctx, const GraphicsRowInfo& info) { light_tuning_row(ctx, info); }},
     {{S::Shadows, "Shadow Quality", "graphics.shadowQuality", "M13, M14", true},
         [](RowContext& ctx, const GraphicsRowInfo& info) {
             enum_row(ctx, info, graphics().shadowQuality,
@@ -1508,6 +1601,62 @@ std::string test_rows_preset_flags() {
     return problems;
 }
 
+std::string test_rows_light_tuning() {
+    std::string problems;
+    const auto row = std::ranges::find_if(kRowInfos,
+        [](const GraphicsRowInfo& info) { return std::string_view{info.label} == "Light Tuning"; });
+    if (row == kRowInfos.end() || row->section != GraphicsSection::Lighting ||
+        row->key != nullptr || std::string_view{row->unlockedIn} != "M10")
+    {
+        append_item(problems, "the Light Tuning row is missing or moved");
+    }
+    std::vector<std::string_view> names;
+    for (const LightTuningEntry& entry : kLightTuningEntries) {
+        const GraphicsSetting& setting = GraphicsSetting::of(entry.option);
+        names.emplace_back(setting.cvarName());
+        if (setting.min != 0 || setting.max != 200 || setting.step != 5 ||
+            setting.defaultValue != 100 || setting.referenceValue() != 100)
+        {
+            append_item(problems, fmt::format("{} range", entry.label));
+        }
+        const bool fill = entry.option == GraphicsOption::LightFill;
+        if (setting.format_value(0) != (fill ? "Off" : "0%") || setting.format_value(150) != "150%")
+        {
+            append_item(problems, fmt::format("{} labels", entry.label));
+        }
+    }
+    std::vector<std::string_view> expected;
+#define DUSK_LIGHT_KEY(member) expected.emplace_back("graphics." #member);
+    DUSK_LIGHT_TUNING_FIELDS(DUSK_LIGHT_KEY)
+#undef DUSK_LIGHT_KEY
+    if (names != expected) {
+        append_item(problems, "the entries do not follow the light keys");
+    }
+    return problems;
+}
+
+std::string test_rows_pbr_blend_share() {
+    std::string problems;
+    const auto bits = [](float value) { return std::bit_cast<uint32_t>(value); };
+    if (bits(PbrShareMap::from_tuner(0)) != bits(1.0f) ||
+        bits(PbrShareMap::from_tuner(100)) != bits(0.0f) || PbrShareMap::to_tuner(1.0f) != 0 ||
+        PbrShareMap::to_tuner(0.0f) != 100)
+    {
+        append_item(problems, "0% and 100% do not store 1 and 0 exactly");
+    }
+    for (int share = 0; share <= 100; share += 5) {
+        if (PbrShareMap::to_tuner(PbrShareMap::from_tuner(share)) != share) {
+            append_item(problems, fmt::format("{}% does not round trip", share));
+        }
+    }
+    const GraphicsSetting& setting = GraphicsSetting::of(GraphicsOption::PbrBlend);
+    if (setting.min != 0 || setting.max != 100 || setting.step != 5 || setting.defaultValue != 100)
+    {
+        append_item(problems, "PBR Blend is not 0-100% in 5% steps with 100% by default");
+    }
+    return problems;
+}
+
 }  // namespace
 
 void build_graphics_tab(Window& window, Pane& leftPane, Pane& rightPane, bool prelaunch) {
@@ -1539,6 +1688,8 @@ void graphics_tab_self_test(render::SelfTestReport& report) {
     check("rows.moved", test_rows_moved());
     check("rows.labels_unique", test_rows_labels_unique());
     check("rows.preset_flags", test_rows_preset_flags());
+    check("rows.light_tuning", test_rows_light_tuning());
+    check("rows.pbr_blend_share", test_rows_pbr_blend_share());
 }
 
 }  // namespace dusk::ui

@@ -245,6 +245,13 @@ UserSettings g_userSettings = {
         .meshReplacement {"graphics.meshReplacement", false},
         .staticWorld {"graphics.staticWorld", GraphicsStaticWorld::Off},
         .debugView {"graphics.debugView", 0},
+        .lightSunMoon {"graphics.lightSunMoon", 1.0f},
+        .lightKeyRoom {"graphics.lightKeyRoom", 1.0f},
+        .lightRoom {"graphics.lightRoom", 1.0f},
+        .lightPoint {"graphics.lightPoint", 1.0f},
+        .lightLantern {"graphics.lightLantern", 1.0f},
+        .lightEffect {"graphics.lightEffect", 1.0f},
+        .lightFill {"graphics.lightFill", 1.0f},
     },
 
     .backend = {
@@ -544,6 +551,14 @@ void registerSettings() {
     RegisterGraphics(g_userSettings.graphics.meshReplacement);
     RegisterGraphics(g_userSettings.graphics.staticWorld);
     RegisterGraphics(g_userSettings.graphics.debugView);
+    // The light builder reads these every frame, so aurora needs no push
+    Register(g_userSettings.graphics.lightSunMoon);
+    Register(g_userSettings.graphics.lightKeyRoom);
+    Register(g_userSettings.graphics.lightRoom);
+    Register(g_userSettings.graphics.lightPoint);
+    Register(g_userSettings.graphics.lightLantern);
+    Register(g_userSettings.graphics.lightEffect);
+    Register(g_userSettings.graphics.lightFill);
 
     Register(g_userSettings.backend.isoPath);
     Register(g_userSettings.backend.isoVerification);

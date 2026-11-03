@@ -3,8 +3,10 @@
 #include "dusk/game_clock.h"
 #include "dusk/interp/frame_interpolation.h"
 #include "dusk/render/fog_probe.hpp"
+#include "dusk/render/graphics_fields.inl"
 #include "dusk/render/hints.hpp"
 #include "dusk/render/render_bridge.hpp"
+#include "dusk/settings.h"
 
 #include "SSystem/SComponent/c_counter.h"
 #include "SSystem/SComponent/c_math.h"
@@ -64,6 +66,60 @@ enum class LightKind : u8 {
 constexpr size_t kKindCount = 14;
 static_assert(static_cast<size_t>(LightKind::Room) + 1 == kKindCount);
 
+// The twilight and water camera lights are part of the realm's look and stay as the game sets them
+ConfigVar<float>* tuning_member(LightKind kind) noexcept {
+    auto& graphics = getSettings().graphics;
+    switch (kind) {
+    case LightKind::Sun:
+    case LightKind::Moon:
+        return &graphics.lightSunMoon;
+    case LightKind::KeyRoom:
+        return &graphics.lightKeyRoom;
+    case LightKind::Room:
+        return &graphics.lightRoom;
+    case LightKind::Point:
+        return &graphics.lightPoint;
+    case LightKind::PlayerLight:
+        return &graphics.lightLantern;
+    case LightKind::Effect:
+    case LightKind::ThunderFlash:
+    case LightKind::BossSpot:
+        return &graphics.lightEffect;
+    case LightKind::CameraFill:
+        return &graphics.lightFill;
+    case LightKind::None:
+    case LightKind::Reserved:
+    case LightKind::TwilightCamera:
+    case LightKind::WaterCamera:
+        break;
+    }
+    return nullptr;
+}
+
+struct LightTuning {
+    std::array<f32, kKindCount> gain;
+};
+
+constexpr LightTuning kUntuned = [] {
+    LightTuning tuning{};
+    tuning.gain.fill(1.0f);
+    return tuning;
+}();
+
+f32 tuning_gain(f32 value) noexcept {
+    return std::isfinite(value) ? std::clamp(value, 0.0f, 2.0f) : 1.0f;
+}
+
+LightTuning live_tuning() {
+    LightTuning tuning = kUntuned;
+    for (size_t i = 0; i < kKindCount; ++i) {
+        if (const ConfigVar<float>* var = tuning_member(static_cast<LightKind>(i))) {
+            tuning.gain[i] = tuning_gain(var->getValue());
+        }
+    }
+    return tuning;
+}
+
 enum class SlotState : u8 {
     Empty,
     Emitted,
@@ -74,9 +130,15 @@ enum class SlotState : u8 {
     Key,
     Unused,
     Dropped,
+    Muted,
 };
-constexpr size_t kSlotStateCount = 9;
-static_assert(static_cast<size_t>(SlotState::Dropped) + 1 == kSlotStateCount);
+constexpr size_t kSlotStateCount = 10;
+static_assert(static_cast<size_t>(SlotState::Muted) + 1 == kSlotStateCount);
+
+// A muted key still holds its place, or add_room would bring LGT0 back as a point light
+constexpr bool holds_key(SlotState s) noexcept {
+    return s == SlotState::Emitted || s == SlotState::Muted;
+}
 
 enum class SlotTableId : u8 {
     Point,
@@ -112,7 +174,7 @@ constexpr f32 kNoViewNear = 1.0f;
 constexpr f32 kNoViewFar = 160000.0f;
 // The game's far plane when it has no view, so an unattenuated light reaches all it can see
 constexpr f32 kMaxLightRadius = kNoViewFar;
-// The GX radius of a point light is about 5x the distance actors are lit to; M10 tunes this
+// Stays the GX cutoff: the evaluator rebuilds the game's falloff from it and fades to 0 there
 constexpr f32 kPointRadiusScale = 1.0f;
 constexpr u32 kCameraFillMask = AURORA_CAT_DYNAMIC | AURORA_CAT_PLAYER;
 constexpr f32 kSunRise = 67.5f;
@@ -198,7 +260,7 @@ std::string_view kind_name(LightKind kind) noexcept {
 
 std::string_view state_name(SlotState state) noexcept {
     constexpr std::array<std::string_view, kSlotStateCount> kNames{"Empty", "Emitted", "Disabled",
-        "Duplicate", "Queued", "Replaced", "Key", "Unused", "Dropped"};
+        "Duplicate", "Queued", "Replaced", "Key", "Unused", "Dropped", "Muted"};
     const auto index = static_cast<size_t>(state);
     return index < kNames.size() ? kNames[index] : "?";
 }
@@ -282,6 +344,10 @@ double angle_degrees(const Vec& a, const Vec& b) noexcept {
 
 bool within(const Vec& a, const Vec& b, f32 tolerance) noexcept {
     return length(sub(a, b)) <= tolerance;
+}
+
+bool same_bits(f32 a, f32 b) noexcept {
+    return std::bit_cast<u32>(a) == std::bit_cast<u32>(b);
 }
 
 void put(f32 (&dst)[3], const Vec& v) noexcept {
@@ -718,6 +784,8 @@ struct SceneLights {
     LightList list;
     SlotReport slots;
     std::array<std::array<SlotEntry, kRoomLights>, kRoomCount> rooms{};
+    LightTuning tuning = kUntuned;
+    u16 muted = 0;
     LightKind key = LightKind::None;
     int lightRoom = -1;
     StageKey stage;
@@ -733,6 +801,8 @@ struct SceneLights {
         list.dropped = 0;
         slots = {};
         rooms = {};
+        tuning = kUntuned;
+        muted = 0;
         key = LightKind::None;
         lightRoom = -1;
         frame = 0;
@@ -786,11 +856,27 @@ struct BuildContext {
     int lightRoom = -1;
     bool sunMoon = false;
     bool keyRoom = false;
+    const LightTuning* tuning = &kUntuned;
 };
 
 SlotState emit(BuildContext& ctx, AuroraLight light, const LightNote& note, const void* key,
     SlotEntry* entry = nullptr) {
     light.id = ctx.ids.assign(note.kind, note.slot, key);
+    const f32 gain = ctx.tuning->gain[static_cast<size_t>(note.kind)];
+    // A light tuned to 0% is left out like a black one, but keeps its id for when it comes back
+    if (!(gain > 0.0f)) {
+        if (entry != nullptr) {
+            entry->state = SlotState::Muted;
+            entry->id = light.id;
+        }
+        ++ctx.out.muted;
+        return SlotState::Muted;
+    }
+    if (gain != 1.0f) {
+        for (f32& c : light.color) {
+            c *= gain;
+        }
+    }
     const SlotState state = ctx.out.list.add(light, note) ? SlotState::Emitted : SlotState::Dropped;
     if (entry != nullptr) {
         entry->state = state;
@@ -828,7 +914,7 @@ void add_sky_body(
     LightNote note;
     note.kind = kind;
     note.weight = weight;
-    if (emit(ctx, light, note, nullptr) == SlotState::Emitted && key) {
+    if (holds_key(emit(ctx, light, note, nullptr)) && key) {
         ctx.out.key = kind;
     }
 }
@@ -872,7 +958,7 @@ void add_key_room(BuildContext& ctx) {
     note.kind = LightKind::KeyRoom;
     note.slot = static_cast<u16>(ctx.lightRoom);
     note.room = static_cast<s8>(ctx.lightRoom);
-    if (emit(ctx, light, note, nullptr) == SlotState::Emitted) {
+    if (holds_key(emit(ctx, light, note, nullptr))) {
         ctx.out.key = LightKind::KeyRoom;
         ctx.keyRoom = true;
     }
@@ -987,6 +1073,27 @@ bool listed(const LIGHT_INFLUENCE* const* lights, int count, const LIGHT_INFLUEN
     return std::find(lights, lights + count, light) != lights + count;
 }
 
+// Two slots can carry one torch; GX lit each draw from one light, PBR would add both
+bool same_point(const LIGHT_INFLUENCE* const* lights, int count, const LIGHT_INFLUENCE* p) {
+    if (p == nullptr) {
+        return false;
+    }
+    for (int i = 0; i < count; ++i) {
+        const LIGHT_INFLUENCE* q = lights[i];
+        if (q != nullptr && q != p && q->mPow > 0.01f &&
+            same_bits(q->mPosition.x, p->mPosition.x) &&
+            same_bits(q->mPosition.y, p->mPosition.y) &&
+            same_bits(q->mPosition.z, p->mPosition.z) && q->mColor.r == p->mColor.r &&
+            q->mColor.g == p->mColor.g && q->mColor.b == p->mColor.b &&
+            same_bits(q->mPow, p->mPow) && same_bits(q->mFluctuation, p->mFluctuation) &&
+            (q->mIndex < 0) == (p->mIndex < 0))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 // The shared part of the point and effect slots; false leaves the slot's state final
 bool influence_candidate(const LIGHT_INFLUENCE* p, bool duplicate, f32 refScale, f32 radiusScale,
     SlotEntry& entry, AuroraLight& light, LightNote& note) {
@@ -1028,9 +1135,8 @@ void add_point_lights(BuildContext& ctx) {
         SlotEntry& entry = ctx.out.slots.point[i];
         AuroraLight light{};
         LightNote note;
-        if (!influence_candidate(
-                p, listed(lights, i, p), 0.001f, kPointRadiusScale, entry, light, note))
-        {
+        const bool duplicate = listed(lights, i, p) || same_point(lights, i, p);
+        if (!influence_candidate(p, duplicate, 0.001f, kPointRadiusScale, entry, light, note)) {
             continue;
         }
         // A negative index is the priority path, which also carries the 0x8000 bit
@@ -1131,14 +1237,16 @@ void add_room_lights(BuildContext& ctx) {
     }
 }
 
-void build_scene_lights(LightState& state) {
+void build_scene_lights(LightState& state, const LightTuning& tuning = kUntuned) {
     SceneLights& out = state.lights;
     out.reset();
+    out.tuning = tuning;
     out.stage = current_stage_key(state.loads);
     out.frame = aurora::gfx::current_frame();
     state.ids.begin_build(out.stage);
 
     BuildContext ctx{out, state.ids};
+    ctx.tuning = &out.tuning;
     ctx.camera = dComIfGp_getCamera(0);
     ctx.player = dComIfGp_getPlayer(0);
     const int stay = dComIfGp_roomControl_getStayNo();
@@ -1172,7 +1280,12 @@ struct SubmitSeam {
     void (*emit)(const AuroraLight* lights, u16 count);
 };
 
-constexpr SubmitSeam kLiveSeam{&has_main_camera, &build_scene_lights, &GXAuroraSetLights};
+// Only the list sent to aurora is tuned, so the checks still compare the game's own lights
+void build_live_lights(LightState& state) {
+    build_scene_lights(state, live_tuning());
+}
+
+constexpr SubmitSeam kLiveSeam{&has_main_camera, &build_live_lights, &GXAuroraSetLights};
 
 bool submit_through(const SubmitSeam& seam, LightState& state) {
     if (!seam.gate()) {
@@ -1231,7 +1344,7 @@ std::unique_ptr<LightState> make_scratch() {
     return scratch;
 }
 
-std::string light_line(size_t index, const AuroraLight& light, const LightNote& note) {
+std::string light_line(size_t index, const AuroraLight& light, const LightNote& note, f32 gain) {
     constexpr std::array<std::string_view, 3> kTypes{"dir", "point", "spot"};
     std::string line = fmt::format(
         "#{} {} id=0x{:08X} {} col=({:.3f},{:.3f},{:.3f}) pos=({:.1f},{:.1f},{:.1f}) "
@@ -1252,6 +1365,9 @@ std::string light_line(size_t index, const AuroraLight& light, const LightNote& 
     if (light.categoryMask != 0) {
         line += fmt::format(" mask=0x{:X}", light.categoryMask);
     }
+    if (gain != 1.0f) {
+        line += fmt::format(" gain={:g}", gain);
+    }
     return line;
 }
 
@@ -1266,12 +1382,18 @@ void describe_list(std::vector<std::string>& out) {
     }
     const SceneLights& lights = s_live.lights;
     for (size_t i = 0; i < lights.list.count; ++i) {
-        out.push_back(light_line(i, lights.list.lights[i], lights.list.notes[i]));
+        const LightNote& note = lights.list.notes[i];
+        out.push_back(light_line(
+            i, lights.list.lights[i], note, lights.tuning.gain[static_cast<size_t>(note.kind)]));
     }
-    out.push_back(fmt::format(
-        "render.lights: {} lights, dropped {}, key={}, lightRoom={}, stage={}, frame {}",
-        lights.list.count, lights.list.dropped, kind_name(lights.key), lights.lightRoom,
-        stage_text(lights.stage), lights.frame));
+    const SlotReport& slots = lights.slots;
+    const auto duplicates =
+        std::ranges::count(slots.point, SlotState::Duplicate, &SlotEntry::state) +
+        std::ranges::count(slots.effect, SlotState::Duplicate, &SlotEntry::state);
+    out.push_back(fmt::format("render.lights: {} lights, dropped {}, muted {}, duplicates {}, "
+                              "key={}, lightRoom={}, stage={}, frame {}",
+        lights.list.count, lights.list.dropped, lights.muted, duplicates, kind_name(lights.key),
+        lights.lightRoom, stage_text(lights.stage), lights.frame));
 }
 
 struct SlotTable {
@@ -1315,9 +1437,9 @@ void describe_slots(std::vector<std::string>& out) {
         }
         total += table.entries.size();
         out.push_back(fmt::format("{}: emitted {}, empty {}, disabled {}, duplicate {}, queued {}, "
-                                  "replaced {}, key {}, unused {}, dropped {}",
+                                  "replaced {}, key {}, unused {}, dropped {}, muted {}",
             table.name, counts[1], counts[0], counts[2], counts[3], counts[4], counts[5], counts[6],
-            counts[7], counts[8]));
+            counts[7], counts[8], counts[9]));
     }
     for (const SlotTable& table : slot_tables(s_live.lights.slots)) {
         for (size_t i = 0; i < table.entries.size(); ++i) {
@@ -1795,6 +1917,13 @@ void describe_counts(std::vector<std::string>& out) {
     out.push_back(
         fmt::format("render.lights: aurora decoded {} skipped {} malformed {} late {} bytes {}",
             counters.decoded, counters.skipped, counters.malformed, counters.late, counters.bytes));
+    std::string gains;
+    const auto& graphics = getSettings().graphics;
+#define DUSK_LIGHT_GAIN(member)                                                                    \
+    gains += fmt::format(" {}={:g}", #member, tuning_gain(graphics.member.getValue()));
+    DUSK_LIGHT_TUNING_FIELDS(DUSK_LIGHT_GAIN)
+#undef DUSK_LIGHT_GAIN
+    out.push_back("render.lights: gains" + gains);
 }
 
 bool parse_count(std::string_view text, u32& value) {
@@ -2182,6 +2311,266 @@ std::string test_gate() {
         }
     }
     return problems;
+}
+
+AuroraLight tuning_sample() noexcept {
+    AuroraLight light = make_light(AURORA_LIGHT_POINT);
+    light.color[0] = 0.3f;
+    light.color[1] = 1.7f;
+    light.color[2] = 1e-7f;
+    light.position[0] = 300.0f;
+    light.position[1] = 3430.0f;
+    light.position[2] = 5100.0f;
+    light.radius = 2015.5f;
+    light.falloffExponent = 2.0f;
+    light.flags = AURORA_LIGHT_AFFECTS_TRANSLUCENT | AURORA_LIGHT_FLICKER;
+    light.categoryMask = kCameraFillMask;
+    light.shadowPriority = kPrioPoint;
+    return light;
+}
+
+const LightList& emit_every_kind(LightState& state, const LightTuning& tuning) {
+    const StageKey stage{{'D', '_', 'M', 'N', '0', '5'}, 0, 1};
+    state.lights.reset();
+    state.lights.tuning = tuning;
+    state.ids.begin_build(stage);
+    BuildContext ctx{state.lights, state.ids};
+    ctx.tuning = &state.lights.tuning;
+    for (size_t k = 0; k < kKindCount; ++k) {
+        LightNote note;
+        note.kind = static_cast<LightKind>(k);
+        note.slot = static_cast<u16>(k);
+        emit(ctx, tuning_sample(), note, nullptr);
+    }
+    return state.lights.list;
+}
+
+std::string test_tuning_identity() {
+    std::string problems;
+    if (std::ranges::any_of(kUntuned.gain, [](f32 gain) { return !same_bits(gain, 1.0f); })) {
+        append_problem(problems, "kUntuned is not 1 for every kind");
+    }
+    LightTuning ones{};
+    ones.gain.fill(1.0f);
+    auto state = std::make_unique<LightState>();
+    for (const LightTuning* tuning : std::array<const LightTuning*, 2>{&kUntuned, &ones}) {
+        const LightList& list = emit_every_kind(*state, *tuning);
+        if (list.count != kKindCount || state->lights.muted != 0) {
+            append_problem(problems,
+                fmt::format("{} lights, {} muted at 100%", list.count, state->lights.muted));
+            continue;
+        }
+        for (size_t i = 0; i < list.count; ++i) {
+            AuroraLight expected = tuning_sample();
+            expected.id = list.lights[i].id;
+            if (std::memcmp(&expected, &list.lights[i], sizeof expected) != 0) {
+                append_problem(
+                    problems, fmt::format("{} changed at 100%", kind_name(list.notes[i].kind)));
+            }
+        }
+    }
+    return problems;
+}
+
+std::string test_tuning_scales() {
+    std::string problems;
+    LightTuning tuning = kUntuned;
+    tuning.gain[static_cast<size_t>(LightKind::Point)] = 1.5f;
+    tuning.gain[static_cast<size_t>(LightKind::CameraFill)] = 0.25f;
+    tuning.gain[static_cast<size_t>(LightKind::Sun)] = 2.0f;
+    auto state = std::make_unique<LightState>();
+    const LightList& list = emit_every_kind(*state, tuning);
+    if (list.count != kKindCount) {
+        return fmt::format("{} lights", list.count);
+    }
+    for (size_t i = 0; i < list.count; ++i) {
+        const f32 gain = tuning.gain[static_cast<size_t>(list.notes[i].kind)];
+        AuroraLight expected = tuning_sample();
+        expected.id = list.lights[i].id;
+        for (f32& c : expected.color) {
+            c = gain != 1.0f ? c * gain : c;
+        }
+        if (std::memcmp(&expected, &list.lights[i], sizeof expected) != 0) {
+            const AuroraLight& got = list.lights[i];
+            append_problem(
+                problems, fmt::format("{} at {:g}: col=({:g},{:g},{:g}) radius={:g} flags={}",
+                              kind_name(list.notes[i].kind), gain, got.color[0], got.color[1],
+                              got.color[2], got.radius, flag_names(got.flags)));
+        }
+    }
+    return problems;
+}
+
+std::string test_tuning_groups() {
+    std::string problems;
+    auto& g = getSettings().graphics;
+    const std::array<std::pair<LightKind, const ConfigVar<float>*>, kKindCount> rows{{
+        {LightKind::None, nullptr},
+        {LightKind::Sun, &g.lightSunMoon},
+        {LightKind::Moon, &g.lightSunMoon},
+        {LightKind::KeyRoom, &g.lightKeyRoom},
+        {LightKind::CameraFill, &g.lightFill},
+        {LightKind::PlayerLight, &g.lightLantern},
+        {LightKind::Reserved, nullptr},
+        {LightKind::BossSpot, &g.lightEffect},
+        {LightKind::TwilightCamera, nullptr},
+        {LightKind::WaterCamera, nullptr},
+        {LightKind::Point, &g.lightPoint},
+        {LightKind::Effect, &g.lightEffect},
+        {LightKind::ThunderFlash, &g.lightEffect},
+        {LightKind::Room, &g.lightRoom},
+    }};
+    for (const auto& [kind, member] : rows) {
+        const ConfigVar<float>* actual = tuning_member(kind);
+        if (actual != member) {
+            append_problem(problems, fmt::format("{} follows {}", kind_name(kind),
+                                         actual != nullptr ? actual->getName() : "nothing"));
+        }
+    }
+    LightTuning tuning = kUntuned;
+    for (size_t i = 0; i < kKindCount; ++i) {
+        if (tuning_member(static_cast<LightKind>(i)) == &g.lightEffect) {
+            tuning.gain[i] = 0.5f;
+        }
+    }
+    auto state = std::make_unique<LightState>();
+    const LightList& list = emit_every_kind(*state, tuning);
+    const auto changed = std::ranges::count_if(std::span(list.lights).first(list.count),
+        [](const AuroraLight& light) { return !same_bits(light.color[0], 0.3f); });
+    if (changed != 3) {
+        append_problem(problems, fmt::format("the effect group changed {} lights", changed));
+    }
+    return problems;
+}
+
+std::string test_tuning_sanitize() {
+    std::string problems;
+    const f32 nan = std::numeric_limits<f32>::quiet_NaN();
+    const f32 inf = std::numeric_limits<f32>::infinity();
+    constexpr f32 kRows[][2] = {
+        {0.0f, 0.0f}, {0.75f, 0.75f}, {1.0f, 1.0f}, {2.0f, 2.0f}, {-0.5f, 0.0f}, {2.5f, 2.0f}};
+    for (const auto& row : kRows) {
+        if (!same_bits(tuning_gain(row[0]), row[1])) {
+            append_problem(problems, fmt::format("{:g} gives {:g}", row[0], tuning_gain(row[0])));
+        }
+    }
+    for (const f32 bad : {nan, inf, -inf}) {
+        if (!same_bits(tuning_gain(bad), 1.0f)) {
+            append_problem(problems, fmt::format("{:g} gives {:g}", bad, tuning_gain(bad)));
+        }
+    }
+    LightTuning tuning = kUntuned;
+    tuning.gain[static_cast<size_t>(LightKind::Room)] = 0.0f;
+    tuning.gain[static_cast<size_t>(LightKind::Point)] = -0.0f;
+    auto state = std::make_unique<LightState>();
+    const LightList& list = emit_every_kind(*state, tuning);
+    if (list.count != kKindCount - 2 || state->lights.muted != 2 ||
+        find_kind(list, LightKind::Room) != list.count ||
+        find_kind(list, LightKind::Point) != list.count)
+    {
+        append_problem(problems,
+            fmt::format("0% and -0% keep {} lights, {} muted", list.count, state->lights.muted));
+    }
+    return problems;
+}
+
+std::string test_point_duplicates() {
+    std::string problems;
+    LIGHT_INFLUENCE torch{};
+    torch.mPosition = cXyz(300.0f, 3430.0f, 5100.0f);
+    torch.mColor = {255, 128, 64, 255};
+    torch.mPow = 7.5f;
+    torch.mFluctuation = 0.5f;
+    torch.mIndex = 3;
+    LIGHT_INFLUENCE copy = torch;
+    LIGHT_INFLUENCE flicker = torch;
+    flicker.mFluctuation = 0.6f;
+    LIGHT_INFLUENCE priority = torch;
+    priority.mIndex = -3;
+    LIGHT_INFLUENCE alpha = torch;
+    alpha.mColor.a = 0;
+    LIGHT_INFLUENCE off = torch;
+    off.mPosition.x = 900.0f;
+    off.mPow = 0.005f;
+    LIGHT_INFLUENCE offCopy = off;
+    LIGHT_INFLUENCE zero = torch;
+    zero.mPosition.x = 0.0f;
+    LIGHT_INFLUENCE negativeZero = zero;
+    negativeZero.mPosition.x = -0.0f;
+    const std::array<const LIGHT_INFLUENCE*, 10> slots{
+        &torch, &copy, &flicker, &priority, nullptr, &flicker, &alpha, &off, &offCopy, &zero};
+    constexpr std::array<bool, 10> kExpected{
+        false, true, false, false, false, false, true, false, false, false};
+    for (size_t i = 0; i < slots.size(); ++i) {
+        if (same_point(slots.data(), static_cast<int>(i), slots[i]) != kExpected[i]) {
+            append_problem(
+                problems, fmt::format("slot {} is{} a duplicate", i, kExpected[i] ? " not" : ""));
+        }
+    }
+    const std::array<const LIGHT_INFLUENCE*, 2> signs{&zero, &negativeZero};
+    if (same_point(signs.data(), 1, &negativeZero)) {
+        append_problem(problems, "-0 and +0 positions match");
+    }
+    return problems;
+}
+
+CheckResult check_muted_key() {
+    if (dComIfGp_getCamera(0) == nullptr) {
+        return skip("no camera 0");
+    }
+    const auto base = make_scratch();
+    build_scene_lights(*base);
+    const LightKind key = base->lights.key;
+    if (key == LightKind::None) {
+        return skip("no key light in this scene");
+    }
+    const ConfigVar<float>* group = tuning_member(key);
+    LightTuning tuning = kUntuned;
+    for (size_t i = 0; i < kKindCount; ++i) {
+        if (tuning_member(static_cast<LightKind>(i)) == group) {
+            tuning.gain[i] = 0.0f;
+        }
+    }
+    const LightList& before = base->lights.list;
+    const auto inGroup = [&tuning](const LightNote& note) {
+        return tuning.gain[static_cast<size_t>(note.kind)] == 0.0f;
+    };
+    const auto expected =
+        std::ranges::count_if(std::span(before.notes).first(before.count), inGroup);
+    const auto muted = make_scratch();
+    build_scene_lights(*muted, tuning);
+    const SceneLights& lights = muted->lights;
+    std::string problems;
+    if (lights.key != key) {
+        append_problem(
+            problems, fmt::format("key {} became {}", kind_name(key), kind_name(lights.key)));
+    }
+    if (lights.muted != static_cast<size_t>(expected)) {
+        append_problem(problems, fmt::format("muted {}, expected {}", lights.muted, expected));
+    }
+    if (std::ranges::any_of(std::span(lights.list.notes).first(lights.list.count), inGroup)) {
+        append_problem(problems, "a muted kind is still listed");
+    }
+    const int room = lights.lightRoom;
+    const RoomLights info = room_lights(room);
+    std::string leg = "no light room";
+    if (key == LightKind::KeyRoom) {
+        const SlotState lgt0 = lights.rooms[room][0].state;
+        if (lgt0 != SlotState::Key) {
+            append_problem(problems, fmt::format("room {} LGT0 is {}", room, state_name(lgt0)));
+        }
+        leg = fmt::format("room {} LGT0 {}", room, state_name(lgt0));
+    } else if (info.count > 0) {
+        for (int i = 0; i < std::min(info.count, 2); ++i) {
+            if (lights.rooms[room][i].state != SlotState::Replaced) {
+                append_problem(problems, fmt::format("room {} LGT{} is {}", room, i,
+                                             state_name(lights.rooms[room][i].state)));
+            }
+        }
+        leg = fmt::format("room {} LGT0/LGT1 replaced", room);
+    }
+    return verdict(
+        problems, fmt::format("key {} kept with {} muted, {}", kind_name(key), lights.muted, leg));
 }
 
 void record(SelfTestReport& report, std::string_view name, const CheckResult& result) {
@@ -2585,10 +2974,6 @@ void probe_mismatch(
         probe.hint = hint;
         probe.draw = draw;
     }
-}
-
-bool same_bits(f32 a, f32 b) noexcept {
-    return std::bit_cast<u32>(a) == std::bit_cast<u32>(b);
 }
 
 void probe_fog(FogProbe& probe, GXFogType type, f32 startZ, f32 endZ, f32 nearZ, f32 farZ,
@@ -3465,6 +3850,12 @@ void lights_self_test(SelfTestReport& report) {
     record_test(report, "lights.order_truncation", test_order_truncation());
     record_test(report, "lights.linear_colour", test_linear_colour());
     record_test(report, "lights.gate", test_gate());
+    record_test(report, "lights.tuning_identity", test_tuning_identity());
+    record_test(report, "lights.tuning_scales", test_tuning_scales());
+    record_test(report, "lights.tuning_groups", test_tuning_groups());
+    record_test(report, "lights.tuning_sanitize", test_tuning_sanitize());
+    record_test(report, "lights.point_duplicates", test_point_duplicates());
+    record(report, "lights.muted_key", check_muted_key());
     record(report, "lights.slot_coverage", check_slot_coverage());
     record(report, "lights.read_only", check_read_only());
     record(report, "lights.aurora_agrees", check_aurora_agrees());

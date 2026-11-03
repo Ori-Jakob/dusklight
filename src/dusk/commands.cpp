@@ -8,6 +8,7 @@
 #include "dusk/main.h"
 #include "dusk/render/camera_cuts.hpp"
 #include "dusk/render/draw_tags.hpp"
+#include "dusk/render/graphics_fields.inl"
 #include "dusk/render/lights.hpp"
 #include "dusk/render/material_tags.hpp"
 #include "dusk/render/mod_conflicts.hpp"
@@ -367,10 +368,16 @@ static void WriteTraceMetadata(const std::filesystem::path& tracePath, long fram
         requested[std::string(field.key)] = field.requested;
         effective[std::string(field.key)] = field.effective;
     }
+    nlohmann::json lightTuning = nlohmann::json::object();
+#define DUSK_LIGHT_TUNING_JSON(member)                                                             \
+    lightTuning[settings.graphics.member.getName()] = settings.graphics.member.getValue();
+    DUSK_LIGHT_TUNING_FIELDS(DUSK_LIGHT_TUNING_JSON)
+#undef DUSK_LIGHT_TUNING_JSON
     meta["graphics"] = {
         {"preset", std::string(render::preset_name(render::detect_preset()))},
         {"requested", std::move(requested)},
         {"effective", std::move(effective)},
+        {"lightTuning", std::move(lightTuning)},
     };
 
     auto metaPath = tracePath;
@@ -592,6 +599,11 @@ static void RunRenderSet(
             requested = field.requested;
             break;
         }
+    }
+    if (const auto* light = dynamic_cast<const config::ConfigVar<float>*>(var);
+        light != nullptr && requested.empty())
+    {
+        requested = fmt::format(FMT_STRING("{:g}"), light->getValue());
     }
     TraceReply(
         state, output, fmt::format(FMT_STRING("{} = {} (override, not saved)"), key, requested));

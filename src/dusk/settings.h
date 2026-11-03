@@ -597,6 +597,13 @@ struct UserSettings {
         ConfigVar<bool> meshReplacement;
         ConfigVar<GraphicsStaticWorld> staticWorld;
         ConfigVar<int> debugView;
+        ConfigVar<float> lightSunMoon;
+        ConfigVar<float> lightKeyRoom;
+        ConfigVar<float> lightRoom;
+        ConfigVar<float> lightPoint;
+        ConfigVar<float> lightLantern;
+        ConfigVar<float> lightEffect;
+        ConfigVar<float> lightFill;
     } graphics;
 
     struct {

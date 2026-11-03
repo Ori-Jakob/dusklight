@@ -162,6 +162,7 @@ constexpr size_t kFieldCount = 1 DUSK_GRAPHICS_FIELDS(DUSK_COUNT_FIELD);
 #undef DUSK_COUNT_FIELD
 // aurora's Settings has 67 members counting preset, and each needs exactly one key
 constexpr size_t kAuroraSettingsMembers = 67;
+constexpr size_t kLightTuningKeys = 7;
 
 uint64_t s_generation = 0;
 uint64_t s_pushedGeneration = 0;
@@ -250,6 +251,14 @@ void visit_fields(Fn&& fn) {
         [](auto& settings) -> auto& { return settings.field; });
     DUSK_GRAPHICS_FIELDS(DUSK_VISIT_FIELD)
 #undef DUSK_VISIT_FIELD
+}
+
+template <typename Fn>
+void visit_light_fields(Fn&& fn) {
+    auto& graphics = getSettings().graphics;
+#define DUSK_VISIT_LIGHT(member) fn(std::string_view{"graphics." #member}, graphics.member);
+    DUSK_LIGHT_TUNING_FIELDS(DUSK_VISIT_LIGHT)
+#undef DUSK_VISIT_LIGHT
 }
 
 std::vector<std::string_view> differing_keys(const ar::Settings& a, const ar::Settings& b) {
@@ -361,15 +370,31 @@ std::string test_field_coverage() {
             append_item(problems, fmt::format("{} is not registered", key));
         }
     });
+    std::vector<std::string_view> lightKeys;
+    visit_light_fields([&](std::string_view key, auto& var) {
+        lightKeys.push_back(key);
+        if (key != var.getName()) {
+            append_item(problems, fmt::format("{} is named {}", key, var.getName()));
+        }
+        if (config::GetConfigVar(key) != &var) {
+            append_item(problems, fmt::format("{} is not registered", key));
+        }
+        if (std::ranges::find(keys, key) != keys.end()) {
+            append_item(problems, fmt::format("{} is also an aurora key", key));
+        }
+    });
     config::EnumerateRegistered([&](config::ConfigVarBase& var) {
         const std::string_view name = var.getName();
-        if (name.starts_with(kKeyPrefix) && std::ranges::find(keys, name) == keys.end()) {
+        if (name.starts_with(kKeyPrefix) && std::ranges::find(keys, name) == keys.end() &&
+            std::ranges::find(lightKeys, name) == lightKeys.end())
+        {
             append_item(problems, fmt::format("{} is not in the field table", name));
         }
     });
-    if (keys.size() != kAuroraSettingsMembers) {
+    if (keys.size() != kAuroraSettingsMembers || lightKeys.size() != kLightTuningKeys) {
         append_item(
-            problems, fmt::format("{} keys, expected {}", keys.size(), kAuroraSettingsMembers));
+            problems, fmt::format("{} aurora keys plus {} dusk-only, expected {} plus {}",
+                          keys.size(), lightKeys.size(), kAuroraSettingsMembers, kLightTuningKeys));
     }
     return problems;
 }

@@ -33,11 +33,13 @@ constexpr std::array<std::string_view, 2> kDxcFiles{"dxc/LICENSE.txt", "dxc/Thir
 constexpr std::array<std::string_view, 1> kDxilFiles{"dxc/dxil-LICENSE.txt"};
 constexpr std::array<std::string_view, 3> kNodFiles{
     "nod/LICENSE-MIT.txt", "nod/LICENSE-APACHE.txt", "nod/dependencies.txt"};
-constexpr std::array<std::string_view, 4> kAuroraFiles{
+constexpr std::array<std::string_view, 6> kAuroraFiles{
     "aurora/LICENSE.txt",
     "aurora/hextile-demo-LICENSE.txt",
     "aurora/bevy-taa-LICENSE.txt",
     "aurora/catmull-rom-LICENSE.txt",
+    "aurora/openpbr-LICENSE.txt",
+    "aurora/xegtao-LICENSE.txt",
 };
 constexpr std::array<std::string_view, 1> kBorealisFiles{"borealis/LICENSE.txt"};
 constexpr std::array<std::string_view, 1> kAbseilFiles{"abseil/LICENSE.txt"};
@@ -116,7 +118,8 @@ constexpr std::array kComponents{
     LicenseComponent{"DXIL Validator", "Windows SDK terms",
         "Validates and signs Direct3D 12 shaders (dxil.dll, from the Windows SDK).", kDxilFiles},
     LicenseComponent{"nod", "MIT or Apache 2.0", "Reads the game disc image.", kNodFiles},
-    LicenseComponent{"aurora", "MIT", "The engine layer that runs the game on PC.", kAuroraFiles},
+    LicenseComponent{
+        "aurora", "MIT, Apache 2.0", "The engine layer that runs the game on PC.", kAuroraFiles},
     LicenseComponent{
         "borealis", "MIT", "Logging, updates, crash handling and networking.", kBorealisFiles},
     LicenseComponent{

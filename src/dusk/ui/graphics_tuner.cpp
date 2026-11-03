@@ -230,10 +230,31 @@ const GraphicsSetting& GraphicsSetting::of(GraphicsOption option) {
             0, 1, 0, 1, format_bool);
     case GraphicsOption::PbrBlend:
         return bind_graphics<[]() -> auto& { return getSettings().graphics.legacyBlend; },
-            PercentMap>(0, 100, 5, 100, TunerFormat::Percent);
+            PbrShareMap>(0, 100, 5, 100, TunerFormat::Percent);
     case GraphicsOption::ExposureBias:
         return bind_graphics<[]() -> auto& { return getSettings().graphics.exposureBias; },
             ScaledMap<float, 10>>(-30, 30, 1, 10, TunerFormat::Ev);
+    case GraphicsOption::LightSunMoon:
+        return bind_graphics<[]() -> auto& { return getSettings().graphics.lightSunMoon; },
+            PercentMap>(0, 200, 5, 100, TunerFormat::Percent);
+    case GraphicsOption::LightKeyRoom:
+        return bind_graphics<[]() -> auto& { return getSettings().graphics.lightKeyRoom; },
+            PercentMap>(0, 200, 5, 100, TunerFormat::Percent);
+    case GraphicsOption::LightRoom:
+        return bind_graphics<[]() -> auto& { return getSettings().graphics.lightRoom; },
+            PercentMap>(0, 200, 5, 100, TunerFormat::Percent);
+    case GraphicsOption::LightPoint:
+        return bind_graphics<[]() -> auto& { return getSettings().graphics.lightPoint; },
+            PercentMap>(0, 200, 5, 100, TunerFormat::Percent);
+    case GraphicsOption::LightLantern:
+        return bind_graphics<[]() -> auto& { return getSettings().graphics.lightLantern; },
+            PercentMap>(0, 200, 5, 100, TunerFormat::Percent);
+    case GraphicsOption::LightEffect:
+        return bind_graphics<[]() -> auto& { return getSettings().graphics.lightEffect; },
+            PercentMap>(0, 200, 5, 100, TunerFormat::Percent);
+    case GraphicsOption::LightFill:
+        return bind_graphics<[]() -> auto& { return getSettings().graphics.lightFill; },
+            PercentMap>(0, 200, 5, 100, TunerFormat::PercentOffAtMin);
     case GraphicsOption::LegacyShadowGain:
         return bind_graphics<[]() -> auto& { return getSettings().graphics.legacyShadowGain; },
             PercentMap>(0, 200, 5, 100, TunerFormat::Percent);
@@ -317,6 +338,8 @@ Rml::String GraphicsSetting::format_value(int value) const {
         return format_percent(value);
     case TunerFormat::PercentAutoAtMin:
         return value == min ? "Auto" : format_percent(value);
+    case TunerFormat::PercentOffAtMin:
+        return value == min ? "Off" : format_percent(value);
     case TunerFormat::MetresAutoAtMin:
         return value == min ? "Auto" : fmt::format("{} m", value);
     case TunerFormat::Ev:

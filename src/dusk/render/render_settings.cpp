@@ -740,6 +740,9 @@ void reset_to_preset() {
     }
     DUSK_GRAPHICS_FIELDS(DUSK_RESET_FIELD)
 #undef DUSK_RESET_FIELD
+#define DUSK_RESET_LIGHT(member) graphics.member.setValue(graphics.member.getDefaultValue());
+    DUSK_LIGHT_TUNING_FIELDS(DUSK_RESET_LIGHT)
+#undef DUSK_RESET_LIGHT
 }
 
 std::optional<bool> seed_generate_missing_mips() {
@@ -846,6 +849,10 @@ bool differs_from_reference() {
     differs = differs || !(graphics.member.getValue() == reference_value(graphics.member));
     DUSK_GRAPHICS_FIELDS(DUSK_DIFFERS_FIELD)
 #undef DUSK_DIFFERS_FIELD
+#define DUSK_DIFFERS_LIGHT(member)                                                                 \
+    differs = differs || graphics.member.getValue() != graphics.member.getDefaultValue();
+    DUSK_LIGHT_TUNING_FIELDS(DUSK_DIFFERS_LIGHT)
+#undef DUSK_DIFFERS_LIGHT
     return differs;
 }
 

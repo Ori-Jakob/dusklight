@@ -5,6 +5,7 @@
 #include "ui.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <functional>
 #include <memory>
 #include <type_traits>
@@ -49,6 +50,7 @@ enum class TunerFormat : u8 {
     Integer,
     ViewAutoAtMin,
     Metres,
+    PercentOffAtMin,
 };
 
 enum class GraphicsOption {
@@ -61,6 +63,13 @@ enum class GraphicsOption {
     TextureReplacements,
     PbrBlend,
     ExposureBias,
+    LightSunMoon,
+    LightKeyRoom,
+    LightRoom,
+    LightPoint,
+    LightLantern,
+    LightEffect,
+    LightFill,
     LegacyShadowGain,
     ShadowPagePool,
     ShadowPageBudget,
@@ -84,6 +93,14 @@ enum class GraphicsOption {
     AoRadius,
     AoStrength,
     DebugView,
+};
+
+// The row shows the PBR share while legacyBlend keeps aurora's meaning, so 0% stores exactly 1
+struct PbrShareMap {
+    static int to_tuner(float value) {
+        return static_cast<int>(std::lround((1.0f - value) * 100.0f));
+    }
+    static float from_tuner(int value) { return (100 - value) / 100.0f; }
 };
 
 struct GraphicsSetting {

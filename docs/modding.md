@@ -1051,7 +1051,9 @@ svc_gfx->get_device_info(mod_ctx, &info);
 - `GFX_STAGE_SCENE_AFTER_TERRAIN`: after terrain/shadow lists, before object and translucent lists
 - `GFX_STAGE_SCENE_AFTER_OPAQUE`: after sky/terrain/object opaque lists, before translucent lists; while Graphics >
   Ambient Occlusion is on, colour resolved here already includes the renderer's ambient occlusion (applied before fog).
-  The SceneTargetsService fog record still describes the fog in that colour while no other renderer effect changes fog
+  The SceneTargetsService fog record still describes the fog in that colour while no other renderer effect changes fog.
+  While Graphics > PBR Lighting is on, lit surfaces in that colour are PBR-lit, exposed and tonemapped; the fog record
+  still describes the fog in it.
 - `GFX_STAGE_FRAME_BEFORE_HUD`: 3D scene and wipe are complete, before 2D/HUD lists
 - `GFX_STAGE_FRAME_AFTER_HUD`: full game scene, including HUD
 
