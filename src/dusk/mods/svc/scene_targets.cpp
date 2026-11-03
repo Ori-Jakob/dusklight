@@ -45,6 +45,9 @@ ModResult scene_targets_get_scene_targets(ModContext* context, SceneTargetsLayou
         case aurora::gfx::ColorAttachmentSemantic::Fog:
             outLayout->fog = i;
             break;
+        case aurora::gfx::ColorAttachmentSemantic::Surface:
+            outLayout->surface = i;
+            break;
         default:
             break;
         }

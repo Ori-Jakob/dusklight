@@ -201,6 +201,7 @@ GfxAttachmentSemantic gfx_attachment_semantic(aurora::gfx::ColorAttachmentSemant
     case aurora::gfx::ColorAttachmentSemantic::Motion:
     case aurora::gfx::ColorAttachmentSemantic::Reactive:
     case aurora::gfx::ColorAttachmentSemantic::Fog:
+    case aurora::gfx::ColorAttachmentSemantic::Surface:
         return GFX_ATTACHMENT_AUXILIARY;
     }
     return GFX_ATTACHMENT_AUXILIARY;

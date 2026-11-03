@@ -1115,7 +1115,24 @@ const bool gbuffer = svc_scene_targets != nullptr &&
 
 `get_scene_targets` reports the attachment indices of the motion, reactive and fog targets in the scene layout whose key
 it returns (the same key as `GfxRenderTargetLayout.key`), or `SCENE_TARGET_NONE`. GfxService keeps upstream's numbering
-and reports all three as `GFX_ATTACHMENT_AUXILIARY`.
+and reports all three, and the surface target below, as `GFX_ATTACHMENT_AUXILIARY`.
+
+**SceneTargetsService 1.1**: `SceneTargetsLayout.surface` is the attachment index of the PBR surface record
+(`RGBA32Uint`), or `SCENE_TARGET_NONE`. The scene layout carries it only while a PBR feature is on and the device can
+hold it, and never without the fog target. Each pixel holds one Surface v1 record; unorm bytes decode as
+`b * (1.0 / 255.0)`:
+
+- `x`: albedo rgb in bytes 0-2 (stored sRGB, as the game's TEV sees it), material occlusion in byte 3 (255 is none)
+- `y`: perceptual roughness in byte 0, metalness in byte 1, class in byte 2, flags in byte 3
+- `z`: ambient rgb in bytes 0-2, the draw category in byte 3
+- `w`: linear emissive as R11G11B10 unsigned float (R in bits 0-10, G in 11-21, B in 22-31)
+
+Class 0 means the pixel is not PBR and the composite keeps the game's colour; 1 is the default class and 255 is
+reserved. The flags are bit 0 cloud receiver, 1 no shadow receive, 2 thin translucent, 3 two-sided, 4 no SSR, 5 unlit
+and 6 baked light; bit 7 is reserved. The record is zero at frame start and after every full colour or depth clear, and
+every game draw that writes depth or opaquely replaces colour rewrites it. An opaque custom draw inside the opaque
+window (`GFX_STAGE_SCENE_BEGIN` or `GFX_STAGE_SCENE_AFTER_TERRAIN`) under the PBR tier should write `vec4u(0)` there, or
+the composite may shade it with the PBR record it covered.
 
 `resolve_pass` is GfxService's `resolve_pass` with one more request: set `SceneRecordsDesc.fog` to snapshot the fog
 record into `SceneRecords.fog` (`RGBA8Uint`). The record is valid from `GFX_STAGE_SCENE_BEGIN` until the first colour

@@ -22,7 +22,7 @@
 
 #define SCENE_TARGETS_SERVICE_ID DUSKLIGHT_SERVICE_ID_PREFIX "scene_targets"
 #define SCENE_TARGETS_SERVICE_MAJOR 1u
-#define SCENE_TARGETS_SERVICE_MINOR 0u
+#define SCENE_TARGETS_SERVICE_MINOR 1u
 
 /* Attachment index of a target the scene layout does not carry. */
 #define SCENE_TARGET_NONE 0xFFFFFFFFu
@@ -34,10 +34,12 @@ typedef struct SceneTargetsLayout {
     uint32_t motion;
     uint32_t reactive;
     uint32_t fog;
+    uint32_t surface; /* index of the PBR surface record (RGBA32Uint), or SCENE_TARGET_NONE */
 } SceneTargetsLayout;
 
 #define SCENE_TARGETS_LAYOUT_INIT                                                                  \
-    {sizeof(SceneTargetsLayout), 0u, SCENE_TARGET_NONE, SCENE_TARGET_NONE, SCENE_TARGET_NONE}
+    {sizeof(SceneTargetsLayout), 0u, SCENE_TARGET_NONE, SCENE_TARGET_NONE, SCENE_TARGET_NONE,      \
+        SCENE_TARGET_NONE}
 
 typedef struct SceneRecordsDesc {
     uint32_t struct_size;
