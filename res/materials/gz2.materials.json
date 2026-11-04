@@ -6,6 +6,10 @@
       "stochastic": {"scale": 0.5, "rotation": 1},
       "_source": "dusk/w11:I_Kusa_A stage:F_SP121 room:1,6,15 texmap:0"
     },
+    "tex1_256x256_43cf041c099b06c7_14": {
+      "class": "default",
+      "_source": "dusk/m10:H_komono_suke stage:R_SP01 room:4,7 mat:bb_komono_v texmap:0"
+    },
     "tex1_256x256_6e94ac1fd8d0cb24_14": {
       "flags": ["stochastic"],
       "stochastic": {"scale": 0.75, "rotation": 1},
