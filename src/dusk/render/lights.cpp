@@ -1842,13 +1842,31 @@ struct GameSnapshot {
     }
 };
 
+LightTuning every_group_at(f32 gain) {
+    LightTuning tuning = kUntuned;
+    for (size_t i = 0; i < kKindCount; ++i) {
+        if (tuning_member(static_cast<LightKind>(i)) != nullptr) {
+            tuning.gain[i] = gain;
+        }
+    }
+    return tuning;
+}
+
 CheckResult check_read_only() {
     auto before = std::make_unique<GameSnapshot>();
     before->take();
-    const auto scratch = make_scratch();
-    build_scene_lights(*scratch);
+    // The live gains are often all 100%, so 0% and 200% builds also take the mute and scale paths
+    const std::array<LightTuning, 4> tunings{
+        kUntuned, live_tuning(), every_group_at(0.0f), every_group_at(2.0f)};
+    std::array<u16, 4> counts{};
+    for (size_t i = 0; i < tunings.size(); ++i) {
+        const auto scratch = make_scratch();
+        build_scene_lights(*scratch, tunings[i]);
+        counts[i] = scratch->lights.list.count;
+    }
     return verdict(before->problems(),
-        fmt::format("{} lights built, nothing written", scratch->lights.list.count));
+        fmt::format("{} lights built untuned, {} live, {} at 0%, {} at 200%, nothing written",
+            counts[0], counts[1], counts[2], counts[3]));
 }
 
 CheckResult check_aurora_agrees() {
