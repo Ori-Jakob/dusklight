@@ -33,12 +33,13 @@ constexpr std::array<std::string_view, 2> kDxcFiles{"dxc/LICENSE.txt", "dxc/Thir
 constexpr std::array<std::string_view, 1> kDxilFiles{"dxc/dxil-LICENSE.txt"};
 constexpr std::array<std::string_view, 3> kNodFiles{
     "nod/LICENSE-MIT.txt", "nod/LICENSE-APACHE.txt", "nod/dependencies.txt"};
-constexpr std::array<std::string_view, 6> kAuroraFiles{
+constexpr std::array<std::string_view, 7> kAuroraFiles{
     "aurora/LICENSE.txt",
     "aurora/hextile-demo-LICENSE.txt",
     "aurora/bevy-taa-LICENSE.txt",
     "aurora/catmull-rom-LICENSE.txt",
     "aurora/openpbr-LICENSE.txt",
+    "aurora/agx-LICENSE.txt",
     "aurora/xegtao-LICENSE.txt",
 };
 constexpr std::array<std::string_view, 1> kBorealisFiles{"borealis/LICENSE.txt"};

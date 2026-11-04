@@ -1,10 +1,10 @@
 OpenPBR BSDF (adobe/openpbr-bsdf), ltc-sheen, Khronos PBR Neutral and Filament AgX
 
-Aurora's PBR lighting uses the energy compensation and sheen tables of Adobe's openpbr-bsdf (Copyright 2026 Adobe) and follows its conventions in its own shader code. openpbr-bsdf reproduces its sheen table from ltc-sheen (tizian/ltc-sheen) by Tizian Zeltner, Brent Burley and Matt Jen-Yuan Chiang.
+Aurora's PBR lighting uses the energy compensation and sheen tables of Adobe's openpbr-bsdf (Copyright 2026 Adobe) and follows its conventions in its own shader and CPU code. openpbr-bsdf reproduces its sheen table from ltc-sheen (tizian/ltc-sheen) by Tizian Zeltner, Brent Burley and Matt Jen-Yuan Chiang.
 
-Aurora's PBR Neutral tone mapper follows the Khronos Group's PBR Neutral reference (KhronosGroup/ToneMapping, PBR_Neutral).
+Aurora's PBR Neutral tone mapper follows the Khronos Group's PBR Neutral reference (KhronosGroup/ToneMapping, PBR_Neutral, Copyright 2024 The Khronos Group, Inc.).
 
-Aurora's AgX tone mapper follows Filament's AgX tone mapper (google/filament, ToneMapper.cpp, Copyright (C) 2021 The Android Open Source Project). Filament takes its AgX matrices from Blender's AgX through EaryChow/AgX_LUT_Gen and adapts its contrast curve from iolite-engine.com's minimal AgX implementation.
+Aurora's AgX tone mapper follows Filament's AgX tone mapper (google/filament, ToneMapper.cpp, Copyright (C) 2021 The Android Open Source Project). Filament takes its AgX matrices from Blender's AgX through EaryChow/AgX_LUT_Gen and adapts its contrast curve from iolite-engine.com's minimal AgX implementation, whose MIT notice is in agx-LICENSE.txt.
 
 All four are used under the Apache License, Version 2.0:
 
