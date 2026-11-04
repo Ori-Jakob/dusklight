@@ -227,6 +227,11 @@ bool advanced_off() {
     return !getSettings().backend.enableAdvancedSettings.getValue();
 }
 
+// One rule for every row that needs AO, so the self-test pins what the rows do
+bool ao_dependent_row_disabled(GraphicsQuality ao) noexcept {
+    return ao == GraphicsQuality::Off;
+}
+
 Rml::String on_off(bool value) {
     return value ? "On" : "Off";
 }
@@ -907,9 +912,11 @@ constexpr std::array<GraphicsRow, 78> kRows{{
             tuner_row(ctx, info,
                 {
                     .option = GraphicsOption::AoRadius,
-                    .help = "How far the darkening spreads from creases and contact areas.",
+                    .help = "How far the darkening spreads from creases and contact areas, "
+                            "and how far bounced light reaches.",
                     .gate = param_gate<F::Ao>(),
-                    .isDisabled = [] { return graphics().ao.getValue() == GraphicsQuality::Off; },
+                    .isDisabled =
+                        [] { return ao_dependent_row_disabled(graphics().ao.getValue()); },
                 });
         }},
     {{S::AoGi, "AO Strength", "graphics.aoStrength", "M8", false},
@@ -917,20 +924,26 @@ constexpr std::array<GraphicsRow, 78> kRows{{
             tuner_row(ctx, info,
                 {
                     .option = GraphicsOption::AoStrength,
-                    .help = "How dark creases and contact areas get. 0% turns the darkening off "
-                            "but keeps the cost.",
+                    .help = "How dark creases and contact areas get; with Indirect Light it also "
+                            "sets how much bounced light fills them. 0% turns both off but keeps "
+                            "the cost.",
                     .gate = param_gate<F::Ao>(),
-                    .isDisabled = [] { return graphics().ao.getValue() == GraphicsQuality::Off; },
+                    .isDisabled =
+                        [] { return ao_dependent_row_disabled(graphics().ao.getValue()); },
                 });
         }},
     {{S::AoGi, "Indirect Light", "graphics.ssil", "M11", true},
         [](RowContext& ctx, const GraphicsRowInfo& info) {
             bool_row(ctx, info, graphics().ssil,
                 {
-                    .help = "Light bounced from nearby surfaces. Needs Ambient Occlusion.",
+                    .help = "Light bounced from nearby surfaces into the creases "
+                            "Ambient Occlusion darkens, tinted by what they face. It reaches as "
+                            "far as AO Radius and follows AO Strength. Its cost grows with "
+                            "Internal Resolution. Needs Ambient Occlusion.",
                     .gate = toggle_gate<F::Ssil>(),
                     .clamped = [] { return clamped().ssil; },
-                    .isDisabled = [] { return graphics().ao.getValue() == GraphicsQuality::Off; },
+                    .isDisabled =
+                        [] { return ao_dependent_row_disabled(graphics().ao.getValue()); },
                 });
         }},
     {{S::AoGi, "Global Illumination", "graphics.gi", "M21, M24", true},
@@ -1657,6 +1670,44 @@ std::string test_rows_pbr_blend_share() {
     return problems;
 }
 
+std::string test_indirect_light_follows_ao() {
+    std::string problems;
+    const auto row = std::ranges::find_if(kRowInfos, [](const GraphicsRowInfo& info) {
+        return info.key != nullptr && std::string_view{info.key} == "graphics.ssil";
+    });
+    if (row == kRowInfos.end() || std::string_view{row->label} != "Indirect Light" ||
+        row->section != GraphicsSection::AoGi || !row->presetControlled)
+    {
+        append_item(problems, "the Indirect Light row is missing or moved");
+    }
+    for (const auto& option : kQualityOptions) {
+        const bool off = option.value == GraphicsQuality::Off;
+        if (ao_dependent_row_disabled(option.value) != off) {
+            append_item(problems,
+                fmt::format("AO {} {} the AO rows", option.label, off ? "keeps" : "disables"));
+        }
+    }
+    if (render::reason_help(ar::Reason::NeedsAo) != "Needs Ambient Occlusion.") {
+        append_item(problems, "NeedsAo does not read Needs Ambient Occlusion.");
+    }
+    ar::Settings context = render::last_requested();
+    context.ao = ar::Quality::High;
+    context.ssil = true;
+    const ar::FeatureSupport on = ar::feature_support(F::Ssil, 1, context);
+    if (on.supported) {
+        context.ao = ar::Quality::Off;
+        const ar::FeatureSupport off = ar::feature_support(F::Ssil, 1, context);
+        if (off.supported || off.reason != ar::Reason::NeedsAo) {
+            append_item(problems, fmt::format("AO Off gives {}", ar::reason_name(off.reason)));
+        }
+    } else if (on.reason != ar::Reason::NeedsCore && on.reason != ar::Reason::MsaaActive &&
+               on.reason != ar::Reason::ColorBudget)
+    {
+        append_item(problems, fmt::format("AO High gives {}", ar::reason_name(on.reason)));
+    }
+    return problems;
+}
+
 }  // namespace
 
 void build_graphics_tab(Window& window, Pane& leftPane, Pane& rightPane, bool prelaunch) {
@@ -1690,6 +1741,7 @@ void graphics_tab_self_test(render::SelfTestReport& report) {
     check("rows.preset_flags", test_rows_preset_flags());
     check("rows.light_tuning", test_rows_light_tuning());
     check("rows.pbr_blend_share", test_rows_pbr_blend_share());
+    check("rows.indirect_light_follows_ao", test_indirect_light_follows_ao());
 }
 
 }  // namespace dusk::ui
