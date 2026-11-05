@@ -450,6 +450,10 @@ f32 falloff_code(u8 fn) noexcept {
     }
 }
 
+f32 falloff_exponent(f32 radius, u8 fn) noexcept {
+    return radius >= kMaxLightRadius ? 0.0f : falloff_code(fn);
+}
+
 struct SpotShape {
     bool spot = false;
     Vec direction{};
@@ -1013,7 +1017,7 @@ void add_env_slot(BuildContext& ctx, const EnvSlotInputs& in, int index, LightKi
     put(light.position, b.mPos);
     put_linear(light.color, b.mColor);
     light.radius = attn_radius(b.mRefDistance, kRefBrightness, b.mDistAttenuation);
-    light.falloffExponent = falloff_code(b.mDistAttenuation);
+    light.falloffExponent = falloff_exponent(light.radius, b.mDistAttenuation);
     switch (kind) {
     case LightKind::PlayerLight:
         light.flags = player_light_flags(in.shadowMode, ctx.out.flame);
@@ -1115,8 +1119,9 @@ bool influence_candidate(const LIGHT_INFLUENCE* p, bool duplicate, f32 refScale,
     light = make_light(AURORA_LIGHT_POINT);
     put(light.position, p->mPosition);
     put_linear(light.color, p->mColor);
-    light.radius = radiusScale * attn_radius(note.ref, kRefBrightness, GX_DA_STEEP);
-    light.falloffExponent = falloff_code(GX_DA_STEEP);
+    const f32 radius = attn_radius(note.ref, kRefBrightness, GX_DA_STEEP);
+    light.radius = radiusScale * radius;
+    light.falloffExponent = falloff_exponent(radius, GX_DA_STEEP);
     if (is_black(light) || is_tiny(light)) {
         entry.state = SlotState::Disabled;
         return false;
@@ -1197,7 +1202,7 @@ void add_room(BuildContext& ctx, int room) {
         put(light.position, lgt.position);
         put_linear(light.color, tev->mLights[i].mInfo.mColor);
         light.radius = attn_radius(lgt.radius, kRefBrightness, lgt.dist_atten_type);
-        light.falloffExponent = falloff_code(lgt.dist_atten_type);
+        light.falloffExponent = falloff_exponent(light.radius, lgt.dist_atten_type);
         if (!light_switch_on(lgt, room) || is_tiny(light) || is_black(light)) {
             entry.state = SlotState::Disabled;
             continue;
@@ -2014,6 +2019,17 @@ std::string test_attn_radius() {
         falloff_code(GX_DA_GENTLE) != 1.0f || falloff_code(GX_DA_OFF) != 0.0f)
     {
         append_problem(problems, "falloff codes");
+    }
+    const f32 steepRef =
+        static_cast<f32>(std::sqrt((1.0 - kRefBrightness) / (kRefBrightness * 1.0e-13)));
+    const f32 steepRadius = attn_radius(steepRef, kRefBrightness, GX_DA_STEEP);
+    const f32 steepExponent = falloff_exponent(steepRadius, GX_DA_STEEP);
+    if (steepRadius != kMaxLightRadius || steepExponent != 0.0f) {
+        append_problem(problems,
+            fmt::format("STEEP k2 1e-13 gives radius {} exponent {}", steepRadius, steepExponent));
+    }
+    if (falloff_exponent(attn_radius(1.0f, kRefBrightness, GX_DA_STEEP), GX_DA_STEEP) != 2.0f) {
+        append_problem(problems, "an unclamped STEEP light loses its exponent");
     }
     return problems;
 }
