@@ -213,7 +213,6 @@ constexpr RowGate param_gate() {
 }
 
 constexpr RowGate kAlwaysGate{&render::always_gate, nullptr};
-constexpr RowGate kNotBuiltGate{&render::not_built_gate, nullptr};
 
 auto& graphics() {
     return getSettings().graphics;
@@ -1440,13 +1439,13 @@ constexpr std::array<GraphicsRow, 78> kRows{{
                     .clamped = [] { return render::from_aurora(clamped().staticWorld); },
                 });
         }},
-    {{S::Advanced, "Debug View", "graphics.debugView", "M3-W4", false},
+    {{S::Advanced, "Debug View", "graphics.debugView", "M12", false},
         [](RowContext& ctx, const GraphicsRowInfo& info) {
             tuner_row(ctx, info,
                 {
                     .option = GraphicsOption::DebugView,
                     .help = "Show a renderer debug view instead of the final image.",
-                    .gate = kNotBuiltGate,
+                    .gate = kAlwaysGate,
                     .isDisabled = advanced_off,
                 });
         }},
@@ -1708,6 +1707,40 @@ std::string test_indirect_light_follows_ao() {
     return problems;
 }
 
+std::string test_debug_view_map() {
+    std::string problems;
+    const auto views = ar::debug_views();
+    if (views.empty()) {
+        append_item(problems, "aurora lists no debug views");
+    }
+    for (size_t i = 0; i < views.size(); ++i) {
+        const int stop = DebugViewMap::to_tuner(views[i].id);
+        if (stop != static_cast<int>(i) + 1 || DebugViewMap::from_tuner(stop) != views[i].id) {
+            append_item(problems, fmt::format("{} does not round trip", views[i].name));
+        }
+    }
+    for (int id = -1; id <= 64; ++id) {
+        const bool built = std::ranges::any_of(
+            views, [id](const ar::DebugViewInfo& view) { return view.id == id; });
+        if (!built && DebugViewMap::to_tuner(id) != 0) {
+            append_item(problems, fmt::format("unknown id {} is not Off", id));
+        }
+    }
+    if (DebugViewMap::from_tuner(0) != 0 ||
+        DebugViewMap::from_tuner(static_cast<int>(views.size()) + 1) != 0)
+    {
+        append_item(problems, "stops outside the views do not store 0");
+    }
+    const GraphicsSetting& setting = GraphicsSetting::of(GraphicsOption::DebugView);
+    if (setting.min != 0 || setting.max != static_cast<int>(views.size()) ||
+        setting.defaultValue != 0 || setting.format_value(0) != "Off" ||
+        (!views.empty() && setting.format_value(1) != views.front().label))
+    {
+        append_item(problems, "the Debug View row does not step through aurora's views");
+    }
+    return problems;
+}
+
 }  // namespace
 
 void build_graphics_tab(Window& window, Pane& leftPane, Pane& rightPane, bool prelaunch) {
@@ -1742,6 +1775,7 @@ void graphics_tab_self_test(render::SelfTestReport& report) {
     check("rows.light_tuning", test_rows_light_tuning());
     check("rows.pbr_blend_share", test_rows_pbr_blend_share());
     check("rows.indirect_light_follows_ao", test_indirect_light_follows_ao());
+    check("rows.debug_view_map", test_debug_view_map());
 }
 
 }  // namespace dusk::ui

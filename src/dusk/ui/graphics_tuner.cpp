@@ -8,6 +8,7 @@
 #include "dusk/settings.h"
 #include "m_Do/m_Do_audio.h"
 
+#include <aurora/render.hpp>
 #include <dolphin/gx/GXAurora.h>
 #include <fmt/format.h>
 
@@ -204,6 +205,18 @@ void update_carousel_arrow_color(Rml::Element* arrow, bool dim) {
 
 }  // namespace
 
+int DebugViewMap::to_tuner(int id) {
+    const auto views = aurora::render::debug_views();
+    const auto it = std::ranges::find_if(
+        views, [id](const aurora::render::DebugViewInfo& view) { return view.id == id; });
+    return it == views.end() ? 0 : static_cast<int>(it - views.begin()) + 1;
+}
+
+int DebugViewMap::from_tuner(int i) {
+    const auto views = aurora::render::debug_views();
+    return i < 1 || i > static_cast<int>(views.size()) ? 0 : views[i - 1].id;
+}
+
 const GraphicsSetting& GraphicsSetting::of(GraphicsOption option) {
     switch (option) {
     case GraphicsOption::InternalResolution:
@@ -323,7 +336,8 @@ const GraphicsSetting& GraphicsSetting::of(GraphicsOption option) {
             PercentMap>(0, 150, 5, 100, TunerFormat::Percent);
     case GraphicsOption::DebugView:
         return bind_graphics<[]() -> auto& { return getSettings().graphics.debugView; },
-            IntegerMap>(0, 63, 1, 1, TunerFormat::ViewAutoAtMin);
+            DebugViewMap>(0, static_cast<int>(aurora::render::debug_views().size()), 1, 1,
+            TunerFormat::ViewAutoAtMin);
     }
     DuskLog.error("{} is an invalid GraphicsOption", static_cast<int>(option));
     abort();
@@ -344,8 +358,12 @@ Rml::String GraphicsSetting::format_value(int value) const {
         return value == min ? "Auto" : fmt::format("{} m", value);
     case TunerFormat::Ev:
         return fmt::format("{:+.1f} EV", value / static_cast<double>(scale));
-    case TunerFormat::ViewAutoAtMin:
-        return value == min ? "Off" : fmt::format("View {}", value);
+    case TunerFormat::ViewAutoAtMin: {
+        const auto views = aurora::render::debug_views();
+        return value < 1 || value > static_cast<int>(views.size()) ?
+                   "Off" :
+                   Rml::String{views[value - 1].label};
+    }
     case TunerFormat::Metres:
         return fmt::format("{:.2f} m", value / static_cast<double>(scale));
     case TunerFormat::Integer:

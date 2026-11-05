@@ -1044,10 +1044,6 @@ ar::FeatureSupport always_gate(uint8_t) noexcept {
     return {true, ar::Reason::None};
 }
 
-ar::FeatureSupport not_built_gate(uint8_t) noexcept {
-    return {false, ar::Reason::NotImplemented};
-}
-
 ar::FeatureSupport terrain_detail_gate(uint8_t option) noexcept {
     switch (static_cast<GraphicsTerrainDetail>(option)) {
     case GraphicsTerrainDetail::Parallax:

@@ -102,7 +102,6 @@ bool feature_ready_gate() noexcept {
     return aurora::render::feature_ready(F);
 }
 aurora::render::FeatureSupport always_gate(uint8_t option) noexcept;
-aurora::render::FeatureSupport not_built_gate(uint8_t option) noexcept;
 aurora::render::FeatureSupport terrain_detail_gate(uint8_t option) noexcept;
 aurora::render::FeatureSupport rt_backend_gate(uint8_t option) noexcept;
 aurora::render::FeatureSupport native_reenable_gate(uint8_t option) noexcept;

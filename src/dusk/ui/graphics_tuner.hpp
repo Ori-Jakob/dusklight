@@ -103,6 +103,11 @@ struct PbrShareMap {
     static float from_tuner(int value) { return (100 - value) / 100.0f; }
 };
 
+struct DebugViewMap {
+    static int to_tuner(int id);
+    static int from_tuner(int i);
+};
+
 struct GraphicsSetting {
     int min = 0;
     int max = 0;
