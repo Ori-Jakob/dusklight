@@ -61,9 +61,10 @@ constexpr std::array<std::string_view, 2> kZlibFiles{
 constexpr std::array<std::string_view, 1> kZstdFiles{"zstd/LICENSE.txt"};
 constexpr std::array<std::string_view, 2> kBzip2BrotliFiles{
     "bzip2-brotli/bzip2-LICENSE.txt", "bzip2-brotli/brotli-LICENSE.txt"};
-constexpr std::array<std::string_view, 7> kUtilityFiles{
+constexpr std::array<std::string_view, 8> kUtilityFiles{
     "utilities/cxxopts-LICENSE.txt",
     "utilities/magic_enum-LICENSE.txt",
+    "utilities/meshoptimizer-LICENSE.txt",
     "utilities/miniz-LICENSE.txt",
     "utilities/nlohmann-json-LICENSE.txt",
     "utilities/PicoSHA2-LICENSE.txt",
@@ -137,7 +138,8 @@ constexpr std::array kComponents{
     LicenseComponent{
         "bzip2 and Brotli", "bzip2, MIT", "Decompress compressed font files.", kBzip2BrotliFiles},
     LicenseComponent{"Utility libraries", "MIT, BSD 2-Clause",
-        "cxxopts, magic_enum, miniz, nlohmann/json, PicoSHA2, xxHash and yyjson.", kUtilityFiles},
+        "cxxopts, magic_enum, meshoptimizer, miniz, nlohmann/json, PicoSHA2, xxHash and yyjson.",
+        kUtilityFiles},
     LicenseComponent{"funchook and diStorm", "GPL 2.0+, BSD 3-Clause",
         "Installs the function hooks that code mods use.", kFunchookFiles},
     LicenseComponent{"Sentry and Crashpad", "MIT, Apache 2.0, BSD",
