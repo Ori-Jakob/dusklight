@@ -340,9 +340,19 @@ int daBg_c::draw() {
 
                 if (mDoLib_clipper::clip(j3dSys.getViewMtx(), (Vec*)shape->getMin(),
                                          (Vec*)shape->getMax())) {
-                    shape->hide();
+#if TARGET_PC
+                    if (dusk::render::take_room_capture(bg_model, j)) {
+                        shape->show();
+                    } else
+#endif
+                    {
+                        shape->hide();
+                    }
                 } else {
                     shape->show();
+#if TARGET_PC
+                    dusk::render::note_room_shape_shown(bg_model, j);
+#endif
                 }
             }
 

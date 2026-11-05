@@ -1,6 +1,7 @@
 #include "dusk/render/model_registry.hpp"
 
 #include "dusk/main.h"
+#include "dusk/render/camera_cuts.hpp"
 #include "dusk/render/hints.hpp"
 #include "dusk/render/render_bridge.hpp"
 
@@ -44,6 +45,8 @@ constexpr u32 kCpuDeformed = AURORA_OBJ_CPU_DEFORMED;
 constexpr u32 kSkinInPlaceFlag = 0x100;
 constexpr size_t kArrayBaseBytes = 16;
 constexpr size_t kArraySlots = GX_VA_TEX7 - GX_VA_POS + 1;
+constexpr u32 kRoomCaptureBudget = 64;
+constexpr u32 kMaxLossRearms = 3;
 
 struct ImmutableArray {
     GXAttr attr = GX_VA_POS;
@@ -88,6 +91,18 @@ struct DataInfo {
     bool bgMaxxChecked = false;
 };
 
+struct RoomShapes {
+    std::vector<u64> covered;
+    std::vector<u64> stamped;
+    u16 shapes = 0;
+    u16 coveredCount = 0;
+    u32 serial = 0;
+    u32 clipFrame = kNoFrame;
+    u32 armFrame = kNoFrame;
+    u32 coverFrames = 0;
+    bool armed = false;
+};
+
 struct ModelEntry {
     u32 serial = 0;
     u32 categories = AURORA_CAT_DYNAMIC;
@@ -101,6 +116,45 @@ struct ModelEntry {
     ShapeFacts facts;
     const J3DModelData* data = nullptr;
     DataInfo* info = nullptr;
+    RoomShapes room;
+};
+
+struct CaptureInputs {
+    bool active = false;
+    u32 epoch = 0;
+    u64 lostCaptures = 0;
+    bool coverageComplete = false;
+};
+
+struct CaptureSource {
+    CaptureInputs (*sample)() noexcept = nullptr;
+    void (*hold)(bool) noexcept = nullptr;
+};
+
+struct RoomCapture {
+    CaptureInputs inputs;
+    u32 armedEpoch = 0;
+    u32 serial = 0;
+    u32 budget = 0;
+    u32 lossRearms = 0;
+    u64 lastLost = 0;
+    bool wasActive = false;
+    bool hold = false;
+    u32 holds = 0;
+};
+
+struct RoomStamp {
+    ModelEntry* entry = nullptr;
+    u16 shape = 0;
+    u32 frame = 0;
+};
+
+struct RoomCoverage {
+    u32 rooms = 0;
+    u32 armed = 0;
+    u32 shapes = 0;
+    u32 covered = 0;
+    u32 coverFrames = 0;
 };
 
 enum class Warning : u8 {
@@ -111,6 +165,7 @@ enum class Warning : u8 {
     ReservedStatic,
     SuppressionUnderflow,
     Leak,
+    LossRearms,
     Count,
 };
 
@@ -123,6 +178,18 @@ struct RegistrySnapshot {
     u64 totalBegins = 0;
     bool operator==(const RegistrySnapshot&) const = default;
 };
+
+bool has_bit(const std::vector<u64>& bits, u16 index) noexcept {
+    return ((bits[index >> 6] >> (index & 63)) & 1) != 0;
+}
+
+void set_bit(std::vector<u64>& bits, u16 index) noexcept {
+    bits[index >> 6] |= u64{1} << (index & 63);
+}
+
+void clear_bit(std::vector<u64>& bits, u16 index) noexcept {
+    bits[index >> 6] &= ~(u64{1} << (index & 63));
+}
 
 const MaterialTag* material_tag_at(const std::vector<MaterialTag>& tags, u32 index) noexcept {
     return index < tags.size() ? &tags[index] : nullptr;
@@ -345,7 +412,8 @@ bool tag_data(DataInfo& info, const J3DModelData* data, const char* label) {
 // Entries live in deques and the maps hold indices, so cached entry pointers survive every insert
 class Registry {
 public:
-    explicit Registry(bool quiet = false) : m_quiet(quiet) {
+    explicit Registry(bool quiet = false, const CaptureSource* source = nullptr)
+        : m_quiet(quiet), m_source(source) {
         m_modelIndex.reserve(8192);
         m_dataIndex.reserve(2048);
     }
@@ -404,12 +472,20 @@ public:
         }
     }
 
-    void declare_room(const J3DModel* model, int roomNo, int part) {
+    void declare_room(const J3DModel* model, int roomNo, int part, u16 shapes = 0) {
         ModelEntry& entry = known_model(model);
         entry.categories = AURORA_CAT_STATIC | AURORA_CAT_TERRAIN;
         entry.flags |= AURORA_OBJ_IMMOBILE;
         entry.roomNo = static_cast<s16>(roomNo);
         entry.part = static_cast<s8>(part);
+        const size_t words = (static_cast<size_t>(shapes) + 63) / 64;
+        entry.room = RoomShapes{.covered = std::vector<u64>(words),
+            .stamped = std::vector<u64>(words),
+            .shapes = shapes};
+        const u32 index = m_modelIndex.find(model)->second;
+        if (std::ranges::find(m_roomModels, index) == m_roomModels.end()) {
+            m_roomModels.push_back(index);
+        }
     }
 
     void declare(const J3DModel* model, u32 categories, u32 flags) {
@@ -481,13 +557,15 @@ public:
         }
         // Ahead of the suppression test, since shadow images draw a model before the main pass
         declare_arrays(*entry.info, entry.facts, shape, frame);
-        if (m_suppression > 0) {
+        const bool captureOnly = consume_room_stamp(entry, shape->getIndex(), frame);
+        if (m_suppression > 0 && !captureOnly) {
             ++m_current.suppressedShapes;
             return false;
         }
 
         ShapeInputs in = base_inputs(entry);
         in.shapeIndex = shape->getIndex();
+        in.captureOnly = captureOnly;
         if (!entry.info->materials.empty()) {
             if (J3DMaterial* material = shape->getMaterial(); material != nullptr) {
                 in.material = material_tag_at(entry.info->materials, material->getIndex());
@@ -560,18 +638,109 @@ public:
             }
             m_depth = 0;
         }
+        m_current.stampsUnconsumed = release_stamps(frame);
         if (array_log(m_frame)) {
             RegistryLog.info("render.objects log: frame {} objects {} suppressed {} nested {} "
                              "cpu_deformed {} billboard {} arrays declared {} released {} "
-                             "policy {} bg_maxx {}",
+                             "policy {} bg_maxx {} capture_only {} unconsumed {} loss_rearms {}",
                 m_current.frame, m_current.objects, m_current.suppressedShapes, m_current.nested,
                 m_current.cpuDeformed, m_current.billboards, m_current.declaredArrays,
-                m_current.releasedArrays, m_current.policyShapes, m_current.bgMaxxModels);
+                m_current.releasedArrays, m_current.policyShapes, m_current.bgMaxxModels,
+                m_current.captureOnlyShapes, m_current.stampsUnconsumed, m_current.lossRearms);
         }
+        const u32 closing = m_frame;
         m_last = m_current;
         m_current = RegistryStats{.frame = frame};
         m_frame = frame;
         m_totalBeginsAtRoll = m_totalBegins;
+        roll_capture(closing);
+    }
+
+    void set_capture_inputs(const CaptureInputs& inputs) noexcept { m_capture.inputs = inputs; }
+    const RoomCapture& capture() const noexcept { return m_capture; }
+
+    void request_rearm() {
+        if (!m_capture.inputs.active) {
+            return;
+        }
+        ++m_capture.serial;
+        if (array_log(m_frame)) {
+            RegistryLog.info("render.objects log: frame {} capture re-arm requested", m_frame);
+        }
+    }
+
+    bool take_room_capture(const J3DModel* model, u16 shape, u32 frame) {
+        roll(frame);
+        if (!m_capture.inputs.active) {
+            return false;
+        }
+        ModelEntry& entry = drawn_model(model);
+        if (entry.roomNo < 0 || shape >= entry.room.shapes) {
+            return false;
+        }
+        RoomShapes& room = clip_room(entry, frame);
+        if (!room.armed || m_capture.budget == 0 || has_bit(room.covered, shape) ||
+            has_bit(room.stamped, shape))
+        {
+            return false;
+        }
+        set_bit(room.stamped, shape);
+        --m_capture.budget;
+        m_stamps.push_back({&entry, shape, frame});
+        return true;
+    }
+
+    void note_room_shape_shown(const J3DModel* model, u16 shape, u32 frame) {
+        roll(frame);
+        if (!m_capture.inputs.active && m_stamps.empty()) {
+            return;
+        }
+        ModelEntry& entry = drawn_model(model);
+        if (entry.roomNo < 0 || shape >= entry.room.shapes) {
+            return;
+        }
+        clear_bit(entry.room.stamped, shape);
+        if (m_capture.inputs.active) {
+            clip_room(entry, frame);
+            cover_room_shape(entry, shape, frame);
+        }
+    }
+
+    bool consume_room_stamp(ModelEntry& entry, u16 shape, u32 frame) {
+        if (entry.roomNo < 0 || shape >= entry.room.shapes || !has_bit(entry.room.stamped, shape)) {
+            return false;
+        }
+        ++m_current.captureOnlyShapes;
+        if (m_suppression == 0) {
+            cover_room_shape(entry, shape, frame);
+        }
+        return true;
+    }
+
+    bool room_loaded(const RoomShapes& room) const noexcept {
+        return room.shapes != 0 && room.clipFrame != kNoFrame &&
+               (room.clipFrame == m_frame || room.clipFrame == m_last.frame);
+    }
+
+    RoomCoverage room_coverage() const noexcept {
+        RoomCoverage coverage;
+        for (const u32 index : m_roomModels) {
+            const ModelEntry& entry = m_models[index];
+            if (entry.roomNo < 0 || !room_loaded(entry.room)) {
+                continue;
+            }
+            ++coverage.rooms;
+            coverage.shapes += entry.room.shapes;
+            if (entry.room.serial == m_capture.serial) {
+                coverage.covered += entry.room.coveredCount;
+            }
+            if (entry.room.armed || entry.room.serial != m_capture.serial) {
+                ++coverage.armed;
+            } else {
+                coverage.coverFrames = std::max(coverage.coverFrames, entry.room.coverFrames);
+            }
+        }
+        return coverage;
     }
 
     void set_log_until(u32 frame) noexcept { m_logUntil = frame; }
@@ -781,6 +950,110 @@ private:
         return m_nextGeneration++;
     }
 
+    RoomShapes& clip_room(ModelEntry& entry, u32 frame) noexcept {
+        RoomShapes& room = entry.room;
+        room.clipFrame = frame;
+        if (room.serial != m_capture.serial) {
+            room.serial = m_capture.serial;
+            std::ranges::fill(room.covered, 0);
+            room.coveredCount = 0;
+            room.armed = true;
+            room.armFrame = frame;
+            room.coverFrames = 0;
+        }
+        return room;
+    }
+
+    void cover_room_shape(ModelEntry& entry, u16 shape, u32 frame) {
+        RoomShapes& room = entry.room;
+        if (!room.armed || has_bit(room.covered, shape)) {
+            return;
+        }
+        set_bit(room.covered, shape);
+        if (++room.coveredCount < room.shapes) {
+            return;
+        }
+        room.armed = false;
+        room.coverFrames = frame - room.armFrame + 1;
+        if (array_log(frame)) {
+            RegistryLog.info("render.objects log: frame {} room {} part {} covered {} shapes in {} "
+                             "frames",
+                frame, entry.roomNo, entry.part, room.shapes, room.coverFrames);
+        }
+    }
+
+    u32 release_stamps(u32 frame) noexcept {
+        u32 unconsumed = 0;
+        std::erase_if(m_stamps, [frame, &unconsumed](const RoomStamp& stamp) {
+            if (frame - stamp.frame <= 1) {
+                return false;
+            }
+            RoomShapes& room = stamp.entry->room;
+            if (stamp.shape < room.shapes) {
+                clear_bit(room.stamped, stamp.shape);
+                unconsumed += has_bit(room.covered, stamp.shape) ? 0 : 1;
+            }
+            return true;
+        });
+        return unconsumed;
+    }
+
+    bool any_room_armed(u32 closing) {
+        std::erase_if(m_roomModels, [this](u32 index) { return m_models[index].roomNo < 0; });
+        return std::ranges::any_of(m_roomModels, [this, closing](u32 index) {
+            const RoomShapes& room = m_models[index].room;
+            return room.shapes != 0 && closing != kNoFrame && room.clipFrame == closing &&
+                   (room.armed || room.serial != m_capture.serial);
+        });
+    }
+
+    void roll_capture(u32 closing) {
+        const bool wasComplete = m_capture.inputs.coverageComplete;
+        if (m_source != nullptr) {
+            m_capture.inputs = m_source->sample();
+        }
+        const CaptureInputs& in = m_capture.inputs;
+        m_capture.budget = kRoomCaptureBudget;
+        if (!in.active) {
+            m_capture.wasActive = false;
+            return;
+        }
+        const bool rising = !std::exchange(m_capture.wasActive, true);
+        const bool lost = in.lostCaptures > m_capture.lastLost;
+        m_capture.lastLost = in.lostCaptures;
+        std::string_view rearm;
+        if (rising || in.epoch != m_capture.armedEpoch) {
+            rearm = rising ? "activation" : "epoch";
+            m_capture.armedEpoch = in.epoch;
+            m_capture.lossRearms = 0;
+        } else if (lost && m_capture.lossRearms < kMaxLossRearms) {
+            rearm = "loss";
+            ++m_capture.lossRearms;
+            ++m_current.lossRearms;
+        } else if (lost && should_warn(Warning::LossRearms)) {
+            RegistryLog.warn("render registry: retained captures still lost after {} re-arms in "
+                             "scene epoch {}",
+                kMaxLossRearms, in.epoch);
+        }
+        if (!rearm.empty()) {
+            ++m_capture.serial;
+        }
+        const bool hold = any_room_armed(closing);
+        if (array_log(m_frame) &&
+            (!rearm.empty() || hold != m_capture.hold || in.coverageComplete != wasComplete))
+        {
+            RegistryLog.info("render.objects log: frame {} capture re-arm {} epoch {} hold {} "
+                             "aurora complete {} lost {}",
+                m_frame, rearm.empty() ? "none" : rearm, in.epoch, hold, in.coverageComplete,
+                in.lostCaptures);
+        }
+        m_capture.hold = hold;
+        ++m_capture.holds;
+        if (m_source != nullptr) {
+            m_source->hold(hold);
+        }
+    }
+
     bool should_warn(Warning warning) noexcept {
         return !m_quiet && !std::exchange(m_warned[static_cast<size_t>(warning)], true);
     }
@@ -826,13 +1099,31 @@ private:
     RegistryStats m_last;
     std::thread::id m_owner;
     std::array<bool, static_cast<size_t>(Warning::Count)> m_warned{};
+    std::vector<u32> m_roomModels;
+    std::vector<RoomStamp> m_stamps;
+    RoomCapture m_capture;
     bool m_quiet;
+    const CaptureSource* m_source;
 };
+
+CaptureInputs sample_live_capture() noexcept {
+    if (!aurora::render::retained_capture_active()) {
+        return {};
+    }
+    const aurora::render::RetainedStats stats = aurora::render::retained_stats();
+    return {true, scene_epoch(), stats.lostCaptures, stats.coverageComplete};
+}
+
+void hold_live_coverage(bool hold) noexcept {
+    aurora::render::retained_hold_coverage(hold);
+}
+
+constexpr CaptureSource kLiveCapture{sample_live_capture, hold_live_coverage};
 
 // A function-local registry is ready for models constructed during static initialization
 Registry& live() noexcept {
     // Never destroyed, since static destructors free archives after function-local statics die
-    static Registry& registry = *new Registry;
+    static Registry& registry = *new Registry(false, &kLiveCapture);
     return registry;
 }
 
@@ -1073,7 +1364,7 @@ std::string test_compose_flags() {
         set(in);
         return compose_shape_object(in).flags;
     };
-    const std::array<std::tuple<std::string_view, u32, u32>, 7> cases{{
+    const std::array<std::tuple<std::string_view, u32, u32>, 8> cases{{
         {"skinPosCpu", flags_for([](ShapeInputs& in) { in.facts.skinPosCpu = true; }),
             kCpuDeformed},
         {"deformData", flags_for([](ShapeInputs& in) { in.facts.deformData = true; }),
@@ -1087,6 +1378,8 @@ std::string test_compose_flags() {
         {"fast skin only", flags_for([](ShapeInputs&) {}), 0},
         {"immobile", flags_for([](ShapeInputs& in) { in.modelFlags = AURORA_OBJ_IMMOBILE; }),
             AURORA_OBJ_IMMOBILE},
+        {"captureOnly", flags_for([](ShapeInputs& in) { in.captureOnly = true; }),
+            AURORA_OBJ_CAPTURE_ONLY},
     }};
     for (const auto& [name, got, expected] : cases) {
         if (got != expected) {
@@ -1189,6 +1482,127 @@ std::string test_bg_maxx() {
         registry.last().bgMaxxModels != 1)
     {
         append_problem(problems, "a new data generation is not checked again");
+    }
+    return problems;
+}
+
+u32 cover_room(Registry& registry, const J3DModel* model, u32 frame, bool consume) {
+    registry.roll(frame);
+    ModelEntry& entry = *registry.find_model(model);
+    u32 taken = 0;
+    for (u16 j = 0; j < entry.room.shapes; ++j) {
+        if (registry.take_room_capture(model, j, frame)) {
+            ++taken;
+            if (consume) {
+                registry.consume_room_stamp(entry, j, frame);
+            }
+        }
+    }
+    return taken;
+}
+
+std::string test_room_coverage() {
+    std::string problems;
+    Registry registry(true);
+    const J3DModel* model = fake_model(0x400);
+    registry.initialize_model(model);
+    registry.declare_room(model, 1, 0, 200);
+    ModelEntry& entry = *registry.find_model(model);
+    if (cover_room(registry, model, 1, true) != 0 || registry.capture().holds != 0) {
+        append_problem(problems, "shapes taken or coverage held while inactive");
+    }
+    registry.set_capture_inputs({true, 5, 0});
+    std::array<u32, 5> taken{};
+    for (u32 i = 0; i < taken.size(); ++i) {
+        taken[i] = cover_room(registry, model, 2 + i, true);
+    }
+    if (taken != std::array<u32, 5>{64, 64, 64, 8, 0} || entry.room.armed ||
+        entry.room.coveredCount != 200 || entry.room.coverFrames != 4)
+    {
+        append_problem(
+            problems, fmt::format("took {} {} {} {} {}, covered {} in {} frames, armed {}",
+                          taken[0], taken[1], taken[2], taken[3], taken[4], entry.room.coveredCount,
+                          entry.room.coverFrames, entry.room.armed));
+    }
+    registry.set_capture_inputs({true, 6, 0});
+    registry.roll(7);
+    u32 rearmed = 0;
+    for (u16 j = 0; j < 64; ++j) {
+        if (registry.take_room_capture(model, j, 7)) {
+            ++rearmed;
+            if (j != 0) {
+                registry.consume_room_stamp(entry, j, 7);
+            }
+        }
+    }
+    if (rearmed != 64 || !registry.capture().hold) {
+        append_problem(problems, fmt::format("an epoch change re-arms {} shapes", rearmed));
+    }
+    registry.roll(8);
+    const bool heldStamp = registry.take_room_capture(model, 0, 8);
+    registry.roll(9);
+    if (heldStamp || registry.last().stampsUnconsumed != 1 ||
+        !registry.take_room_capture(model, 0, 9))
+    {
+        append_problem(problems,
+            fmt::format("{} unconsumed stamps, shape 0 retaken {} before its stamp expired",
+                registry.last().stampsUnconsumed, heldStamp));
+    }
+    if (registry.consume_room_stamp(entry, 1, 9)) {
+        append_problem(problems, "a covered shape consumes a stamp");
+    }
+    registry.take_room_capture(model, 64, 9);
+    registry.take_room_capture(model, 65, 9);
+    registry.roll(10);
+    registry.note_room_shape_shown(model, 65, 10);
+    if (!registry.consume_room_stamp(entry, 64, 10) || registry.consume_room_stamp(entry, 65, 10)) {
+        append_problem(problems, "a stamp is not consumed in the next frame or survives a show");
+    }
+    registry.set_capture_inputs({});
+    registry.roll(11);
+    if (registry.take_room_capture(model, 66, 11) || registry.capture().holds != 9) {
+        append_problem(problems,
+            fmt::format("taken after deactivation, {} hold calls", registry.capture().holds));
+    }
+    return problems;
+}
+
+std::string test_room_coverage_loss() {
+    std::string problems;
+    Registry registry(true);
+    const J3DModel* model = fake_model(0x410);
+    registry.initialize_model(model);
+    registry.declare_room(model, 2, 0, 100);
+    u32 frame = 1;
+    const auto step = [&](u32 epoch, u64 lost) {
+        registry.set_capture_inputs({true, epoch, lost});
+        return cover_room(registry, model, frame++, true);
+    };
+    step(3, 0);
+    step(3, 0);
+    if (step(3, 0) != 0 || registry.capture().hold) {
+        append_problem(problems, "coverage held after the room was covered");
+    }
+    for (u64 lost = 1; lost <= 4; ++lost) {
+        const u32 taken = step(3, lost);
+        const bool held = registry.capture().hold;
+        const bool rearmed = lost <= kMaxLossRearms;
+        if (taken != (rearmed ? 64 : 0) || held != rearmed) {
+            append_problem(
+                problems, fmt::format("loss {} takes {} shapes, hold {}", lost, taken, held));
+        }
+        step(3, lost);
+        if (step(3, lost) != 0 || registry.capture().hold) {
+            append_problem(problems, fmt::format("loss {} keeps the hold once covered", lost));
+        }
+    }
+    if (registry.capture().lossRearms != kMaxLossRearms) {
+        append_problem(problems, fmt::format("{} loss re-arms", registry.capture().lossRearms));
+    }
+    step(4, 4);
+    step(4, 5);
+    if (registry.capture().lossRearms != 1 || !registry.capture().hold) {
+        append_problem(problems, "a new epoch does not allow loss re-arms again");
     }
     return problems;
 }
@@ -1455,7 +1869,8 @@ void on_resource_heap_destroyed(const JKRHeap* heap) noexcept {
 void declare_room_model(const J3DModel* model, int roomNo, int part) noexcept {
     Registry& registry = live();
     registry.check_thread();
-    registry.declare_room(model, roomNo, part);
+    const J3DModelData* data = model != nullptr ? model->mModelData : nullptr;
+    registry.declare_room(model, roomNo, part, data != nullptr ? data->getShapeNum() : 0);
 }
 
 void declare_model(const J3DModel* model, u32 categories, u32 flags) noexcept {
@@ -1478,6 +1893,23 @@ void note_bg_maxx_model(const J3DModel* model) noexcept {
     registry.check_thread();
     registry.note_bg_maxx_data(model->mModelData, aurora::gfx::current_frame(),
         [](DataInfo& info, const J3DModelData* data) { return tag_data(info, data, "bg_object"); });
+}
+
+bool take_room_capture(const J3DModel* model, u16 shape) noexcept {
+    if (!hints_active()) {
+        return false;
+    }
+    return live().take_room_capture(model, shape, aurora::gfx::current_frame());
+}
+
+void note_room_shape_shown(const J3DModel* model, u16 shape) noexcept {
+    if (hints_active()) {
+        live().note_room_shape_shown(model, shape, aurora::gfx::current_frame());
+    }
+}
+
+void rearm_room_capture() noexcept {
+    live().request_rearm();
 }
 
 u32 model_serial(const J3DModel* model) noexcept {
@@ -1510,6 +1942,9 @@ ShapeObjectHint compose_shape_object(const ShapeInputs& in) noexcept {
     if (in.facts.teleport) {
         flags |= AURORA_OBJ_TELEPORT;
     }
+    if (in.captureOnly) {
+        flags |= AURORA_OBJ_CAPTURE_ONLY;
+    }
     return {make_object_id(ObjectKind::J3dModel, in.serial), in.shapeIndex, in.generation,
         categories, flags};
 }
@@ -1530,7 +1965,9 @@ void pop_object_suppression() noexcept {
 }
 
 void note_object_open() noexcept {
-    live().note_open();
+    Registry& registry = live();
+    registry.roll(aurora::gfx::current_frame());
+    registry.note_open();
 }
 
 void note_object_close() noexcept {
@@ -1585,6 +2022,19 @@ std::vector<std::string> registry_report() {
         fmt::format("render.objects: immutable data {} sent {} released {} vcd checks {} misses {}",
             immutable, registry.declares().total, registry.releases().total, registry.vcd_checks(),
             registry.vcd_misses()));
+
+    const RoomCapture& capture = registry.capture();
+    const RoomCoverage coverage = registry.room_coverage();
+    const aurora::render::RetainedStats retained = aurora::render::retained_stats();
+    lines.push_back(
+        fmt::format("render.objects: retained capture active {} armed {} epoch {} rooms {} "
+                    "shapes {}/{} stamps not consumed {} loss re-arms {} frames to cover "
+                    "{}; aurora complete {} static objects {} undelivered statics {} "
+                    "lost captures {} churn {}",
+            capture.inputs.active, coverage.armed, capture.inputs.epoch, coverage.rooms,
+            coverage.covered, coverage.shapes, last.stampsUnconsumed, capture.lossRearms,
+            coverage.coverFrames, retained.coverageComplete, retained.staticObjects,
+            retained.undeliveredStatics, retained.lostCaptures, retained.churn));
 
     std::vector<std::tuple<int, int, u64, u32>> rooms;
     for (const ModelEntry& entry : registry.models()) {
@@ -1653,6 +2103,8 @@ void registry_self_test(SelfTestReport& report) {
     check("registry.immutable_select", test_immutable_select());
     check("registry.array_lifecycle", test_array_lifecycle());
     check("registry.array_check_gate", test_array_check_gate());
+    check("registry.room_coverage", test_room_coverage());
+    check("registry.room_coverage_loss", test_room_coverage_loss());
     check("registry.live_untouched",
         live().snapshot() == before ? std::string{} : "the live registry changed during the suite");
     if (!hints_active()) {

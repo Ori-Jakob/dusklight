@@ -49,6 +49,7 @@ struct ShapeInputs {
     u32 modelFlags = 0;
     const MaterialTag* material = nullptr;
     bool pendingTags = false;
+    bool captureOnly = false;
     ShapeFacts facts;
 };
 
@@ -73,6 +74,9 @@ struct RegistryStats {
     u32 releasedArrays = 0;
     u32 policyShapes = 0;
     u32 bgMaxxModels = 0;
+    u32 captureOnlyShapes = 0;
+    u32 stampsUnconsumed = 0;
+    u32 lossRearms = 0;
 };
 
 void on_model_initialized(const J3DModel* model) noexcept;
@@ -83,6 +87,9 @@ void declare_room_model(const J3DModel* model, int roomNo, int part) noexcept;
 void declare_model(const J3DModel* model, u32 categories, u32 flags) noexcept;
 void mark_model_teleport(const J3DModel* model) noexcept;
 void note_bg_maxx_model(const J3DModel* model) noexcept;
+bool take_room_capture(const J3DModel* model, u16 shape) noexcept;
+void note_room_shape_shown(const J3DModel* model, u16 shape) noexcept;
+void rearm_room_capture() noexcept;
 u32 model_serial(const J3DModel* model) noexcept;
 u32 data_generation(const J3DModelData* data) noexcept;
 

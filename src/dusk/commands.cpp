@@ -497,6 +497,7 @@ static void RunRenderTrace(
                 pathString, aurora::trace::capture_status().error));
         return;
     }
+    render::rearm_room_capture();
     WriteTraceMetadata(path, *frames);
     state.tracePath = pathString;
     state.traceFrames = static_cast<unsigned int>(*frames);
