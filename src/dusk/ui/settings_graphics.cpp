@@ -231,6 +231,10 @@ bool ao_dependent_row_disabled(GraphicsQuality ao) noexcept {
     return ao == GraphicsQuality::Off;
 }
 
+bool keep_cues_disabled(GraphicsGameShadows game) noexcept {
+    return game != GraphicsGameShadows::Auto;
+}
+
 Rml::String on_off(bool value) {
     return value ? "On" : "Off";
 }
@@ -786,9 +790,7 @@ constexpr std::array<GraphicsRow, 78> kRows{{
             bool_row(ctx, info, graphics().pbr,
                 {
                     .help = "Light the scene with physically based materials and lights. Uses "
-                            "more GPU time and video memory, more so at high Internal Resolution. "
-                            "Until real-time shadows arrive, many of the game's own shadows are "
-                            "not drawn on PBR-lit surfaces.",
+                            "more GPU time and video memory, more so at high Internal Resolution.",
                     .gate = toggle_gate<F::Pbr>(),
                     .clamped = [] { return clamped().pbr; },
                 });
@@ -848,7 +850,8 @@ constexpr std::array<GraphicsRow, 78> kRows{{
         [](RowContext& ctx, const GraphicsRowInfo& info) {
             enum_row(ctx, info, graphics().shadowQuality,
                 {
-                    .help = "Real-time shadows from the sun, the moon and other lights.",
+                    .help = "Real-time shadows from the sun and the moon. They use more GPU time "
+                            "and video memory, more so at high Internal Resolution.",
                     .options = kQualityOptions,
                     .gate = toggle_gate<F::Shadows>(),
                     .clamped = [] { return render::from_aurora(clamped().shadows.quality); },
@@ -859,7 +862,8 @@ constexpr std::array<GraphicsRow, 78> kRows{{
             enum_row(ctx, info, graphics().gameShadows,
                 {
                     .help = "What happens to the game's own shadows. Replace When Covered removes "
-                            "them only where real-time shadows exist.",
+                            "each one only once a real-time shadow takes its place. Remove takes "
+                            "them all away, except ground marks and landing markers.",
                     .options = kGameShadowOptions,
                     .gate = toggle_gate<F::GameShadowSuppression>(),
                     .clamped = [] { return render::from_aurora(clamped().shadows.game); },
@@ -875,9 +879,7 @@ constexpr std::array<GraphicsRow, 78> kRows{{
                     .gate = param_gate<F::GameShadowSuppression>(),
                     .clamped = [] { return clamped().shadows.keepCues; },
                     .isDisabled =
-                        [] {
-                            return graphics().gameShadows.getValue() != GraphicsGameShadows::Auto;
-                        },
+                        [] { return keep_cues_disabled(graphics().gameShadows.getValue()); },
                 });
         }},
     {{S::Shadows, "Original Shadow Strength", "graphics.legacyShadowGain", "M13", false},
@@ -885,7 +887,8 @@ constexpr std::array<GraphicsRow, 78> kRows{{
             tuner_row(ctx, info,
                 {
                     .option = GraphicsOption::LegacyShadowGain,
-                    .help = "Darkness of the game's own shadows.",
+                    .help = "How dark real-time shadows are on surfaces lit the original way, "
+                            "relative to the game's own shadow strength.",
                     .gate = param_gate<F::GameShadowSuppression>(),
                 });
         }},
@@ -1459,7 +1462,7 @@ constexpr std::array<GraphicsRow, 78> kRows{{
                     .isDisabled = advanced_off,
                 });
         }},
-    {{S::Advanced, "Shadow Page Budget", "graphics.shadowPageBudget", "M14", true},
+    {{S::Advanced, "Shadow Page Budget", "graphics.shadowPageBudget", "M13", true},
         [](RowContext& ctx, const GraphicsRowInfo& info) {
             tuner_row(ctx, info,
                 {
@@ -1741,6 +1744,58 @@ std::string test_debug_view_map() {
     return problems;
 }
 
+std::string test_shadows_unlock() {
+    std::string problems;
+    struct ShadowRow {
+        std::string_view label;
+        GraphicsSection section;
+        std::string_view unlockedIn;
+    };
+    constexpr std::array kShadowRows{
+        ShadowRow{"Shadow Quality", GraphicsSection::Shadows, "M13, M14"},
+        ShadowRow{"Game Shadows", GraphicsSection::Shadows, "M13"},
+        ShadowRow{"Keep Shadow Cues", GraphicsSection::Shadows, "M13"},
+        ShadowRow{"Original Shadow Strength", GraphicsSection::Shadows, "M13"},
+        ShadowRow{"Shadow Page Pool", GraphicsSection::Advanced, "M13"},
+        ShadowRow{"Shadow Page Budget", GraphicsSection::Advanced, "M13"},
+    };
+    for (const ShadowRow& expected : kShadowRows) {
+        const auto row = std::ranges::find_if(kRowInfos, [&](const GraphicsRowInfo& info) {
+            return std::string_view{info.label} == expected.label;
+        });
+        if (row == kRowInfos.end() || row->section != expected.section) {
+            append_item(problems, fmt::format("the {} row is missing or moved", expected.label));
+        } else if (std::string_view{row->unlockedIn} != expected.unlockedIn) {
+            append_item(problems, fmt::format("{} unlocks in {}, expected {}", expected.label,
+                                      row->unlockedIn, expected.unlockedIn));
+        }
+    }
+    for (const auto& option : kGameShadowOptions) {
+        const bool replace = option.value == GraphicsGameShadows::Auto;
+        if (keep_cues_disabled(option.value) == replace) {
+            append_item(problems, fmt::format("Game Shadows {} {} Keep Shadow Cues", option.label,
+                                      replace ? "disables" : "keeps"));
+        }
+    }
+    const ar::FeatureSupport medium =
+        ar::feature_support(F::Shadows, enum_option(GraphicsQuality::Medium));
+    if (!medium.supported && medium.reason != ar::Reason::NeedsCore &&
+        medium.reason != ar::Reason::MsaaActive && medium.reason != ar::Reason::ColorBudget &&
+        medium.reason != ar::Reason::NoFragmentStorage &&
+        medium.reason != ar::Reason::NoVertexStorage &&
+        medium.reason != ar::Reason::NeedsRetainedScene)
+    {
+        append_item(
+            problems, fmt::format("Shadows Medium gives {}", ar::reason_name(medium.reason)));
+    }
+    const ar::FeatureSupport remove = ar::feature_support(
+        F::GameShadowSuppression, render::game_shadows_option(GraphicsGameShadows::Remove));
+    if (!remove.supported) {
+        append_item(problems, fmt::format("Remove gives {}", ar::reason_name(remove.reason)));
+    }
+    return problems;
+}
+
 }  // namespace
 
 void build_graphics_tab(Window& window, Pane& leftPane, Pane& rightPane, bool prelaunch) {
@@ -1776,6 +1831,7 @@ void graphics_tab_self_test(render::SelfTestReport& report) {
     check("rows.pbr_blend_share", test_rows_pbr_blend_share());
     check("rows.indirect_light_follows_ao", test_indirect_light_follows_ao());
     check("rows.debug_view_map", test_debug_view_map());
+    check("rows.shadows_unlock", test_shadows_unlock());
 }
 
 }  // namespace dusk::ui
