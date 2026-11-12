@@ -53,6 +53,7 @@
 #include "dusk/interp/frame_interpolation.h"
 #include "dusk/logging.h"
 #include "dusk/render/draw_tags.hpp"
+#include "dusk/render/fake_shadows.hpp"
 #include "dusk/render/lights.hpp"
 #include "dusk/render/render_bridge.hpp"
 #include "dusk/settings.h"
@@ -2244,6 +2245,7 @@ int mDoGph_Painter() {
             #endif
 
 #if TARGET_PC
+            dusk::render::fake_shadows::decide_frame(g_dComIfG_gameInfo.drawlist.mShadowControl);
             dusk::render::begin_tag_scope(dusk::render::TagScope::ShadowImage);
 #endif
             GX_DEBUG_GROUP(dComIfGd_imageDrawShadow, camera_p->view.viewMtx);

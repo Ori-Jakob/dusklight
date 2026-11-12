@@ -18,6 +18,7 @@
 #include "dusk/interp/frame_interpolation.h"
 #include "dusk/logging.h"
 #include "dusk/render/draw_tags.hpp"
+#include "dusk/render/fake_shadows.hpp"
 #include "helpers/gx_helper.h"
 
 #include "d/d_menu_collect.h"
@@ -1316,6 +1317,9 @@ u32 dDlst_shadowReal_c::set(u32 i_key, J3DModel* i_model, cXyz* param_2, f32 par
     dScnKy_env_light_c* env_light = dKy_getEnvlight();
 
     if (mModelNum == 0) {
+#if TARGET_PC
+        dusk::render::fake_shadows::note_real(this, param_5);
+#endif
         cXyz sp60;
 
         if (param_5 != NULL) {
@@ -1492,6 +1496,9 @@ void dDlst_shadowSimple_c::set(cXyz* param_0, f32 param_1, f32 param_2, cXyz* pa
     cMtx_concat(j3dSys.getViewMtx(), mDoMtx_stack_c::get(), mMtx);
 #endif
     mpTexObj = param_6;
+#if TARGET_PC
+    dusk::render::fake_shadows::note_blob(this);
+#endif
 }
 
 void dDlst_shadowControl_c::init() {
@@ -1540,6 +1547,7 @@ void dDlst_shadowControl_c::reset() {
     field_0x4 = NULL;
 
 #if TARGET_PC
+    dusk::render::fake_shadows::begin_draw_pass();
     if (mTexResScale != dusk::getSettings().game.shadowResolutionMultiplier)
         init();
 #endif
@@ -1681,7 +1689,8 @@ void dDlst_shadowControl_c::draw(Mtx param_0) {
                                   l_tevColorChan[i2]);
 #if TARGET_PC
             const dusk::render::ShadowEntryObject shadowEntry(dusk::render::ObjectKind::RealShadow,
-                real->mpModels[0], int(real - mReal), real->mShadowRealPoly.mCount != 0);
+                real->mpModels[0], int(real - mReal), real->mShadowRealPoly.mCount != 0,
+                dusk::render::fake_shadows::real_sub_id(*real));
 #endif
             real->draw();
             i2 = (i2 + 1) % 4;
@@ -1698,8 +1707,12 @@ void dDlst_shadowControl_c::draw(Mtx param_0) {
     dDlst_shadowSimple_c* simple = mSimple;
     for (int i = 0; i < mSimpleNum; i++) {
 #if TARGET_PC
-        const dusk::render::ShadowEntryObject shadowEntry(
-            dusk::render::ObjectKind::SimpleShadow, nullptr, i, true);
+        if (simple->mDuskSkip) {
+            simple++;
+            continue;
+        }
+        const dusk::render::ShadowEntryObject shadowEntry(dusk::render::ObjectKind::SimpleShadow,
+            nullptr, i, true, dusk::render::fake_shadows::blob_sub_id(*simple));
 #endif
         simple->draw();
         simple++;

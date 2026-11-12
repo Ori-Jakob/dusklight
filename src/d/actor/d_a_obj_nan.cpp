@@ -11,6 +11,9 @@
 #include "d/d_cc_uty.h"
 #include "d/d_com_inf_game.h"
 #include <cstring>
+#if TARGET_PC
+#include "dusk/render/fake_shadows.hpp"
+#endif
 
 class daObj_NanHIO_c {
 public:
@@ -615,6 +618,10 @@ inline int daObjNAN_c::draw() {
                 gndChk.SetPos(&cStack_88);
                 f32 groundCross = dComIfG_Bgsp().GroundCross(&gndChk);
                 if (groundCross != G_CM3D_F_INF) {
+#if TARGET_PC
+                    const dusk::render::fake_shadows::BlobClassScope blobClass(
+                        dusk::render::fake_shadows::Class::Cue);
+#endif
                     dComIfGd_setSimpleShadow(&current.pos, groundCross, 15.0f, gndChk, 0, -0.6f, 
                                              dDlst_shadowControl_c::getSimpleTex());
                 }

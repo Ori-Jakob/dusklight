@@ -10,6 +10,9 @@
 #include "d/d_com_inf_game.h"
 #include "d/actor/d_a_player.h"
 #include "d/d_s_play.h"
+#if TARGET_PC
+#include "dusk/render/fake_shadows.hpp"
+#endif
 
 enum daE_TH_ACTION {
     ACTION_STOP,
@@ -102,6 +105,10 @@ static int daE_TH_BALL_Draw(e_th_ball_class* i_this) {
     g_env_light.settingTevStruct(0, &a_this->current.pos, &a_this->tevStr);
     g_env_light.setLightTevColorType_MAJI(i_this->mpBallModel, &a_this->tevStr);
     mDoExt_modelUpdateDL(i_this->mpBallModel);
+#if TARGET_PC
+    const dusk::render::fake_shadows::BlobClassScope blobClass(
+        dusk::render::fake_shadows::Class::Telegraph);
+#endif
     dComIfGd_setSimpleShadow(&a_this->current.pos, i_this->mAcch.GetGroundH(), 55.0f + AREG_F(11), i_this->mAcch.m_gnd, 0, 1.0f, dDlst_shadowControl_c::getSimpleTex());
     chain_draw(i_this);
     return 1;

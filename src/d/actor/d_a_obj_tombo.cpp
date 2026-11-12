@@ -14,6 +14,9 @@
 #include "d/d_item_data.h"
 #include "m_Do/m_Do_lib.h"
 #include <cstring>
+#if TARGET_PC
+#include "dusk/render/fake_shadows.hpp"
+#endif
 
 class daObj_TomHIO_c : public JORReflexible {
 public:
@@ -558,6 +561,10 @@ inline int daObjTOMBO_c::Draw() {
         mBrk->entry(morfModel->getModelData());
         mpMorf->entryDL();
         if (!field_0x75c) {
+#if TARGET_PC
+            const dusk::render::fake_shadows::BlobClassScope blobClass(
+                dusk::render::fake_shadows::Class::Cue);
+#endif
             dComIfGd_setSimpleShadow(&current.pos, mAcch.GetGroundH(), 15.0f, mAcch.m_gnd, 0, -0.6f,
                                      dDlst_shadowControl_c::getSimpleTex());
         }

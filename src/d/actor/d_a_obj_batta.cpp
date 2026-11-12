@@ -13,6 +13,9 @@
 #include "d/d_menu_insect.h"
 #include "d/d_item_data.h"
 #include <cstring>
+#if TARGET_PC
+#include "dusk/render/fake_shadows.hpp"
+#endif
 
 class daObj_BattaHIO_c : public JORReflexible {
 public:
@@ -559,6 +562,10 @@ inline int daObjBATTA_c::draw() {
         if (field_0x9f0 != 2) {
             mpMorf->entryDL();
             if (field_0x9f0 != 1) {
+#if TARGET_PC
+                const dusk::render::fake_shadows::BlobClassScope blobClass(
+                    dusk::render::fake_shadows::Class::Cue);
+#endif
                 dComIfGd_setSimpleShadow(&current.pos, mAcch.GetGroundH(), 15.0f, mAcch.m_gnd, 0,
                                          -0.6f, dDlst_shadowControl_c::getSimpleTex());
             }

@@ -378,14 +378,14 @@ u32 open_tag_scopes() noexcept {
 }
 
 ShadowEntryObject::ShadowEntryObject(
-    ObjectKind kind, const J3DModel* caster, int slot, bool draws) noexcept
+    ObjectKind kind, const J3DModel* caster, int slot, bool draws, u32 subId) noexcept
     : mOpen(draws && hints_active()) {
     if (!mOpen) {
         return;
     }
     const u32 serial = caster != nullptr ? model_serial(caster) : 0;
     GXAuroraBeginObject(
-        make_object_id(kind, shadow_entry_value(serial, slot)), 0, 0, kFakeShadowCategories, 0);
+        make_object_id(kind, shadow_entry_value(serial, slot)), subId, 0, kFakeShadowCategories, 0);
     note_object_open();
     TagStats& stats = live_frame();
     if (kind == ObjectKind::RealShadow) {

@@ -21,6 +21,7 @@
 
 #if TARGET_PC
 #include "dusk/interp/samples.h"
+#include "dusk/render/fake_shadows.hpp"
 #endif
 
 #if DEBUG
@@ -258,6 +259,9 @@ static int fopAc_Draw(void* i_this) {
             print_error_check_c error_check(actor, print_error_check_c::sDRAW);
             #endif
 
+#if TARGET_PC
+            const dusk::render::fake_shadows::ActorDrawScope drawScope(actor);
+#endif
             ret = fpcLf_DrawMethod((leafdraw_method_class DUSK_CONST*)actor->sub_method, actor);
 
             #if DEBUG

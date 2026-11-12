@@ -2,6 +2,8 @@
 
 #include "dusk/main.h"
 #include "dusk/render/camera_cuts.hpp"
+#include "dusk/render/draw_tags.hpp"
+#include "dusk/render/fake_shadows.hpp"
 #include "dusk/render/hints.hpp"
 #include "dusk/render/render_bridge.hpp"
 
@@ -47,6 +49,8 @@ constexpr size_t kArrayBaseBytes = 16;
 constexpr size_t kArraySlots = GX_VA_TEX7 - GX_VA_POS + 1;
 constexpr u32 kRoomCaptureBudget = 64;
 constexpr u32 kMaxLossRearms = 3;
+constexpr u32 kNotCaster =
+    AURORA_CAT_NO_CAPTURE | AURORA_CAT_NO_SHADOW_CAST | AURORA_CAT_FAKE_SHADOW;
 
 struct ImmutableArray {
     GXAttr attr = GX_VA_POS;
@@ -113,6 +117,7 @@ struct ModelEntry {
     u32 teleportFrame = kNoFrame;
     u32 lastDrawFrame = kNoFrame;
     u32 factsFrame = kNoFrame;
+    u32 enteredPass = 0;
     ShapeFacts facts;
     const J3DModelData* data = nullptr;
     DataInfo* info = nullptr;
@@ -510,6 +515,22 @@ public:
     ModelEntry* find_model(const J3DModel* model) {
         const auto it = m_modelIndex.find(model);
         return it == m_modelIndex.end() ? nullptr : &m_models[it->second];
+    }
+
+    void note_entry(const J3DModel* model, u32 pass) noexcept {
+        if (ModelEntry* entry = find_model(model); entry != nullptr) {
+            entry->enteredPass = pass;
+        }
+    }
+
+    bool entered_in(const J3DModel* model, u32 pass) const noexcept {
+        const auto it = m_modelIndex.find(model);
+        return it != m_modelIndex.end() && m_models[it->second].enteredPass == pass;
+    }
+
+    bool castable(const J3DModel* model) const noexcept {
+        const auto it = m_modelIndex.find(model);
+        return it != m_modelIndex.end() && (m_models[it->second].categories & kNotCaster) == 0;
     }
 
     u32 serial_of(const J3DModel* model) const {
@@ -1607,6 +1628,52 @@ std::string test_room_coverage_loss() {
     return problems;
 }
 
+std::string test_entered_flag() {
+    Registry registry(true);
+    const J3DModel* model = fake_model(0x900);
+    const J3DModel* other = fake_model(0x910);
+    registry.initialize_model(model);
+    registry.initialize_model(other);
+    registry.note_entry(model, 7);
+    registry.note_entry(fake_model(0x920), 7);
+    std::string problems;
+    if (!registry.entered_in(model, 7) || registry.entered_in(model, 8)) {
+        append_problem(problems, "the entry stamp is not per pass");
+    }
+    if (registry.entered_in(other, 7) || registry.entered_in(fake_model(0x920), 7)) {
+        append_problem(problems, "a model not entered or not registered reads entered");
+    }
+    registry.initialize_model(model);
+    if (registry.entered_in(model, 7)) {
+        append_problem(problems, "a re-initialized model keeps its stamp");
+    }
+    return problems;
+}
+
+std::string test_bridge_declared() {
+    Registry registry(true);
+    const J3DModel* shadow = fake_model(0xA00);
+    const J3DModel* bridge = fake_model(0xA10);
+    registry.initialize_model(shadow);
+    registry.initialize_model(bridge);
+    registry.declare(shadow, kFakeShadowCategories, 0);
+    const ModelEntry* entry = registry.find_model(shadow);
+    std::string problems;
+    if (entry == nullptr || (entry->categories & AURORA_CAT_FAKE_SHADOW) == 0) {
+        append_problem(problems, "the shadow mesh is not FAKE_SHADOW");
+    }
+    if (registry.castable(shadow) || !registry.castable(bridge) ||
+        registry.castable(fake_model(0xA20)))
+    {
+        append_problem(problems, "castable ignores FAKE_SHADOW or registration");
+    }
+    registry.declare(bridge, AURORA_CAT_DYNAMIC | AURORA_CAT_NO_SHADOW_CAST, 0);
+    if (registry.castable(bridge)) {
+        append_problem(problems, "NO_SHADOW_CAST still casts");
+    }
+    return problems;
+}
+
 std::string test_aurora_agrees() {
     std::string problems;
     const Registry& registry = live();
@@ -1916,6 +1983,19 @@ u32 model_serial(const J3DModel* model) noexcept {
     return live().serial_of(model);
 }
 
+void note_model_entry(const J3DModel* model) noexcept {
+    live().note_entry(model, fake_shadows::draw_pass());
+    fake_shadows::note_actor_model(model);
+}
+
+bool model_entered_this_frame(const J3DModel* model) noexcept {
+    return live().entered_in(model, fake_shadows::draw_pass());
+}
+
+bool registry_castable(const J3DModel* model) noexcept {
+    return live().castable(model);
+}
+
 u32 data_generation(const J3DModelData* data) noexcept {
     return live().generation_of(data);
 }
@@ -2105,6 +2185,8 @@ void registry_self_test(SelfTestReport& report) {
     check("registry.array_check_gate", test_array_check_gate());
     check("registry.room_coverage", test_room_coverage());
     check("registry.room_coverage_loss", test_room_coverage_loss());
+    check("fake_shadows.entered_flag", test_entered_flag());
+    check("fake_shadows.bridge_declared", test_bridge_declared());
     check("registry.live_untouched",
         live().snapshot() == before ? std::string{} : "the live registry changed during the suite");
     if (!hints_active()) {

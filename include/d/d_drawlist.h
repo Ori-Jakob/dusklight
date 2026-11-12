@@ -213,6 +213,11 @@ public:
 #if TARGET_PC
     const void* mVolumeMtxKey;
     const void* mMtxKey;
+    u32 mDuskActor;
+    u8 mDuskClass;
+    u8 mDuskOrdinal;
+    u8 mDuskDecision;
+    bool mDuskSkip;
 #endif
 };  // Size: 0x68
 
@@ -285,6 +290,11 @@ public:
     /* 0x2548 */ f32 mCameraZ;
     /* 0x254C */ dDlst_shadowReal_c* mZsortPre;
     /* 0x2550 */ dDlst_shadowReal_c* mZsortNext;
+#if TARGET_PC
+    u32 mDuskActor;
+    u8 mDuskSrc;
+    u8 mDuskDecision;
+#endif
 };  // Size: 0x2554
 
 class dDlst_shadowControl_c {

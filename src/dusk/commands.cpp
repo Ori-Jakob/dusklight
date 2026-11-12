@@ -1591,7 +1591,8 @@ void runCommand(std::string_view cmdLine, CommandState& state, const CommandOutp
         output("pos                                         Print player position and stage");
         output("rate [hz]                                   Get or set sim rate (1-480, default 30)");
         output("render.env [show|check|counts|log <n>]      Renderer environment state");
-        output("render.fakeshadows [log <n>]                Game shadow light sources");
+        output("render.fakeshadows [stats|reset|hash]       Game shadow decisions and counters");
+        output("render.fakeshadows log <n>                  Log game shadow sources and decisions");
         output(
             "render.graph.dump [file]                    Write the compiled render graph as JSON");
         output("render.hints [reset|ids]                    Hint counts, camera cuts, scene epoch");

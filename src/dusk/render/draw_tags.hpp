@@ -75,7 +75,7 @@ private:
 class ShadowEntryObject {
 public:
     [[nodiscard]] ShadowEntryObject(
-        ObjectKind kind, const J3DModel* caster, int slot, bool draws) noexcept;
+        ObjectKind kind, const J3DModel* caster, int slot, bool draws, u32 subId) noexcept;
     ~ShadowEntryObject();
     ShadowEntryObject(const ShadowEntryObject&) = delete;
     ShadowEntryObject& operator=(const ShadowEntryObject&) = delete;

@@ -10,6 +10,9 @@
 #include "d/d_s_play.h"
 #include "d/d_cc_uty.h"
 #include <cstring>
+#if TARGET_PC
+#include "dusk/render/fake_shadows.hpp"
+#endif
 
 enum I_Kag_RES_File_ID {
     /* BCK */
@@ -619,6 +622,10 @@ int daObjKAG_c::draw() {
             mpModelMorf->entryDL();
 
             if (field_0x85e != 1) {
+#if TARGET_PC
+                const dusk::render::fake_shadows::BlobClassScope blobClass(
+                    dusk::render::fake_shadows::Class::Cue);
+#endif
                 dComIfGd_setSimpleShadow(&current.pos, field_0x81c, 15.0f, mGndChk, 0, -0.6f, dDlst_shadowControl_c::getSimpleTex());
             }
         }

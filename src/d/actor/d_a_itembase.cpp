@@ -9,6 +9,9 @@
 #include "d/d_com_inf_game.h"
 #include "d/d_item_data.h"
 #include "f_op/f_op_actor_mng.h"
+#if TARGET_PC
+#include "dusk/render/fake_shadows.hpp"
+#endif
 
 int daItemBase_c::DeleteBase(const char* i_resName) {
     dComIfG_resDelete(&mPhase, i_resName);
@@ -162,6 +165,10 @@ void daItemBase_c::setShadow() {
 
     if (!chkFlag(0x10)) {
         if (getShadowSize() != 0.0f) {
+#if TARGET_PC
+            const dusk::render::fake_shadows::BlobClassScope blobClass(
+                dusk::render::fake_shadows::Class::Telegraph);
+#endif
             dComIfGd_setSimpleShadow(&current.pos, mAcch.GetGroundH(), size, mAcch.m_gnd, 0, 1.0f,
                                      dDlst_shadowControl_c::getSimpleTex());
         }

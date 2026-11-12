@@ -12,6 +12,11 @@
 #include "SSystem/SComponent/c_math.h"
 #include "d/d_bg_w.h"
 #include <cstring>
+#if TARGET_PC
+#include "dusk/render/draw_tags.hpp"
+#include "dusk/render/fake_shadows.hpp"
+#include "dusk/render/model_registry.hpp"
+#endif
 
 #define ACTION_WAIT 0
 #define ACTION_SWON 1
@@ -180,6 +185,9 @@ int daPillar_c::CreateHeap() {
         if (mpShadowModel == NULL) {
             return 0;
         }
+#if TARGET_PC
+        dusk::render::declare_model(mpShadowModel, dusk::render::kFakeShadowCategories, 0);
+#endif
     }
 
     return 1;
@@ -450,6 +458,11 @@ int daPillar_c::Draw() {
 
     if (mpShadowModel != NULL) {
         g_env_light.settingTevStruct(0, &current.pos, &tevStr);
+#if TARGET_PC
+        if (dusk::render::fake_shadows::bridge_skipped(mpShadowModel, mpModel, &tevStr)) {
+            return 1;
+        }
+#endif
         g_env_light.setLightTevColorType_MAJI(mpShadowModel, &tevStr);
         mDoExt_modelUpdateDL(mpShadowModel);
     }

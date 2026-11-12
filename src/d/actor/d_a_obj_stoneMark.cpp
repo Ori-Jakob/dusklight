@@ -12,6 +12,9 @@
 #include "d/d_com_inf_game.h"
 #include "f_op/f_op_actor_mng.h"
 #include "m_Do/m_Do_lib.h"
+#if TARGET_PC
+#include "dusk/render/fake_shadows.hpp"
+#endif
 
 static DUSK_CONST char* l_arcName = "A_IwaAto";
 
@@ -52,6 +55,10 @@ int daObjSMark_c::create() {
 
 int daObjSMark_c::draw() {
     static const f32 l_shadow_size[2] = {55.0f, 85.0f};
+#if TARGET_PC
+    const dusk::render::fake_shadows::BlobClassScope blobClass(
+        dusk::render::fake_shadows::Class::GroundMark);
+#endif
     dComIfGd_setSimpleShadow(&current.pos, mObjAcch.GetGroundH(),
                              l_shadow_size[fopAcM_GetParam(this) & 0xFF], mObjAcch.m_gnd,
                              shape_angle.y, (-0.6f - g_env_light.field_0x1238 * (0.7f - 0.3f)),

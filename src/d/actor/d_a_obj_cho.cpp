@@ -13,6 +13,9 @@
 #include "f_pc/f_pc_name.h"
 #include "f_op/f_op_camera_mng.h"
 #include <cstring>
+#if TARGET_PC
+#include "dusk/render/fake_shadows.hpp"
+#endif
 
 static bool hio_set;
 
@@ -475,6 +478,10 @@ int daObjCHO_c::Draw() {
         mpBrkAnm->entry(model->getModelData());
         mpMorf->entryDL();
         if (mLocation == LOC_OUTSIDE) {
+#if TARGET_PC
+            const dusk::render::fake_shadows::BlobClassScope blobClass(
+                dusk::render::fake_shadows::Class::Cue);
+#endif
             dComIfGd_setSimpleShadow(&current.pos, mAcch.GetGroundH(), 15.0f, mAcch.m_gnd, 0, -0.6f,
                                      dDlst_shadowControl_c::getSimpleTex());
         }

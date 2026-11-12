@@ -16,6 +16,9 @@
 #include "m_Do/m_Do_lib.h"
 #include "d/d_menu_insect.h"
 #include <cstring>
+#if TARGET_PC
+#include "dusk/render/fake_shadows.hpp"
+#endif
 
 daObj_TenHIO_c::daObj_TenHIO_c() {
     field_0x4 = -1;
@@ -646,6 +649,10 @@ static int daObjTEN_Draw(daObjTEN_c* i_this) {
         i_this->mBrk->entry(model->getModelData());
         i_this->mMorf->entryDL();
         if (i_this->field_0x624 == 0) {
+#if TARGET_PC
+            const dusk::render::fake_shadows::BlobClassScope blobClass(
+                dusk::render::fake_shadows::Class::Cue);
+#endif
             dComIfGd_setSimpleShadow(&i_this->current.pos, i_this->mAcch.GetGroundH(), 15.0f,
                                      i_this->mAcch.m_gnd, 0, -0.6f,
                                      dDlst_shadowControl_c::getSimpleTex());

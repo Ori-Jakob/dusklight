@@ -520,6 +520,9 @@ void J3DModel::calc() {
 }
 
 void J3DModel::entry() {
+#if TARGET_PC
+    dusk::render::note_model_entry(this);
+#endif
     j3dSys.setModel(this);
 
     if (checkFlag(J3DMdlFlag_SkinPosCpu)) {

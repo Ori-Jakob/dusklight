@@ -21,6 +21,9 @@
 #include "d/d_lib.h"
 #include "d/d_debug_viewer.h"
 #include "f_op/f_op_kankyo_mng.h"
+#if TARGET_PC
+#include "dusk/render/fake_shadows.hpp"
+#endif
 
 static const cM3dGCylS l_cyl_info[] = {
     { 0.0f, 0.0f, 0.0f, 30.0f, 100.0f },
@@ -1961,6 +1964,10 @@ int daObjCarry_c::draw() {
 
     if (fopAcM_GetModel(this) == NULL) {
         f32 temp_f31 = scale.x * data().field_0x74;
+#if TARGET_PC
+        const dusk::render::fake_shadows::BlobClassScope blobClass(
+            dusk::render::fake_shadows::Class::Telegraph);
+#endif
         if (checkFlag(1)) {
             dComIfGd_setSimpleShadow(&current.pos, mAcch.GetGroundH(), temp_f31, mAcch.m_gnd, shape_angle.y, 1.0f, NULL);
         } else {

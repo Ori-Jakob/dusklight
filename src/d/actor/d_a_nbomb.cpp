@@ -15,6 +15,9 @@
 #include "d/actor/d_a_mirror.h"
 #include "JSystem/JAudio2/JAUSectionHeap.h"
 #include <cstring>
+#if TARGET_PC
+#include "dusk/render/fake_shadows.hpp"
+#endif
 
 void daNbomb_c::coHitCallback(fopAc_ac_c* i_hitActor) {
     if (fopAcM_GetGroup(i_hitActor) == fopAc_ENEMY_e ||
@@ -1658,6 +1661,10 @@ int daNbomb_c::draw() {
     if (mAcch.GetGroundH() != -G_CM3D_F_INF && !fopAcM_checkCarryNow(this)) {
         cM3dGPla ground_poly;
         if (dComIfG_Bgsp().GetTriPla(mAcch.m_gnd, &ground_poly)) {
+#if TARGET_PC
+            const dusk::render::fake_shadows::BlobClassScope blobClass(
+                dusk::render::fake_shadows::Class::Telegraph);
+#endif
             dComIfGd_setSimpleShadow(&current.pos, mAcch.GetGroundH(), scale.x * 25.0f,
                                      &ground_poly.mNormal, 0, 1.0f,
                                      dDlst_shadowControl_c::getSimpleTex());

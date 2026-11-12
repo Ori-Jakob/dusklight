@@ -91,6 +91,9 @@ bool take_room_capture(const J3DModel* model, u16 shape) noexcept;
 void note_room_shape_shown(const J3DModel* model, u16 shape) noexcept;
 void rearm_room_capture() noexcept;
 u32 model_serial(const J3DModel* model) noexcept;
+void note_model_entry(const J3DModel* model) noexcept;
+bool model_entered_this_frame(const J3DModel* model) noexcept;
+bool registry_castable(const J3DModel* model) noexcept;
 u32 data_generation(const J3DModelData* data) noexcept;
 
 ShapeObjectHint compose_shape_object(const ShapeInputs& in) noexcept;
