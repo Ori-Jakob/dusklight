@@ -14,6 +14,9 @@
 #include "d/d_meter2_info.h"
 #include "d/d_tresure.h"
 #include <cstring>
+#if TARGET_PC
+#include "dusk/render/fake_shadows.hpp"
+#endif
 
 enum Coach_RES_File_ID {
     /* BCK */
@@ -1933,6 +1936,9 @@ int daNpcCoach_c::draw() {
     sp48.set(current.pos.x, current.pos.y + 150.0f, current.pos.z);
     tevStr.mLightPosWorld = current.pos;
     tevStr.mLightPosWorld.y += 1000.0f;
+#if TARGET_PC
+    dusk::render::fake_shadows::set_tag(&tevStr, dusk::render::fake_shadows::Src::Vertical);
+#endif
     mChHorse.mShadowKey = dComIfGd_setShadow(mChHorse.mShadowKey, 0, mChHorse.mpModelMorf->getModel(), &sp48, 1000.0f, 100.0f,
                                              current.pos.y, mChHorse.mBgc.GetGroundH(), mChHorse.mBgc.m_gnd, &tevStr, 0,
                                              1.0f, dDlst_shadowControl_c::getSimpleTex());
@@ -1943,6 +1949,10 @@ int daNpcCoach_c::draw() {
     sp48.set(mChHarness.field_0x6e0.x, mChHarness.field_0x6e0.y + 100.0f, mChHarness.field_0x6e0.z);
     mChHarness.mTevStr.mLightPosWorld = mChHarness.field_0x6e0;
     mChHarness.mTevStr.mLightPosWorld.y += 1000.0f;
+#if TARGET_PC
+    dusk::render::fake_shadows::set_tag(
+        &mChHarness.mTevStr, dusk::render::fake_shadows::Src::Vertical);
+#endif
     mChHarness.mShadowKey = dComIfGd_setShadow(mChHarness.mShadowKey, 0, mChHarness.mHarnessModel, &sp48, 1400.0f, 100.0f,
                                                mChHarness.field_0x6e0.y, mChHarness.mBgc.GetGroundH(), mChHarness.mBgc.m_gnd,
                                                &mChHarness.mTevStr, 0, 1.0f, dDlst_shadowControl_c::getSimpleTex());
@@ -1966,6 +1976,10 @@ int daNpcCoach_c::draw() {
     sp48.set(mChCoach.field_0x5e0.x, mChCoach.field_0x5e0.y + 100.0f, mChCoach.field_0x5e0.z);
     mChHarness.mTevStr.mLightPosWorld = mChCoach.field_0x5e0;
     mChHarness.mTevStr.mLightPosWorld.y += 1000.0f;
+#if TARGET_PC
+    dusk::render::fake_shadows::set_tag(
+        &mChHarness.mTevStr, dusk::render::fake_shadows::Src::Vertical);
+#endif
     mChCoach.mShadowKey = dComIfGd_setShadow(mChCoach.mShadowKey, 0, mChCoach.mCoachModel, &sp48, 1400.0f, 100.0f,
                                              mChCoach.field_0x5e0.y, mChCoach.mBgc.GetGroundH(), mChCoach.mBgc.m_gnd,
                                              &mChHarness.mTevStr, 0, 1.0f, dDlst_shadowControl_c::getSimpleTex());

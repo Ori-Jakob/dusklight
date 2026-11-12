@@ -15,6 +15,9 @@
 #include "d/d_com_inf_game.h"
 #include "d/d_meter2_info.h"
 #include <cstring>
+#if TARGET_PC
+#include "dusk/render/fake_shadows.hpp"
+#endif
 
 #if DEBUG
 daObjVolcBom_HIO_c::daObjVolcBom_HIO_c() {
@@ -820,6 +823,9 @@ int daObjVolcBom_c::Draw() {
         tevStr.mLightPosWorld.x = current.pos.x;
         tevStr.mLightPosWorld.y = mLightPosWorld.y + KREG_F(11);
         tevStr.mLightPosWorld.z = current.pos.z;
+#if TARGET_PC
+        dusk::render::fake_shadows::set_tag(&tevStr, dusk::render::fake_shadows::Src::Vertical);
+#endif
         tevStr.field_0x344 = field_0x978;
         mShadowID = dComIfGd_setShadow(mShadowID, 0, mModel1, &current.pos,
             4000.0f, 0.0f, mLightPosWorld.y, mAcch.GetGroundH(), mAcch.m_gnd, &tevStr, 0, 1.0f, dDlst_shadowControl_c::getSimpleTex());

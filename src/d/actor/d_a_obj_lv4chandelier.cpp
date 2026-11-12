@@ -11,6 +11,9 @@
 #include "d/d_bg_w.h"
 #include "d/d_cc_d.h"
 #include "d/d_cc_uty.h"
+#if TARGET_PC
+#include "dusk/render/fake_shadows.hpp"
+#endif
 
 #if DEBUG
 class daObjLv4Chan_HIO_c : public mDoHIO_entry_c {
@@ -829,6 +832,9 @@ int daObjLv4Chan_c::Draw() {
         tevStr.mLightPosWorld.x = field_0x23bc.x;
         tevStr.mLightPosWorld.y = field_0x247c + 2000.0f;
         tevStr.mLightPosWorld.z = field_0x23bc.z;
+#if TARGET_PC
+        dusk::render::fake_shadows::set_tag(&tevStr, dusk::render::fake_shadows::Src::Vertical);
+#endif
         tevStr.field_0x344 = fVar4;
         mShadowId = dComIfGd_setShadow(
             mShadowId, 0, mModel, &field_0x23bc,

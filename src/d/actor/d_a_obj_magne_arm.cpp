@@ -10,7 +10,9 @@
 #include "d/d_bg_w.h"
 #include "d/d_com_inf_game.h"
 #include "Z2AudioLib/Z2Instances.h"
-
+#if TARGET_PC
+#include "dusk/render/fake_shadows.hpp"
+#endif
 
 static u8 const l_magne_scale[12] = {
     0x40, 0x40, 0x00, 0x00, 0x40, 0x09, 0x99, 0x9A, 0x40, 0x40, 0x00, 0x00,
@@ -1045,6 +1047,9 @@ int daObjMarm_c::Draw() {
     if (fopAcM_gc_c::gndCheck(&offset1)) {
         f32 ground_y = fopAcM_gc_c::getGroundY();
         tevStr.mLightPosWorld = offset2;
+#if TARGET_PC
+        dusk::render::fake_shadows::set_tag(&tevStr, dusk::render::fake_shadows::Src::Unknown);
+#endif
         tevStr.field_0x344 = 0.3f;
         mShadowKey = dComIfGd_setShadow(mShadowKey, 0, mpModel[5], &offset1, 1500.0f, 450.0f,
                                         offset1.y, ground_y, fopAcM_gc_c::mGndCheck, &tevStr, 0,

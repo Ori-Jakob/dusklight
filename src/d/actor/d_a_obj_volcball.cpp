@@ -12,6 +12,9 @@
 #include "d/d_com_inf_game.h"
 #include "d/d_event_lib.h"
 #include "f_op/f_op_actor_mng.h"
+#if TARGET_PC
+#include "dusk/render/fake_shadows.hpp"
+#endif
 
 static const char* l_arcName = "M_Volcbal";
 
@@ -552,6 +555,9 @@ int daObjVolcBall_c::draw() {
     tevStr.mLightPosWorld.x = mBall[8].field_0x4.x;
     tevStr.mLightPosWorld.y = mBall[8].field_0x4.y;
     tevStr.mLightPosWorld.z = mBall[8].field_0x4.z;
+#if TARGET_PC
+    dusk::render::fake_shadows::set_tag(&tevStr, dusk::render::fake_shadows::Src::Vertical);
+#endif
     tevStr.field_0x344 = mBall[8].field_0x50;
 
     vball_s* ball = mBall;

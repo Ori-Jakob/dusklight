@@ -20,6 +20,9 @@
 #include "f_op/f_op_camera_mng.h"
 #include "m_Do/m_Do_graphic.h"
 #include "m_Do/m_Do_lib.h"
+#if TARGET_PC
+#include "dusk/render/fake_shadows.hpp"
+#endif
 
 class daE_DT_HIO_c {
 public:
@@ -332,6 +335,9 @@ int daE_DT_c::draw() {
     pos.set(current.pos.x, current.pos.y + 100.0f, current.pos.z);
     tevStr.mLightPosWorld = current.pos;
     tevStr.mLightPosWorld.y += 1000.0f;
+#if TARGET_PC
+    dusk::render::fake_shadows::set_tag(&tevStr, dusk::render::fake_shadows::Src::Vertical);
+#endif
     f32 tmp = 2000.0f - current.pos.y;
     if (tmp < 0.0f) {
         tmp = 0.0f;

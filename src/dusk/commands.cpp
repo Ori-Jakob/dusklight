@@ -8,6 +8,7 @@
 #include "dusk/main.h"
 #include "dusk/render/camera_cuts.hpp"
 #include "dusk/render/draw_tags.hpp"
+#include "dusk/render/fake_shadows.hpp"
 #include "dusk/render/graphics_fields.inl"
 #include "dusk/render/lights.hpp"
 #include "dusk/render/material_tags.hpp"
@@ -622,6 +623,7 @@ static void RunRenderSelfTest(
     ui::graphics_tab_self_test(report);
     render::hints_self_test(report);
     render::draw_tags_self_test(report);
+    render::fake_shadows::self_test(report);
     render::registry_self_test(report);
     render::material_tags_self_test(report);
     render::lights_self_test(report);
@@ -1547,6 +1549,11 @@ void runCommand(std::string_view cmdLine, CommandState& state, const CommandOutp
         return;
     }
 
+    if (cmd == "render.fakeshadows") {
+        RunRenderTable(&render::fake_shadows::command, args, state, output);
+        return;
+    }
+
     if (cmd == "render.env") {
         RunRenderTable(&render::environment_command, args, state, output);
         return;
@@ -1584,6 +1591,7 @@ void runCommand(std::string_view cmdLine, CommandState& state, const CommandOutp
         output("pos                                         Print player position and stage");
         output("rate [hz]                                   Get or set sim rate (1-480, default 30)");
         output("render.env [show|check|counts|log <n>]      Renderer environment state");
+        output("render.fakeshadows [log <n>]                Game shadow light sources");
         output(
             "render.graph.dump [file]                    Write the compiled render graph as JSON");
         output("render.hints [reset|ids]                    Hint counts, camera cuts, scene epoch");

@@ -38,6 +38,10 @@ public:
     /* 0x383 */ u8 Material_use_fg;
     /* 0x384 */ u8 field_0x384;
     /* 0x385 */ u8 field_0x385;
+#if TARGET_PC
+    // Which light the game's shadow points away from; dKy_tevstr_init's memset leaves 0, unknown
+    /* 0x386 */ u8 dusk_shadowSrc;
+#endif
 };  // Size = 0x388
 
 STATIC_ASSERT(sizeof(dKy_tevstr_c) == 0x388);

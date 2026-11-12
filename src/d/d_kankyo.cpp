@@ -38,8 +38,10 @@
 #include "dusk/interp/material.h"
 #include "dusk/imgui/ImGuiBloomWindow.hpp"
 
+#include "dusk/render/fake_shadows.hpp"
 #include "dusk/render/fog_probe.hpp"
 #include "dusk/render/model_registry.hpp"
+namespace dfs = dusk::render::fake_shadows;
 static f32 timeScale = 1.0f;
 #endif
 
@@ -3564,14 +3566,23 @@ void dScnKy_env_light_c::settingTevStruct_plightcol_plus(cXyz* pos_p, dKy_tevstr
         spB8 = tevstr_p->field_0x32c;
         cMtx_multVec(view_mtx, &spB8, &spDC);
 
+#if TARGET_PC
+        dfs::set_tag(tevstr_p, dfs::Src::Unknown);
+#endif
         if (dKy_shadow_mode_check(4) == 0) {
             if ((tevstr_p->Type == 9 || tevstr_p->Type == 10) &&
                 (player->getSinkShapeOffset() < -20.0f || player->checkSinkDead() || dKy_camera_water_in_status_check() || !player->checkSwimUp()))
             {
+#if TARGET_PC
+                dfs::set_tag(tevstr_p, dfs::Src::Vertical);
+#endif
                 cLib_addCalc(&tevstr_p->mLightPosWorld.x, pos_p->x, 0.5f, 5000.0f, 0.1f);
                 cLib_addCalc(&tevstr_p->mLightPosWorld.y, 1000.0f + pos_p->y, 0.5f, 5000.0f, 0.1f);
                 cLib_addCalc(&tevstr_p->mLightPosWorld.z, pos_p->z, 0.5f, 5000.0f, 0.1f);
             } else if ((kankyo->shadow_mode & 1) || (kankyo->shadow_mode & 2)) {
+#if TARGET_PC
+                dfs::set_tag(tevstr_p, dfs::flame_source());
+#endif
                 cLib_addCalc(&tevstr_p->mLightPosWorld.x, g_env_light.field_0x10a0.x, 0.5f, 5000.0f,
                              0.1f);
                 cLib_addCalc(&tevstr_p->mLightPosWorld.y, g_env_light.field_0x10a0.y, 0.5f, 5000.0f,
@@ -3579,6 +3590,9 @@ void dScnKy_env_light_c::settingTevStruct_plightcol_plus(cXyz* pos_p, dKy_tevstr
                 cLib_addCalc(&tevstr_p->mLightPosWorld.z, g_env_light.field_0x10a0.z, 0.5f, 5000.0f,
                              0.1f);
             } else if (sp9 != 0) {
+#if TARGET_PC
+                dfs::set_tag(tevstr_p, dfs::base_light_source());
+#endif
                 if (init_timer != 0 || tevstr_p->field_0x384 != 0) {
                     tevstr_p->mLightPosWorld = kankyo->base_light.mPosition;
                 } else {
@@ -3606,6 +3620,9 @@ void dScnKy_env_light_c::settingTevStruct_plightcol_plus(cXyz* pos_p, dKy_tevstr
                 }
 
                 if (sp8 == 0) {
+#if TARGET_PC
+                    dfs::set_tag(tevstr_p, sp44 ? dfs::Src::PointLight : dfs::base_light_source());
+#endif
                     if (init_timer != 0 || tevstr_p->field_0x384 != 0) {
                         tevstr_p->mLightPosWorld = tevstr_p->field_0x32c;
                     } else {
@@ -3617,6 +3634,9 @@ void dScnKy_env_light_c::settingTevStruct_plightcol_plus(cXyz* pos_p, dKy_tevstr
                                      1000.0f, 0.0001f);
                     }
                 } else {
+#if TARGET_PC
+                    dfs::set_tag(tevstr_p, dfs::Src::RoomLight);
+#endif
                     if (init_timer != 0 || tevstr_p->field_0x384 != 0) {
                         tevstr_p->mLightPosWorld = kankyo->field_0x0c18[sp8 - 1].mPos;
                     } else {
@@ -3659,6 +3679,9 @@ void dScnKy_env_light_c::settingTevStruct_plightcol_plus(cXyz* pos_p, dKy_tevstr
                 tevstr_p->field_0x344 = 1.0f;
             }
         }
+#if TARGET_PC
+        dfs::note_tag(tevstr_p);
+#endif
 
         light_info->mLightPosition = spDC;
         light_info->mLightDirection = g_env_light.field_0x1064;
@@ -4686,6 +4709,9 @@ void dScnKy_env_light_c::SetBaseLight() {
     f32 daytime;
 
     if (dKy_SunMoon_Light_Check() == TRUE) {
+#if TARGET_PC
+        dfs::note_base_light(dfs::Src::SunMoon);
+#endif
         daytime = g_env_light.getDaytime();
         if (daytime > 67.5f && daytime < 292.5f) {
             base_light.mPosition = kankyo->sun_light_pos;
@@ -4695,6 +4721,9 @@ void dScnKy_env_light_c::SetBaseLight() {
             base_light.mPosition = kankyo->moon_pos;
         }
     } else {
+#if TARGET_PC
+        dfs::note_base_light(dfs::Src::RoomKey);
+#endif
         base_light.mPosition = lightStatusPt[2].position;
     }
 
@@ -4812,6 +4841,9 @@ void dScnKy_env_light_c::exeKankyo() {
 
         if (flame_pos_p != NULL) {
             g_env_light.field_0x10a0 = *flame_pos_p;
+#if TARGET_PC
+            dfs::note_flame_writer(dfs::Src::Lantern);
+#endif
             dKy_shadow_mode_set(2);
         } else if (dKy_shadow_mode_check(2)) {
             dKy_shadow_mode_reset(2);
@@ -8486,6 +8518,9 @@ void dKy_setLight_nowroom_common(char room_no, f32 light_ratio) {
                 dKy_bgparts_activelight_set(g_env_light.efplight[eflight_id], 1);
                 if (dKy_Indoor_check() == TRUE) {
                     g_env_light.field_0x10a0 = g_env_light.efplight[eflight_id]->mPosition;
+#if TARGET_PC
+                    dfs::note_flame_writer(dfs::Src::EffectLight);
+#endif
                     dKy_shadow_mode_set(1);
                 }
             } else {
